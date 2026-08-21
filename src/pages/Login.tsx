@@ -3,7 +3,7 @@ import { useState, type FormEvent } from 'react';
 import { I, PlanetMark } from '../components/icons';
 import { Starfield, ToastHost } from '../components/layout';
 import { useStore } from '../lib/store';
-import { cls } from '../lib/util';
+import { cls, CONSOLE_VERSION } from '../lib/util';
 
 const PLANET_IMG = 'https://image.qwenlm.ai/generated-images/120b83b6-62c1-434e-a8ab-680747038cb2/_result.png';
 
@@ -128,7 +128,7 @@ export default function Login() {
         </div>
 
         <p className="rise absolute bottom-6 left-8 text-[11px] text-dim/70 sm:left-16 lg:left-24" style={{ animationDelay: '200ms' }}>
-          PLUTO Core v1.4 · сервер — Ubuntu / Docker Compose · агенты — Windows
+          PLUTO Core v{CONSOLE_VERSION} · сервер — Ubuntu / Docker Compose · агенты — Windows
         </p>
       </div>
 

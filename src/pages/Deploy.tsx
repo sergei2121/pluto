@@ -7,8 +7,13 @@ const COMPOSE = `services:
     build:
       context: .                  # образ собирается из исходников репозитория
       dockerfile: server/Dockerfile
-    image: pluto/core:1.4
+    image: pluto/core:1.6
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/health"]
+      interval: 15s
+      timeout: 4s
+      retries: 3
     ports:
       - "8080:8080"      # веб-консоль + REST API
       - "8443:8443"      # WebSocket-шлюз агентов
