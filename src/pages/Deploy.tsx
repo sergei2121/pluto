@@ -48,6 +48,18 @@ const AGENT_YAML = `# pluto-agent.exe -h
 # Сборщики: ЦП (загрузка, температура WMI), ОЗУ, диски (объёмы и
 # занятость), счётчики сети RX/TX, ARP-скан доступных подсетей.`;
 
+const DIAG_CMDS = `# 1. Жив ли API (ожидается {"ok":true,...}):
+curl -s http://localhost:8080/api/health
+
+# 2. Настоящий ping изнутри ядра — ровно так проверяются устройства:
+docker compose exec core ping -c 1 <IP-устройства>
+
+# 3. Живой журнал проверок (адрес → результат → задержка):
+docker compose logs -f core
+
+# 4. Если в консоли чип «ядро: эмуляция» — образ не пересобран:
+git pull && docker compose up -d --build`;
+
 function Arch() {
   return (
     <svg viewBox="0 0 760 240" className="w-full">
@@ -179,6 +191,22 @@ export default function Deploy() {
               <li>журнал событий хранит входы, изменения настроек и аварии.</li>
             </ul>
           </div>
+        </div>
+      </Panel>
+
+      <Panel title="5 · Диагностика: проверки ли настоящие?" icon="activity" delay={300}>
+        <div className="space-y-3">
+          <p className="text-[12.5px] leading-relaxed text-mut">
+            Жёлтая плашка «работа без серверного ядра» или чип <span className="font-mono text-warn">ядро: эмуляция</span> в шапке означают,
+            что в контейнере старая консоль и результаты синтезируются браузером — именно поэтому несуществующие хосты могут выглядеть «живыми».
+            Браузер физически не умеет отправлять ICMP: настоящий ping делает только серверное ядро. Пересоберите образ и обновите страницу (Ctrl+Shift+R).
+          </p>
+          <CopyBlock label="bash · на сервере" code={DIAG_CMDS} />
+          <p className="text-[11.5px] leading-relaxed text-dim">
+            После каждой проверки ядро пишет в лог строку вида{' '}
+            <span className="font-mono text-mut">[pluto] PING 192.168.1.10 → ok 1 мс</span> или{' '}
+            <span className="font-mono text-mut">[pluto] PING 10.0.0.99 → недоступен</span> — по ней видно, что опрашивается и какой ответ получен.
+          </p>
         </div>
       </Panel>
     </div>

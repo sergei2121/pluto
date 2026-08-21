@@ -112,14 +112,20 @@ function checkSip(addr, port, timeoutMs) {
 async function runCheck(device) {
   const s = db.settings;
   const t = s.timeoutMs;
+  let r;
   switch (device.type) {
-    case 'ping': return checkPing(device.address, t);
-    case 'http': return checkHttp(device.address, device.port, device.path, 'GET', null, t);
-    case 'api': return checkHttp(device.address, device.port, device.path, device.method || 'POST', device.body || null, t);
-    case 'rtsp': return checkRtsp(device.address, device.port, device.path, Math.max(t, 4000));
-    case 'sip': return checkSip(device.address, device.port, t);
-    default: return { ok: false, latency: 0, error: 'unknown type' };
+    case 'ping': r = await checkPing(device.address, t); break;
+    case 'http': r = await checkHttp(device.address, device.port, device.path, 'GET', null, t); break;
+    case 'api': r = await checkHttp(device.address, device.port, device.path, device.method || 'POST', device.body || null, t); break;
+    case 'rtsp': r = await checkRtsp(device.address, device.port, device.path, Math.max(t, 4000)); break;
+    case 'sip': r = await checkSip(device.address, device.port, t); break;
+    default: r = { ok: false, latency: 0, error: 'unknown type' };
   }
+  // живой журнал проверок: docker compose logs -f core
+  console.log(
+    `[pluto] ${device.type.toUpperCase()} ${device.address} → ${r.ok ? `ok ${r.latency} мс` : `недоступен${r.error ? ` (${r.error})` : ''}`}`,
+  );
+  return r;
 }
 
 function applyResult(device, res) {
