@@ -437,6 +437,14 @@ const server = http.createServer(async (req, res) => {
         saveDb();
         return json(res, 200, { agent, token: agent.token });
       }
+      if (method === 'POST' && p.endsWith('/retoken')) {
+        const a = db.agents.find((x) => x.id === p.split('/')[3]);
+        if (!a) return json(res, 404, { error: 'Агент не найден' });
+        a.token = uid() + uid();
+        pushEvent('warn', 'agent', `Токен агента «${a.name}» перевыпущен — старый недействителен`);
+        saveDb();
+        return json(res, 200, { token: a.token });
+      }
       const id = p.split('/')[3];
       if (method === 'DELETE') {
         db.agents = db.agents.filter((a) => a.id !== id);
