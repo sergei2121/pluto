@@ -1,1 +1,209 @@
 @import "tailwindcss";
+
+@theme {
+  --font-display: "Unbounded", "Manrope", sans-serif;
+  --font-sans: "Manrope", "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "Consolas", monospace;
+
+  --color-void: #0d1120;
+  --color-deep: #111729;
+  --color-panel: #151c31;
+  --color-raised: #1c2440;
+  --color-line: #27304f;
+  --color-line-soft: #1f2846;
+  --color-ink: #e4e8f7;
+  --color-mut: #97a0c3;
+  --color-dim: #626d95;
+
+  --color-vio: #9a8cfa;
+  --color-vio-deep: #6355c9;
+  --color-blu: #7ba4e6;
+  --color-ok: #55c795;
+  --color-warn: #dfa65e;
+  --color-crit: #e07a80;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: #0d1120;
+  color: #e4e8f7;
+  font-family: "Manrope", "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: rgba(154, 140, 250, 0.35);
+}
+
+/* ─── Звёздное небо ─── */
+.stars {
+  background-image:
+    radial-gradient(1px 1px at 22px 34px, rgba(214, 220, 255, 0.75), transparent 100%),
+    radial-gradient(1px 1px at 118px 92px, rgba(180, 190, 255, 0.55), transparent 100%),
+    radial-gradient(1.5px 1.5px at 200px 160px, rgba(224, 228, 255, 0.8), transparent 100%),
+    radial-gradient(1px 1px at 300px 60px, rgba(170, 180, 240, 0.5), transparent 100%),
+    radial-gradient(1px 1px at 410px 200px, rgba(200, 208, 255, 0.6), transparent 100%),
+    radial-gradient(1.5px 1.5px at 520px 120px, rgba(190, 170, 255, 0.55), transparent 100%),
+    radial-gradient(1px 1px at 80px 220px, rgba(210, 216, 255, 0.5), transparent 100%),
+    radial-gradient(1px 1px at 360px 250px, rgba(180, 188, 250, 0.65), transparent 100%);
+  background-size: 560px 280px;
+  animation: drift 280s linear infinite;
+  opacity: 0.7;
+}
+
+.stars-2 {
+  background-image:
+    radial-gradient(1px 1px at 70px 50px, rgba(154, 140, 250, 0.6), transparent 100%),
+    radial-gradient(2px 2px at 260px 190px, rgba(123, 164, 230, 0.5), transparent 100%),
+    radial-gradient(1px 1px at 450px 90px, rgba(220, 226, 255, 0.7), transparent 100%),
+    radial-gradient(1.5px 1.5px at 640px 260px, rgba(154, 140, 250, 0.5), transparent 100%),
+    radial-gradient(1px 1px at 180px 300px, rgba(190, 200, 255, 0.55), transparent 100%);
+  background-size: 720px 360px;
+  animation: drift 420s linear infinite reverse, twinkle 9s ease-in-out infinite alternate;
+  opacity: 0.5;
+}
+
+@keyframes drift {
+  from { background-position: 0 0; }
+  to { background-position: 560px 1120px; }
+}
+
+@keyframes twinkle {
+  from { opacity: 0.35; }
+  to { opacity: 0.7; }
+}
+
+.nebula {
+  background:
+    radial-gradient(900px 600px at 12% -8%, rgba(106, 88, 214, 0.16), transparent 62%),
+    radial-gradient(800px 620px at 96% 14%, rgba(64, 102, 178, 0.13), transparent 60%),
+    radial-gradient(1000px 700px at 70% 110%, rgba(86, 70, 190, 0.12), transparent 60%),
+    linear-gradient(180deg, #0d1120 0%, #0e1325 55%, #0c101e 100%);
+}
+
+/* ─── Анимации появления ─── */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise { animation: rise 0.45s cubic-bezier(0.22, 0.9, 0.3, 1) both; }
+
+@keyframes pop {
+  from { opacity: 0; transform: scale(0.96) translateY(6px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.pop { animation: pop 0.22s cubic-bezier(0.22, 0.9, 0.3, 1) both; }
+
+@keyframes evin {
+  from { opacity: 0; transform: translateX(-6px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.ev-in { animation: evin 0.3s ease-out both; }
+
+@keyframes toastin {
+  from { opacity: 0; transform: translateY(12px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.toast-in { animation: toastin 0.25s cubic-bezier(0.22, 0.9, 0.3, 1) both; }
+
+@keyframes shake {
+  10%, 90% { transform: translateX(-1px); }
+  20%, 80% { transform: translateX(2px); }
+  30%, 50%, 70% { transform: translateX(-4px); }
+  40%, 60% { transform: translateX(4px); }
+}
+.shake { animation: shake 0.5s ease both; }
+
+/* ─── Кнопки и поля ─── */
+.btn-acc {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 0.5rem;
+  background: #6355c9;
+  padding: 0.55rem 1rem;
+  font-size: 13px;
+  font-weight: 700;
+  color: #e4e8f7;
+  border: 1px solid rgba(154, 140, 250, 0.4);
+  transition: all 0.18s ease;
+  box-shadow: 0 4px 18px -6px rgba(99, 85, 201, 0.55);
+}
+.btn-acc:hover { background: #7264dd; transform: translateY(-1px); }
+.btn-acc:active { transform: translateY(0) scale(0.99); }
+.btn-acc:disabled { opacity: 0.5; pointer-events: none; }
+
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 0.5rem;
+  border: 1px solid #27304f;
+  background: rgba(28, 36, 64, 0.6);
+  padding: 0.55rem 1rem;
+  font-size: 13px;
+  font-weight: 600;
+  color: #97a0c3;
+  transition: all 0.18s ease;
+}
+.btn-ghost:hover { color: #e4e8f7; border-color: #3a4570; background: rgba(28, 36, 64, 0.95); }
+.btn-ghost:disabled { opacity: 0.45; pointer-events: none; }
+
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(224, 122, 128, 0.4);
+  background: rgba(224, 122, 128, 0.1);
+  padding: 0.55rem 1rem;
+  font-size: 13px;
+  font-weight: 700;
+  color: #e07a80;
+  transition: all 0.18s ease;
+}
+.btn-danger:hover { background: rgba(224, 122, 128, 0.2); border-color: rgba(224, 122, 128, 0.6); }
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.45rem;
+  padding: 0.4rem;
+  color: #626d95;
+  transition: all 0.15s ease;
+}
+.icon-btn:hover { color: #e4e8f7; background: rgba(28, 36, 64, 0.95); }
+
+.inp {
+  width: 100%;
+  border-radius: 0.5rem;
+  border: 1px solid #27304f;
+  background: rgba(28, 36, 64, 0.55);
+  padding: 0.55rem 0.8rem;
+  font-size: 13.5px;
+  color: #e4e8f7;
+  outline: none;
+  transition: all 0.18s ease;
+}
+.inp::placeholder { color: rgba(98, 109, 149, 0.75); }
+.inp:focus {
+  border-color: rgba(154, 140, 250, 0.6);
+  box-shadow: 0 0 0 3px rgba(143, 125, 240, 0.12);
+  background: rgba(28, 36, 64, 0.85);
+}
+.inp:disabled { opacity: 0.6; }
+
+/* ─── Скроллбары ─── */
+.scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+.scroll-thin::-webkit-scrollbar-track { background: transparent; }
+.scroll-thin::-webkit-scrollbar-thumb { background: #27304f; border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+.scroll-thin::-webkit-scrollbar-thumb:hover { background: #3a4570; background-clip: content-box; border: 2px solid transparent; }
+.scroll-thin { scrollbar-width: thin; scrollbar-color: #27304f transparent; }
