@@ -158,6 +158,30 @@ function Clock() {
   return <span className="font-mono text-[12px] tabular-nums text-dim">{fmtClock(now)}</span>;
 }
 
+/** Индикатор режима ядра: серверное (реальные проверки) или встроенное */
+function ModeChip() {
+  const apiMode = useStore((s) => s.apiMode);
+  const server = apiMode === 'server';
+  return (
+    <div
+      className={cls(
+        'hidden items-center gap-2 rounded-lg border px-3 py-1.5 lg:flex',
+        server ? 'border-ok/35 bg-ok/10' : 'border-warn/35 bg-warn/10',
+      )}
+      title={
+        server
+          ? 'Консоль подключена к серверному ядру: ping, HTTP, RTSP и SIP выполняются по-настоящему, телеметрия приходит от агентов.'
+          : 'Серверное ядро не найдено — работает встроенный браузерный движок (эмуляция). Разверните сервер: git pull && docker compose up -d --build.'
+      }
+    >
+      <span className={cls('h-1.5 w-1.5 rounded-full', server ? 'dot-live bg-ok' : 'bg-warn')} />
+      <span className={cls('text-[11px] font-bold uppercase tracking-[0.1em]', server ? 'text-ok' : 'text-warn')}>
+        {server ? 'ядро: сервер' : 'ядро: эмуляция'}
+      </span>
+    </div>
+  );
+}
+
 export function Topbar() {
   const route = useStore((s) => s.route);
   const nav = useStore((s) => s.nav);
@@ -254,6 +278,7 @@ export function Topbar() {
         )}
       </div>
 
+      <ModeChip />
       <div className="hidden items-center gap-2 rounded-lg border border-line bg-raised/50 px-3 py-1.5 md:flex">
         <span className="dot-live h-1.5 w-1.5 rounded-full bg-vio" />
         <span className="text-[11px] font-semibold text-mut">опрос активен</span>
@@ -265,6 +290,25 @@ export function Topbar() {
 
 // ─── Оболочка страниц ────────────────────────────────────────────────────────
 
+/** Яркая плашка, когда консоль работает без серверного ядра (эмуляция) */
+function EmuBanner() {
+  const apiMode = useStore((s) => s.apiMode);
+  if (apiMode === 'server') return null;
+  return (
+    <div className="flex items-start gap-3 border-b border-warn/30 bg-warn/10 px-6 py-2.5">
+      <I n="alert" className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
+      <p className="text-[12px] leading-relaxed text-warn">
+        <span className="font-bold">Работа без серверного ядра — задержки и статусы синтетические:</span>{' '}
+        браузер не умеет слать ping, поэтому даже несуществующие хосты могут выглядеть «живыми». Это не данные сети.
+        <span className="mt-0.5 block text-warn/85">
+          На сервере выполните <code className="rounded bg-void/50 px-1.5 py-0.5 font-mono text-[11px] text-ink">git pull &amp;&amp; docker compose up -d --build</code>{' '}
+          и обновите страницу (Ctrl+Shift+R) — плашка исчезнет, проверки станут настоящими.
+        </span>
+      </p>
+    </div>
+  );
+}
+
 export function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="relative flex h-screen overflow-hidden bg-void text-ink">
@@ -272,6 +316,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <Sidebar />
       <div className="relative z-10 flex min-w-0 flex-1 flex-col">
         <Topbar />
+        <EmuBanner />
         <main className="min-h-0 flex-1 overflow-y-auto scroll-thin">
           <div className="mx-auto max-w-[1500px] p-6">{children}</div>
         </main>

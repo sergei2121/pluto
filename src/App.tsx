@@ -20,24 +20,46 @@ export default function App() {
   const [booting, setBooting] = useState(true);
 
   // Определение режима: есть ли серверное ядро рядом (/api/health)?
+  // Пробуем при старте и добираемся фоном, пока нет сессии (ядро могло
+  // стартовать позже консоли) и при возврате на вкладку.
   useEffect(() => {
     let alive = true;
-    (async () => {
+
+    const probe = async (first: boolean) => {
       const ok = await detectApi();
       if (!alive) return;
-      if (ok && getApiToken()) {
-        try {
-          const me = await apiMe();
-          useStore.getState().enterServer(me);
-          void syncAll();
-        } catch {
-          setApiToken(null); // токен протух — покажем вход
+      if (ok) {
+        if (getApiToken()) {
+          try {
+            const me = await apiMe();
+            if (useStore.getState().apiMode !== 'server') {
+              useStore.getState().enterServer(me);
+              void syncAll();
+            }
+          } catch {
+            setApiToken(null); // токен протух — покажем вход
+          }
+        } else if (useStore.getState().apiMode !== 'server') {
+          // ядро появилось: если была сессия встроенного режима, сбросим её,
+          // чтобы пользователь вошёл уже в серверное ядро
+          useStore.getState().serverLogout();
         }
       }
-      setBooting(false);
-    })();
+      if (first) setBooting(false);
+    };
+
+    void probe(true);
+    const t = window.setInterval(() => {
+      if (!useStore.getState().session) void probe(false);
+    }, 5000);
+    const vis = () => {
+      if (document.visibilityState === 'visible' && !useStore.getState().session) void probe(false);
+    };
+    document.addEventListener('visibilitychange', vis);
     return () => {
       alive = false;
+      window.clearInterval(t);
+      document.removeEventListener('visibilitychange', vis);
     };
   }, []);
 
