@@ -62,6 +62,7 @@ export function Sidebar() {
   const route = useStore((s) => s.route);
   const nav = useStore((s) => s.nav);
   const logout = useStore((s) => s.logout);
+  const apiMode = useStore((s) => s.apiMode);
   const user = useCurrentUser();
   const critCount = useStore((s) => s.devices.filter((d) => d.status === 'down').length + s.agents.filter((a) => !a.online).length);
 
@@ -111,10 +112,12 @@ export function Sidebar() {
         <div className="rounded-lg border border-line bg-raised/50 px-3 py-2.5">
           <div className="flex items-center gap-2">
             <span className="dot-live h-2 w-2 shrink-0 rounded-full bg-ok" />
-            <span className="text-[11px] font-semibold text-mut">Ядро: встроенное</span>
+            <span className="text-[11px] font-semibold text-mut">{apiMode === 'server' ? 'Ядро: серверное' : 'Ядро: встроенное'}</span>
             <span className="ml-auto font-mono text-[10px] text-dim">v1.4</span>
           </div>
-          <p className="mt-1 text-[10.5px] leading-relaxed text-dim">Движок опроса активен · браузерный режим</p>
+          <p className="mt-1 text-[10.5px] leading-relaxed text-dim">
+            {apiMode === 'server' ? 'реальные проверки · опрос каждые 2.5 с' : 'движок опроса активен · браузерный режим'}
+          </p>
         </div>
 
         {user && (

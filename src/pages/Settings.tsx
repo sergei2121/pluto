@@ -15,6 +15,7 @@ type Tab = 'poll' | 'tags' | 'notify' | 'users';
 function PollTab() {
   const settings = useStore((s) => s.settings);
   const saveSettings = useStore((s) => s.saveSettings);
+  const apiMode = useStore((s) => s.apiMode);
   const [draft, setDraft] = useState<TSettings>({ ...settings, intervals: { ...settings.intervals } });
 
   const num = (v: string, fb: number) => {
@@ -71,18 +72,29 @@ function PollTab() {
             <input className="inp font-mono" value={draft.lanScan} onChange={(e) => setDraft({ ...draft, lanScan: num(e.target.value.replace(/\D/g, ''), 300) })} />
           </Field>
           <div className="flex items-end pb-1">
-            <label className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-lg border border-line bg-raised/40 px-3.5 py-2.5">
-              <span>
-                <span className="block text-[12px] font-semibold text-ink">Сетевая эмуляция</span>
-                <span className="block text-[10.5px] text-dim">браузерное ядро: честные fetch-зонды off</span>
-              </span>
-              <Toggle checked={draft.simulate} onChange={(v) => setDraft({ ...draft, simulate: v })} />
-            </label>
+            {apiMode === 'server' ? (
+              <div className="flex w-full items-center justify-between gap-3 rounded-lg border border-ok/30 bg-ok/5 px-3.5 py-2.5">
+                <span>
+                  <span className="block text-[12px] font-semibold text-ink">Реальные проверки</span>
+                  <span className="block text-[10.5px] text-dim">серверное ядро: ping, HTTP, RTSP, SIP</span>
+                </span>
+                <span className="dot-live h-2 w-2 shrink-0 rounded-full bg-ok" />
+              </div>
+            ) : (
+              <label className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-lg border border-line bg-raised/40 px-3.5 py-2.5">
+                <span>
+                  <span className="block text-[12px] font-semibold text-ink">Сетевая эмуляция</span>
+                  <span className="block text-[10.5px] text-dim">браузерное ядро: честные fetch-зонды off</span>
+                </span>
+                <Toggle checked={draft.simulate} onChange={(v) => setDraft({ ...draft, simulate: v })} />
+              </label>
+            )}
           </div>
         </div>
         <p className="mt-3 text-[11.5px] leading-relaxed text-dim">
-          Встроенное (браузерное) ядро эмулирует ICMP/RTSP/SIP и недостижимые хосты, чтобы система была работоспособна без серверной части.
-          При развёртывании сервера ядро выполняет настоящие проверки — эмуляцию можно выключить.
+          {apiMode === 'server'
+            ? 'Консоль подключена к серверному ядру: задержки и статусы — результат настоящих проверок (системный ping, HTTP-запросы, RTSP OPTIONS, SIP OPTIONS по UDP), телеметрия приходит от агентов.'
+            : 'Встроенное (браузерное) ядро эмулирует ICMP/RTSP/SIP и недостижимые хосты, поэтому задержки здесь не совпадают с реальным ping. Разверните сервер (страница «Развёртывание») — консоль подключится к ядру автоматически и будет показывать реальные значения.'}
         </p>
       </Panel>
 

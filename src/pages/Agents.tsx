@@ -1,5 +1,6 @@
 // ─── PLUTO: агенты на Windows-машинах ────────────────────────────────────────
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { api, syncAll } from '../lib/api';
 import { I } from '../components/icons';
 import { AreaChart, Bar, CopyBlock, Drawer, EmptyState, Panel, Ring, StatusDot, TimeAgo } from '../components/ui';
 import { useStore, useToasts, useCurrentUser, visibleAgents } from '../lib/store';
@@ -278,6 +279,7 @@ export default function Agents() {
   const allAgents = useStore((s) => s.agents);
   const agents = useMemo(() => visibleAgents(allAgents, user), [allAgents, user]);
   const addEmulated = useStore((s) => s.addEmulatedAgent);
+  const apiMode = useStore((s) => s.apiMode);
   const toast = useToasts((s) => s.push);
   const nav = useStore((s) => s.nav);
 
@@ -314,9 +316,22 @@ export default function Agents() {
               <button className="btn-ghost" onClick={() => setShowInstall((v) => !v)}>
                 <I n="terminal" className="h-4 w-4" /> Установка на Windows
               </button>
-              <button className="btn-acc" onClick={() => { const a = addEmulated(); toast('ok', `Тестовый агент ${a.hostname} подключён`); setDrawer(a.id); }}>
-                <I n="plus" className="h-4 w-4" /> Подключить тестового агента
-              </button>
+              {apiMode === 'server' ? (
+                <button
+                  className="btn-acc"
+                  onClick={() => {
+                    api.createAgentToken('agent-' + Date.now().toString(36).slice(-4))
+                      .then((r) => { toast('ok', `Токен создан: ${r.token}`); void syncAll(); })
+                      .catch((e) => toast('warn', e?.message || 'Не удалось создать токен'));
+                  }}
+                >
+                  <I n="plus" className="h-4 w-4" /> Создать токен агента
+                </button>
+              ) : (
+                <button className="btn-acc" onClick={() => { const a = addEmulated(); toast('ok', `Тестовый агент ${a.hostname} подключён`); setDrawer(a.id); }}>
+                  <I n="plus" className="h-4 w-4" /> Подключить тестового агента
+                </button>
+              )}
             </>
           )}
         </div>
@@ -341,11 +356,26 @@ export default function Agents() {
           <EmptyState
             icon="agents"
             title="Агентов пока нет"
-            text="Подключите Windows-машину по токену или поднимите тестового агента, чтобы увидеть телеметрию: ЦП, ОЗУ, диски, температуры, сеть и LAN-скан."
+            text={apiMode === 'server'
+              ? 'Создайте токен, запустите pluto-agent на Windows-машине — и здесь появится живая телеметрия: ЦП, ОЗУ, диски, температуры, сеть и LAN-скан.'
+              : 'Подключите Windows-машину по токену или поднимите тестового агента, чтобы увидеть телеметрию: ЦП, ОЗУ, диски, температуры, сеть и LAN-скан.'}
             action={isAdmin ? (
-              <button className="btn-acc" onClick={() => { const a = addEmulated(); toast('ok', `Тестовый агент ${a.hostname} подключён`); }}>
-                <I n="plus" className="h-4 w-4" /> Подключить тестового агента
-              </button>
+              apiMode === 'server' ? (
+                <button
+                  className="btn-acc"
+                  onClick={() => {
+                    api.createAgentToken('agent-' + Date.now().toString(36).slice(-4))
+                      .then((r) => { toast('ok', `Токен создан: ${r.token}`); void syncAll(); })
+                      .catch((e) => toast('warn', e?.message || 'Не удалось создать токен'));
+                  }}
+                >
+                  <I n="plus" className="h-4 w-4" /> Создать токен агента
+                </button>
+              ) : (
+                <button className="btn-acc" onClick={() => { const a = addEmulated(); toast('ok', `Тестовый агент ${a.hostname} подключён`); }}>
+                  <I n="plus" className="h-4 w-4" /> Подключить тестового агента
+                </button>
+              )
             ) : undefined}
           />
         </Panel>

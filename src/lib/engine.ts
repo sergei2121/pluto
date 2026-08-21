@@ -112,9 +112,20 @@ export async function runCheck(d: Device): Promise<void> {
   applyResult(d.id, res.ok, res.latency, approx);
 }
 
-/** Принудительная проверка «Проверить сейчас» */
+/** Принудительная проверка «Проверить сейчас» (в серверном режиме — силами ядра) */
 export async function forceCheck(id: string): Promise<{ ok: boolean; latency: number } | null> {
-  const d = useStore.getState().devices.find((x) => x.id === id);
+  const s = useStore.getState();
+  if (s.apiMode === 'server') {
+    try {
+      const { api, syncAll } = await import('./api');
+      const r = await api.checkDevice(id);
+      void syncAll();
+      return { ok: r.result.ok, latency: r.result.latency ?? 0 };
+    } catch {
+      return null;
+    }
+  }
+  const d = s.devices.find((x) => x.id === id);
   if (!d) return null;
   await runCheck(d);
   const fresh = useStore.getState().devices.find((x) => x.id === id);

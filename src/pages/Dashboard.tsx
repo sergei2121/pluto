@@ -147,8 +147,10 @@ const FavAgentCard = memo(function FavAgentCard({ id }: { id: string }) {
 function Onboarding() {
   const nav = useStore((s) => s.nav);
   const addAgent = useStore((s) => s.addEmulatedAgent);
+  const apiMode = useStore((s) => s.apiMode);
   const user = useCurrentUser();
   const isAdmin = user?.role === 'admin';
+  const isServer = apiMode === 'server';
   const steps = [
     {
       icon: 'server' as const, title: 'Добавьте первое устройство',
@@ -157,12 +159,22 @@ function Onboarding() {
     },
     {
       icon: 'agents' as const, title: 'Подключите агента',
-      text: 'Реальные Windows-машины подключаются токеном. Для осмотра системы можно поднять тестового агента.',
-      act: () => { const a = addAgent(); nav('agents', a.hostname); }, label: 'Подключить тестового агента', show: isAdmin,
+      text: isServer
+        ? 'Создайте токен в разделе «Агенты» и запустите pluto-agent на Windows-машине — телеметрия появится в течение секунд.'
+        : 'Реальные Windows-машины подключаются токеном. Для осмотра системы можно поднять тестового агента.',
+      act: () => {
+        if (isServer) { nav('agents', 'new'); return; }
+        const a = addAgent();
+        if (a) nav('agents', a.hostname);
+      },
+      label: isServer ? 'Получить токен агента' : 'Подключить тестового агента',
+      show: isAdmin,
     },
     {
-      icon: 'rocket' as const, title: 'Разверните ядро и агенты',
-      text: 'docker compose up -d на Ubuntu и одна команда PowerShell на каждой Windows-машине.',
+      icon: 'rocket' as const, title: isServer ? 'Агенты для Windows' : 'Разверните ядро и агенты',
+      text: isServer
+        ? 'Ядро уже работает. Осталось поставить агенты: go build в каталоге agent/ и одна команда PowerShell на машине.'
+        : 'docker compose up -d --build на Ubuntu и одна команда PowerShell на каждой Windows-машине.',
       act: () => nav('deploy'), label: 'Инструкция по развёртыванию', show: true,
     },
   ].filter((s) => s.show);
