@@ -1,5 +1,5 @@
 // ─── PLUTO: главная страница ─────────────────────────────────────────────────
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { I } from '../components/icons';
 import { Bar, Panel, Ring, Sparkbar, StatusDot, STATUS_META, Seg, TypeBadge, EmptyState, TimeAgo } from '../components/ui';
 import { useStore, useCurrentUser, visibleDevices, visibleAgents, FAVORITES_LIMIT } from '../lib/store';
@@ -9,7 +9,7 @@ import { DEVICE_TYPE_META } from '../lib/types';
 
 // ─── Плитки KPI ──────────────────────────────────────────────────────────────
 
-function KpiTile({
+const KpiTile = memo(function KpiTile({
   label, value, sub, accent, icon, extra, delay,
 }: {
   label: string; value: string | number; sub: string; accent: string; icon: React.ReactNode; extra?: React.ReactNode; delay: number;
@@ -31,7 +31,7 @@ function KpiTile({
       {extra && <div className="mt-3">{extra}</div>}
     </div>
   );
-}
+});
 
 // ─── Журнал событий ──────────────────────────────────────────────────────────
 
@@ -42,7 +42,7 @@ const SEV_META: Record<Severity, { icon: 'check' | 'alert' | 'bell' | 'activity'
   info: { icon: 'bell', cls: 'text-mut', bar: 'bg-vio' },
 };
 
-function EventRow({ e }: { e: EventItem }) {
+const EventRow = memo(function EventRow({ e }: { e: EventItem }) {
   const m = SEV_META[e.sev];
   return (
     <li className="ev-in relative flex gap-3 border-b border-line-soft/60 py-2.5 pl-3 pr-1 last:border-0">
@@ -54,11 +54,11 @@ function EventRow({ e }: { e: EventItem }) {
       </div>
     </li>
   );
-}
+});
 
 // ─── Карточки избранного ─────────────────────────────────────────────────────
 
-function FavDeviceCard({ id }: { id: string }) {
+const FavDeviceCard = memo(function FavDeviceCard({ id }: { id: string }) {
   const d = useStore((s) => s.devices.find((x) => x.id === id));
   const toggleFav = useStore((s) => s.toggleDeviceFav);
   const nav = useStore((s) => s.nav);
@@ -96,9 +96,9 @@ function FavDeviceCard({ id }: { id: string }) {
       </div>
     </div>
   );
-}
+});
 
-function FavAgentCard({ id }: { id: string }) {
+const FavAgentCard = memo(function FavAgentCard({ id }: { id: string }) {
   const a = useStore((s) => s.agents.find((x) => x.id === id));
   const toggleFav = useStore((s) => s.toggleAgentFav);
   const nav = useStore((s) => s.nav);
@@ -140,7 +140,7 @@ function FavAgentCard({ id }: { id: string }) {
       </div>
     </div>
   );
-}
+});
 
 // ─── Онбординг чистой базы ───────────────────────────────────────────────────
 
@@ -262,7 +262,7 @@ export default function Dashboard() {
             label="В аварии" value={down} accent="#e07a80" delay={60}
             icon={<I n="alert" className="h-4.5 w-4.5" />}
             sub={down ? 'потеря связи · нажмите для списка' : 'потерь связи нет'}
-            extra={down > 0 ? <span className="inline-flex items-center gap-1.5 font-mono text-[10.5px] text-crit"><span className="h-1.5 w-1.5 animate-ping rounded-full bg-crit" />требует внимания</span> : <span className="font-mono text-[10.5px] text-ok">все каналы отвечают</span>}
+            extra={down > 0 ? <span className="inline-flex items-center gap-1.5 font-mono text-[10.5px] text-crit"><span className="dot-crit h-1.5 w-1.5 rounded-full bg-crit" />требует внимания</span> : <span className="font-mono text-[10.5px] text-ok">все каналы отвечают</span>}
           />
         </button>
         <KpiTile
