@@ -8,11 +8,12 @@
 ```bash
 git clone https://github.com/pluto-monitor/pluto.git
 cd pluto
-cp .env.example .env   # задайте DB_PASS, ADMIN_PASSWORD, JWT_SECRET
-docker compose up -d
+cp .env.example .env          # при желании задайте свой ADMIN_PASSWORD
+docker compose up -d --build  # сервер собирается из исходников (server/, src/)
 ```
 
 Консоль: `http://<хост>:8080`, вход `admin` / пароль из `.env` (по умолчанию `pluto` — смените сразу).
+База — один файл `db.json` в томе `pluto-data`; полная инструкция — в [DEPLOY.md](DEPLOY.md).
 
 > Полная пошаговая инструкция — в [DEPLOY.md](./DEPLOY.md): установка Docker на Ubuntu,
 > секреты `.env`, первый вход, подключение Windows-агентов, TLS, резервные копии и диагностика.
@@ -20,12 +21,15 @@ docker compose up -d
 ## Агент (Windows)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -Command "irm https://get.pluto.mon/agent.ps1 | iex"
-pluto-agent.exe install --server wss://pluto.example.com:8443/ws --token <ТОКЕН>
-net start pluto-agent
+# сборка из исходников (Go 1.21+, один раз):
+cd agent
+go build -o pluto-agent.exe .
+
+# на целевой машине (PowerShell, администратор) — установка службой:
+pluto-agent.exe -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН>
 ```
 
-Токен выдаётся в консоли: **Агенты → Токен**. Агент собирает телеметрию каждые N секунд:
+Токен выдаётся в консоли: **Агенты → Токен подключения**. Агент собирает телеметрию каждые N секунд:
 
 - загрузка и температура ЦП (WMI), количество ядер;
 - ОЗУ: занято/всего, температура;

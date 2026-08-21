@@ -1,0 +1,17 @@
+{
+  "name": "pluto-core",
+  "version": "1.4.0",
+  "private": true,
+  "type": "module",
+  "description": "PLUTO monitoring core: REST API, poll engine (ping/http/api/rtsp/sip), agent WebSocket gateway",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "nodemailer": "^6.9.9"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,217 +1,173 @@
 # PLUTO — инструкция по развёртыванию
 
-Полный цикл: сервер на Ubuntu (Docker Compose) → агенты на Windows-машинах → веб-консоль.
+## Если вы получили ошибку `…/server not found`
 
+Старый `docker-compose.yml` ссылался на готовый образ в реестре и каталог `./server`,
+которого ещё не было в репозитории. Теперь **весь сервер и агент лежат прямо в репозитории**:
+
+- `server/` — ядро (Node.js, REST API, движок опроса, шлюз агентов) + `Dockerfile`;
+- `agent/` — исходники Windows-агента (Go, один файл);
+- веб-консоль собирается тем же Dockerfile из корня репозитория.
+
+Исправление на уже развёрнутой машине:
+
+```bash
+cd /home/pluto/pluto
+git pull
+docker compose up -d --build    # соберёт образ из исходников
 ```
-┌─────────────┐  WebSocket/TLS   ┌───────────────────────┐        ┌──────────────┐
-│ Агенты Win  │ ───────────────▶ │ PLUTO Core (Docker)   │ ─────▶ │ PostgreSQL 16│
-│ Go · служба │  телеметрия/LAN  │ Node.js · опросы · API│        │ метрики      │
-└─────────────┘                  │ :8080 консоль :8443 WS│        └──────────────┘
-                                 └───────────────────────┘
-                                         ▲ опрос: PING · HTTP · API · RTSP · SIP
-┌─────────────┐                          │
-│ Цели сети   │ ◀────────────────────────┘
-│ камеры, АТС │
-└─────────────┘
-```
-
-**Требования**
-
-| Компонент | Минимум |
-|---|---|
-| Сервер | Ubuntu 22.04/24.04 (или Debian 12), Docker 24+, Compose v2, 1 ГБ ОЗУ |
-| Агенты | Windows 10 / 11 / Server 2016+ (x64), права администратора |
-| Сеть | открытые порты `8080/tcp` (консоль+API) и `8443/tcp` (агенты) |
 
 ---
 
-## Часть 1 · Сервер на Ubuntu
+## 1. Требования
 
-### 1.1 Установите Docker (если ещё нет)
+- Ubuntu 22.04+ (сервер), 1 ГБ ОЗУ, ~500 МБ диска;
+- Docker Engine + плагин Compose v2;
+- для агентов: Windows 10/11 или Server 2016+, Go 1.21+ (только для сборки, см. часть 3).
+
+## 2. Установка сервера
+
+### 2.1 Docker (если ещё не установлен)
 
 ```bash
-sudo apt update && sudo apt install -y ca-certificates curl gnupg
+sudo apt update
+sudo apt install -y ca-certificates curl gnupg
 sudo install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
   | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
   https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
-  | sudo tee /etc/apt/sources.list.d/docker.list
+  | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 sudo apt update
 sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
-sudo usermod -aG docker "$USER"   # перезайдите в сессию
-docker compose version            # проверка: v2.x
+sudo usermod -aG docker $USER    # войти в систему заново
 ```
 
-### 1.2 Склонируйте репозиторий
+### 2.2 PLUTO
 
 ```bash
 git clone https://github.com/pluto-monitor/pluto.git
 cd pluto
+cp .env.example .env             # при желании задайте свой ADMIN_PASSWORD
+docker compose up -d --build
+docker compose ps                # статус: core — running
 ```
 
-### 1.3 Создайте `.env` с секретами
+Готово:
 
-```bash
-cp .env.example .env
-nano .env
-```
-
-Заполните три значения (случайные строки — `openssl rand -hex 32`):
-
-| Переменная | Назначение |
+| Что | Где |
 |---|---|
-| `DB_PASS` | пароль внутренней PostgreSQL |
-| `ADMIN_PASSWORD` | пароль входа `admin` в консоль — **смените после первого входа** |
-| `JWT_SECRET` | подпись сессий, от 64 символов |
+| Веб-консоль + REST API | `http://<IP-сервера>:8080` |
+| Шлюз агентов (WebSocket) | `ws://<IP-сервера>:8443/ws` |
+| База данных | том Docker `pluto-data` → `/data/db.json` |
 
-### 1.4 Запустите систему
+Первый вход: **admin** / пароль из `.env` (по умолчанию `pluto`) — сразу смените его:
+*Настройки → Пользователи → admin → «Сменить пароль»*.
 
-```bash
-docker compose up -d          # первый запуск: скачает образы (~400 МБ)
-docker compose ps             # оба контейнера — Up (healthy)
-docker compose logs -f core   # наблюдайте старт ядра
-```
-
-### 1.5 Первый вход
-
-Откройте `http://<IP-сервера>:8080` → логин `admin`, пароль из `ADMIN_PASSWORD`.
-Сразу: **Настройки → Пользователи → Сменить пароль**, затем создайте
-пользователей-наблюдателей с разрешёнными типами устройств.
-
-### 1.6 Откройте порты (ufw)
+### 2.3 Firewall
 
 ```bash
-sudo ufw allow 8080/tcp    # консоль и REST API
-sudo ufw allow 8443/tcp    # WebSocket-шлюз агентов
-sudo ufw enable
+sudo ufw allow 8080/tcp    # консоль
+sudo ufw allow 8443/tcp    # агенты
 ```
 
-### 1.7 TLS и домен (рекомендуется)
+### 2.4 Домен + HTTPS (опционально)
 
-Проще всего — обратный прокси Caddy перед ядром (Let's Encrypt автоматически).
-В отдельном `Caddyfile`:
+Агентам нужен `wss://` — поставьте перед ядром Caddy (TLS от Let's Encrypt автоматически):
 
-```
+```caddy
+# /etc/caddy/Caddyfile
 pluto.example.com {
-    reverse_proxy localhost:8080
+    reverse_proxy 127.0.0.1:8080
+}
+pluto-ws.example.com {
+    reverse_proxy 127.0.0.1:8443
 }
 ```
 
-Для шлюза агентов замените `wss://pluto.example.com:8443/ws` на путь через домен,
-либо оставьте прямой порт 8443 — образ ядра принимает самоподписанный сертификат.
+Тогда в команде установки агента используйте `wss://pluto-ws.example.com/ws`.
 
----
+## 3. Установка агентов (Windows)
 
-## Часть 2 · Агенты на Windows-машинах
+Агент собирает: загрузку и температуру ЦП, ОЗУ (занято/всего), диски (количество,
+объёмы, занятость), сетевые счётчики RX/TX и список доступных локальных сетей (ARP-скан).
 
-Агент — один файл `pluto-agent.exe` (Go, ~14 МБ). Устанавливается как служба
-Windows с автозапуском; аутентификация — токен из консоли.
+### 3.1 Получить токен
 
-### 2.1 Получите токен в консоли
+В консоли: **Агенты → «Токен подключения» → введите имя → Сгенерировать**. Скопируйте токен.
 
-Консоль → **Агенты** → кнопка **«Токен подключения»** → «Сгенерировать» → скопируйте.
-
-### 2.2 Установка одной командой (PowerShell, от администратора)
+### 3.2 Собрать бинарник (один раз, на любой машине с Go)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -Command "irm https://get.pluto.mon/agent.ps1 | iex"
-pluto-agent.exe install --server wss://pluto.example.com:8443/ws --token <ТОКЕН>
-net start pluto-agent
+cd agent
+go build -o pluto-agent.exe .
 ```
 
-### 2.3 Конфигурация `C:\ProgramData\pluto\agent.yaml`
+Готовый `pluto-agent.exe` можно раздавать по сети (один файл, без зависимостей).
 
-Создаётся установщиком; интервалы можно править вручную:
+### 3.3 Установить службой на целевой машине
 
-```yaml
-server: wss://pluto.example.com:8443/ws
-token: <ТОКЕН>
-heartbeat_sec: 10     # «живость» соединения
-metrics_sec: 3        # телеметрия ЦП/ОЗУ/дисков/температур/сети
-lan_scan_sec: 300     # ARP-скан доступных подсетей
-collectors: [cpu, ram, disks, temps, net, arp]
+PowerShell **от имени администратора**:
+
+```powershell
+pluto-agent.exe -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН>
 ```
 
-После правки: `net stop pluto-agent && net start pluto-agent`.
+Служба `pluto-agent` создаётся с автозапуском и сразу стартует. Управление:
 
-### 2.4 Что агент присылает
+```powershell
+sc.exe query pluto-agent        # статус
+sc.exe stop pluto-agent         # остановить
+pluto-agent.exe -uninstall      # удалить службу
+```
 
-- ЦП: загрузка по ядрам и суммарная, температура, тактовая частота;
-- ОЗУ: занято/всего, температура модулей;
-- Диски: количество, буквы, объёмы, занятость, температуры;
-- Сеть: счётчики RX/TX (байт/с) по каждому интерфейсу;
-- Локальные сети: список доступных подсетей + ARP-таблица хостов (IP, MAC, онлайн).
+Флаги: `-metrics 3` (сек, телеметрия), `-lan 300` (сек, скан сетей).
 
-В консоли машина появляется в разделе **Агенты** в течение ~10 секунд;
-детальная панель — по клику на карточку (графики ЦП/ОЗУ, диски, температура, LAN).
+Агент появится в консоли в течение нескольких секунд: событие «Агент … подключился»,
+затем живые метрики и список локальных сетей на карточке агента.
 
----
+## 4. Что делать после установки
 
-## Часть 3 · Веб-консоль (этот репозиторий)
+1. **Устройства** → «Добавить устройство»: тип (PING / HTTP / API / RTSP / SIP),
+   адрес, порт/путь, кастомный интервал, теги.
+2. **Настройки → Интервалы**: глобальные интервалы по типам, таймаут, порог аварии
+   (N сбоев подряд), фактор деградации (во сколько раз пинг выше базового считается деградацией).
+3. **Настройки → Теги**: создайте теги (до 10 цветов из палитры), присваивайте их устройствам.
+4. **Настройки → Уведомления**: Telegram (токен бота + chat_id), e-mail (SMTP),
+   всплывающие окна браузера; каждый канал и каждое событие включается отдельно.
+5. **Пользователи**: создайте наблюдателей и отметьте, какие типы устройств им видны.
 
-Консоль встроена в образ ядра и отдаётся на `:8080` — отдельно ставить не нужно.
+Проверки на сервере — настоящие: ICMP через системный `ping`, HTTP/API через
+запросы, RTSP — `OPTIONS`/ответ `RTSP/1.0 200`, SIP — `OPTIONS`/`SIP/2.0 200` по UDP.
+
+## 5. Эксплуатация
 
 ```bash
-# Разработка
-npm install
-npm run dev          # http://localhost:5173 — встроенное ядро (эмуляция)
+# Обновление из репозитория
+git pull && docker compose up -d --build
 
-# Продакшен-сборка
-npm run build        # результат в dist/, копируется в образ core при сборке
-```
-
-> **Встроенный режим**: без поднятого Docker-ядра консоль исполняет ту же модель
-> данных и движок опросов в браузере — систему можно осмотреть «как есть».
-> После `docker compose up` подключите консоль к реальному API ядра
-> (базовый URL задаётся переменной `VITE_PLUTO_API`).
-
----
-
-## Часть 4 · Эксплуатация
-
-```bash
-# Обновление до новой версии
-git pull
-docker compose pull
-docker compose up -d
-
-# Логи / статус / перезапуск
+# Логи
 docker compose logs -f core
-docker compose ps
-docker compose restart core
 
-# Резервная копия базы
-docker compose exec db pg_dump -U pluto pluto > pluto-backup-$(date +%F).sql
+# Бэкап базы (база — один файл в томе)
+docker compose exec core cp /data/db.json /data/db.backup.json
+docker run --rm -v pluto_pluto-data:/data -v $PWD:/backup alpine \
+  cp /data/db.json /backup/pluto-backup-$(date +%F).json
 
-# Восстановление
-cat pluto-backup-YYYY-MM-DD.sql | docker compose exec -T db psql -U pluto -d pluto
-
-# Остановить (данные сохранятся в томах)
-docker compose down
-
-# Полное удаление вместе с данными
+# Полное удаление (включая данные!)
 docker compose down -v
 ```
 
-Данные живут в именованных томах `pg-data` (метрики, события, настройки) и
-`core-data` (файлы ядра) — они переживают пересоздание контейнеров.
+Данные живут в томе `pluto-data` и переживают `docker compose down` (без `-v`),
+перезагрузку хоста и пересборку образа.
 
----
+## 6. Диагностика
 
-## Часть 5 · Диагностика
-
-| Симптом | Проверка |
+| Симптом | Проверить |
 |---|---|
-| Консоль не открывается | `docker compose ps` → core `Up`; `curl http://localhost:8080/api/health` |
-| Агент не подключается | токен свежий? порт `8443/tcp` открыт в ufw/фаерволе? имя сервера резолвится с Windows-машины? |
-| Агент виден, но без LAN-скана | `lan_scan_sec` в `agent.yaml`; перезапустите службу |
-| ICMP-проверки молчат | в docker-сети ping доступен из коробки; для внешнего NAT проверьте `--network host` или cap `NET_ADMIN` |
-| Забыт пароль admin | остановите core, задайте новый `ADMIN_PASSWORD` в `.env`, `docker compose up -d` — ядро переприменит |
-
-Быстрая проверка здоровья:
-
-```bash
-curl -s http://localhost:8080/api/health
-# {"status":"ok","core":"1.4","db":"up","agents":0,"devices":0}
-```
+| `denied: requested access to the resource is denied` / `server not found` | Обновите репозиторий (`git pull`) и используйте `up -d --build` — образ собирается локально |
+| Консоль не открывается | `docker compose ps`, `sudo ufw status`, порт 8080 не занят другим сервисом |
+| Агент «не подключается» | Токен скопирован полностью; сервер и порт 8443 доступны: `Test-NetConnection <IP> -Port 8443`; для `wss://` нужен TLS-прокси |
+| Агент подключился, но нет температур | WMI-класс `MSAcpi_ThermalZoneTemperature` требует прав администратора и поддерживается не всеми материнскими платами — поле будет 0 |
+| ICMP «нет данных» | В образе используется системный ping (`iputils`); убедитесь, что целевой хост не блокирует эхо-запросы |
+| Забыт пароль admin | Удалите файл `/data/db.json` в томе и перезапустите контейнер — база создастся заново с паролем из `.env` |
