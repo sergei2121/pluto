@@ -10,7 +10,10 @@ const PLANET_IMG = 'https://image.qwenlm.ai/generated-images/120b83b6-62c1-434e-
 export default function Login() {
   const login = useStore((s) => s.login);
   const loginServer = useStore((s) => s.loginServer);
-  const apiMode = useStore((s) => s.apiMode);
+  const coreVersion = useStore((s) => s.coreVersion);
+  // ядро считается доступным, если детектор его увидел — даже старую сборку
+  // (она отвечает 401 на /api/health, но REST API у неё полностью рабочий)
+  const serverAvailable = coreVersion !== null;
   const [l, setL] = useState('');
   const [p, setP] = useState('');
   const [err, setErr] = useState<string | null>(null);
@@ -20,7 +23,7 @@ export default function Login() {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (busy) return;
-    if (apiMode === 'server') {
+    if (serverAvailable) {
       setBusy(true);
       const res = await loginServer(l, p);
       setBusy(false);
@@ -106,14 +109,18 @@ export default function Login() {
           <div className="mt-6 rounded-lg border border-vio/25 bg-vio/5 px-4 py-3">
             <p className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.12em] text-vio">
               <I n="shield" className="h-3.5 w-3.5" />
-              {apiMode === 'server' ? 'Ядро: серверное (Docker)' : 'Ядро: встроенное (браузер)'}
+              {serverAvailable
+                ? coreVersion === 'legacy'
+                  ? 'Ядро: серверное · старая сборка'
+                  : `Ядро: серверное · v${coreVersion}`
+                : 'Ядро: встроенное (браузер)'}
             </p>
             <p className="mt-1.5 font-mono text-[12px] text-mut">
               администратор: <span className="text-ink">admin</span> /{' '}
-              <span className="text-ink">{apiMode === 'server' ? 'пароль из .env' : 'pluto'}</span>
+              <span className="text-ink">{serverAvailable ? 'пароль из .env' : 'pluto'}</span>
             </p>
             <p className="mt-1 text-[11px] leading-relaxed text-dim">
-              {apiMode === 'server'
+              {serverAvailable
                 ? 'Проверки (ping, HTTP, RTSP, SIP) и телеметрию агентов выполняет серверное ядро — данные реальные.'
                 : 'Серверное ядро не обнаружено: работает встроенный движок. Смените пароль в «Настройки → Пользователи» после входа.'}
             </p>

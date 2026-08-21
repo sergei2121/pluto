@@ -1,6 +1,6 @@
 // ─── PLUTO: корень приложения ────────────────────────────────────────────────
 import { useEffect, useState } from 'react';
-import { useStore, useCurrentUser } from './lib/store';
+import { useStore, useCurrentUser, useToasts } from './lib/store';
 import { startEngine, stopEngine } from './lib/engine';
 import { detectApi, apiMe, getApiToken, setApiToken, syncAll } from './lib/api';
 import { Shell } from './components/layout';
@@ -20,41 +20,44 @@ export default function App() {
   const [booting, setBooting] = useState(true);
 
   // Определение режима: есть ли серверное ядро рядом (/api/health)?
-  // Пробуем при старте и добираемся фоном, пока нет сессии (ядро могло
-  // стартовать позже консоли) и при возврате на вкладку.
+  // Пробуем при старте, затем фоном каждые 5 с и при возврате на вкладку —
+  // даже при активной сессии, чтобы появление ядра не осталось незамеченным.
   useEffect(() => {
     let alive = true;
 
     const probe = async (first: boolean) => {
       const ver = await detectApi();
       if (!alive) return;
-      if (ver) useStore.setState({ coreVersion: ver });
+      const s = useStore.getState();
       if (ver) {
+        if (s.coreVersion !== ver) useStore.setState({ coreVersion: ver });
         if (getApiToken()) {
-          try {
-            const me = await apiMe();
-            if (useStore.getState().apiMode !== 'server') {
+          // токен есть: добираемся до серверной сессии
+          if (s.apiMode !== 'server') {
+            try {
+              const me = await apiMe();
               useStore.getState().enterServer(me);
               void syncAll();
+            } catch {
+              setApiToken(null); // токен протух — покажем вход
             }
-          } catch {
-            setApiToken(null); // токен протух — покажем вход
           }
-        } else if (useStore.getState().apiMode !== 'server') {
-          // ядро появилось: если была сессия встроенного режима, сбросим её,
-          // чтобы пользователь вошёл уже в серверное ядро
-          useStore.getState().serverLogout();
+        } else if (s.apiMode === 'embedded' && s.session) {
+          // Ядро появилось, а пользователь сидит во встроенной (эмуляционной)
+          // сессии: завершаем её и просим войти уже в серверное ядро.
+          useStore.getState().logout();
+          useToasts.getState().push('info', 'Обнаружено серверное ядро — войдите, чтобы видеть реальные проверки');
         }
+      } else if (s.coreVersion !== null) {
+        useStore.setState({ coreVersion: null });
       }
       if (first) setBooting(false);
     };
 
     void probe(true);
-    const t = window.setInterval(() => {
-      if (!useStore.getState().session) void probe(false);
-    }, 5000);
+    const t = window.setInterval(() => void probe(false), 5000);
     const vis = () => {
-      if (document.visibilityState === 'visible' && !useStore.getState().session) void probe(false);
+      if (document.visibilityState === 'visible') void probe(false);
     };
     document.addEventListener('visibilitychange', vis);
     return () => {
