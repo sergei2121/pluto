@@ -177,7 +177,11 @@ function ModeChip() {
     >
       <span className={cls('h-1.5 w-1.5 rounded-full', server ? 'dot-live bg-ok' : 'bg-warn')} />
       <span className={cls('text-[11px] font-bold uppercase tracking-[0.1em]', server ? 'text-ok' : 'text-warn')}>
-        {server ? `ядро: сервер · v${coreVersion ?? '?'}` : 'ядро: эмуляция'}
+        {server
+          ? coreVersion === 'legacy'
+            ? 'ядро: сервер · старая сборка'
+            : `ядро: сервер · v${coreVersion ?? '?'}`
+          : 'ядро: эмуляция'}
       </span>
     </div>
   );
