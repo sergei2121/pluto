@@ -47,16 +47,25 @@ async function req<T>(path: string, opts: { method?: string; body?: unknown } = 
   }
 }
 
-/** Проверка доступности ядра; возвращает его версию или null */
+/** Проверка доступности ядра; возвращает его версию, 'legacy' или null */
 export async function detectApi(): Promise<string | null> {
   try {
     const ctrl = new AbortController();
-    const to = setTimeout(() => ctrl.abort(), 1500);
+    const to = setTimeout(() => ctrl.abort(), 2000);
     const res = await fetch('/api/health', { signal: ctrl.signal });
     clearTimeout(to);
-    if (!res.ok) return null;
-    const j = (await res.json().catch(() => ({}))) as { version?: string };
-    return j.version || 'core';
+    if (res.ok) {
+      const j = (await res.json().catch(() => ({}))) as { version?: string };
+      return j.version || 'core';
+    }
+    // Старая сборка ядра: /api/health закрыт авторизацией, но JSON с ошибкой —
+    // фирменный ответ PLUTO Core. Считаем ядро присутствующим, чтобы консоль
+    // не падала в эмуляцию.
+    if (res.status === 401) {
+      const j = (await res.json().catch(() => null)) as { error?: string } | null;
+      if (j && typeof j.error === 'string') return 'legacy';
+    }
+    return null;
   } catch {
     return null;
   }
