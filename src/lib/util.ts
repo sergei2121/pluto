@@ -117,6 +117,9 @@ export const TAG_COLORS = [
   '#98a4c8', // стальной
 ];
 
+/** Версия веб-консоли (фиксируется при сборке образа) */
+export const CONSOLE_VERSION = '1.6.0';
+
 export function macFrom(seedStr: string): string {
   const rng = mulberry32(hashStr(seedStr));
   const b = () => Math.floor(rng() * 256).toString(16).padStart(2, '0').toUpperCase();

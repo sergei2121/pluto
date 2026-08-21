@@ -1,7 +1,7 @@
 // ─── PLUTO: каркас интерфейса ────────────────────────────────────────────────
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { I, PlanetMark, type IconName } from './icons';
-import { cls, fmtClock } from '../lib/util';
+import { cls, fmtClock, CONSOLE_VERSION } from '../lib/util';
 import { useStore, useToasts, useCurrentUser, visibleDevices, visibleAgents } from '../lib/store';
 import { StatusDot } from './ui';
 import type { Route } from '../lib/types';
@@ -120,7 +120,7 @@ export function Sidebar() {
                   : `Ядро: серверное · v${coreVersion ?? '?'}`
                 : 'Ядро: встроенное'}
             </span>
-            <span className="ml-auto font-mono text-[10px] text-dim">v1.5</span>
+            <span className="ml-auto font-mono text-[10px] text-dim">консоль v{CONSOLE_VERSION}</span>
           </div>
           <p className="mt-1 text-[10.5px] leading-relaxed text-dim">
             {apiMode === 'server' ? 'реальные проверки · опрос каждые 2.5 с' : 'движок опроса активен · браузерный режим'}
@@ -191,6 +191,9 @@ function ModeChip() {
           : coreVersion
             ? 'ядро найдено'
             : 'ядро: эмуляция'}
+      </span>
+      <span className="border-l border-line pl-2 font-mono text-[10px] font-normal normal-case tracking-normal text-dim">
+        консоль v{CONSOLE_VERSION}
       </span>
     </div>
   );
