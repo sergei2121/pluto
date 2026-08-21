@@ -4,58 +4,49 @@ import { CopyBlock, Panel } from '../components/ui';
 
 const COMPOSE = `services:
   core:
-    image: ghcr.io/pluto-monitor/core:1.4
+    build:
+      context: .                  # образ собирается из исходников репозитория
+      dockerfile: server/Dockerfile
+    image: pluto/core:1.4
     restart: unless-stopped
     ports:
       - "8080:8080"      # веб-консоль + REST API
-      - "8443:8443"      # WebSocket для агентов (TLS)
+      - "8443:8443"      # WebSocket-шлюз агентов
     environment:
-      DATABASE_URL: postgres://pluto:\${DB_PASS}@db:5432/pluto
-      ADMIN_PASSWORD: \${ADMIN_PASSWORD}   # смените при первом входе
-      JWT_SECRET: \${JWT_SECRET}
-    depends_on:
-      db:
-        condition: service_healthy
+      ADMIN_PASSWORD: \${ADMIN_PASSWORD:-pluto}   # смените после первого входа
+      DATA_DIR: /data
     volumes:
-      - core-data:/data
-
-  db:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: pluto
-      POSTGRES_PASSWORD: \${DB_PASS}
-      POSTGRES_DB: pluto
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U pluto"]
-      interval: 5s
-      retries: 10
-    volumes:
-      - pg-data:/var/lib/postgresql/data
+      - pluto-data:/data          # база db.json — переживает пересборку
 
 volumes:
-  core-data:
-  pg-data:`;
+  pluto-data:`;
 
-const ENV_EXAMPLE = `# .env — создайте рядом с docker-compose.yml
-DB_PASS=сгенерируйте_надёжный_пароль
-ADMIN_PASSWORD=pluto          # временный, смените в консоли
-JWT_SECRET=случайная_строка_64_символа`;
+const ENV_EXAMPLE = `# .env — создайте рядом с docker-compose.yml (cp .env.example .env)
 
-const AGENT_PS = `# PowerShell (от имени администратора) — одна команда:
-powershell -ExecutionPolicy Bypass -Command "irm https://get.pluto.mon/agent.ps1 | iex"
+# Пароль администратора по умолчанию (логин: admin).
+# Смените после первого входа: Настройки → Пользователи.
+ADMIN_PASSWORD=pluto`;
 
-# Скрипт установит агент как службу Windows:
-pluto-agent.exe install --server wss://pluto.example.com:8443/ws --token <ТОКЕН_АГЕНТА>
-net start pluto-agent`;
+const AGENT_PS = `# Сборка бинарника из исходников (Go 1.21+, один раз):
+cd agent
+go build -o pluto-agent.exe .
 
-const AGENT_YAML = `# C:\\ProgramData\\pluto\\agent.yaml (создаётся установщиком)
-server: wss://pluto.example.com:8443/ws
-token: <ТОКЕН_АГЕНТА>
-heartbeat_sec: 10
-metrics_sec: 3
-lan_scan_sec: 300
-collectors: [cpu, ram, disks, temps, net, arp]`;
+# PowerShell (от имени администратора) — установка службой:
+pluto-agent.exe -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН_АГЕНТА>
+
+# Управление:
+sc.exe query pluto-agent      # статус службы
+pluto-agent.exe -uninstall    # удаление`;
+
+const AGENT_YAML = `# pluto-agent.exe -h
+-server   адрес шлюза:  ws://<IP>:8443/ws  или  wss://pluto.example.com/ws
+-token    токен из консоли (Агенты → Токен подключения)
+-metrics  интервал телеметрии, сек         (по умолчанию 3)
+-lan      интервал скана локальных сетей   (по умолчанию 300)
+-install  установить службой Windows "pluto-agent" с автозапуском
+
+# Сборщики: ЦП (загрузка, температура WMI), ОЗУ, диски (объёмы и
+# занятость), счётчики сети RX/TX, ARP-скан доступных подсетей.`;
 
 function Arch() {
   return (
@@ -69,7 +60,7 @@ function Arch() {
         { x: 20, y: 40, w: 150, h: 64, t1: 'Агенты Windows', t2: 'Go · служба · токен', c: '#7ba4e6' },
         { x: 20, y: 136, w: 150, h: 64, t1: 'Цели мониторинга', t2: 'ICMP · HTTP · RTSP · SIP', c: '#5fc6d8' },
         { x: 300, y: 62, w: 170, h: 116, t1: 'PLUTO Core', t2: 'Node.js · воркеры опроса', t3: 'Docker · Ubuntu', c: '#9a8cfa' },
-        { x: 590, y: 40, w: 150, h: 64, t1: 'PostgreSQL 16', t2: 'метрики · события', c: '#55c795' },
+        { x: 590, y: 40, w: 150, h: 64, t1: 'Хранилище /data', t2: 'db.json · Docker volume', c: '#55c795' },
         { x: 590, y: 136, w: 150, h: 64, t1: 'Веб-консоль', t2: 'эта панель · роли', c: '#dfa65e' },
       ].map((b) => (
         <g key={b.t1}>
@@ -122,14 +113,14 @@ export default function Deploy() {
 
       <Panel title="1 · Установка сервера (Ubuntu / Docker Compose)" icon="terminal" delay={60}>
         <div className="space-y-3">
-          <CopyBlock label="bash · три команды" code={`git clone https://github.com/pluto-monitor/pluto.git\ncd pluto\ncp .env.example .env && nano .env\ndocker compose up -d`} />
+          <CopyBlock label="bash · три команды" code={`git clone https://github.com/pluto-monitor/pluto.git\ncd pluto\ncp .env.example .env && nano .env\ndocker compose up -d --build   # сервер собирается из исходников (server/)`} />
           <div className="grid gap-3 lg:grid-cols-2">
             <CopyBlock label="docker-compose.yml" code={COMPOSE} />
             <CopyBlock label=".env.example" code={ENV_EXAMPLE} />
           </div>
           <p className="text-[12px] leading-relaxed text-dim">
             Консоль откроется на <span className="font-mono text-mut">http://&lt;сервер&gt;:8080</span>, вход — <span className="font-mono text-mut">admin</span> / пароль из <span className="font-mono text-mut">.env</span>.
-            Обновление: <span className="font-mono text-mut">git pull &amp;&amp; docker compose pull &amp;&amp; docker compose up -d</span>.
+            Обновление: <span className="font-mono text-mut">git pull &amp;&amp; docker compose up -d --build</span>. Полная инструкция — <span className="font-mono text-mut">DEPLOY.md</span> в корне репозитория.
           </p>
         </div>
       </Panel>
@@ -138,7 +129,7 @@ export default function Deploy() {
         <div className="space-y-3">
           <div className="grid gap-3 lg:grid-cols-2">
             <CopyBlock label="powershell" code={AGENT_PS} />
-            <CopyBlock label="agent.yaml" code={AGENT_YAML} />
+            <CopyBlock label="параметры агента" code={AGENT_YAML} />
           </div>
           <div className="grid gap-2 sm:grid-cols-3">
             {[
@@ -182,8 +173,8 @@ export default function Deploy() {
           <div className="rounded-lg border border-line bg-raised/40 p-4">
             <span className="flex items-center gap-2 text-[13px] font-bold text-ink"><I n="lock" className="h-4 w-4 text-vio" /> Безопасность</span>
             <ul className="mt-2 list-disc space-y-1 pl-5 text-[12px] leading-relaxed text-dim">
-              <li>пароли — <span className="text-mut">argon2id</span>, сессии — JWT с коротким TTL;</li>
-              <li>агенты ходят только по <span className="text-mut">wss://</span> с одноразовыми токенами;</li>
+              <li>пароли — <span className="text-mut">scrypt</span> с солью, сессии — случайные токены, хранимые в базе;</li>
+              <li>агенты подключаются по <span className="text-mut">ws/wss</span> со стойким токеном — перевыпускается одним кликом;</li>
               <li>роли: администратор и наблюдатель с фильтром по типам устройств;</li>
               <li>журнал событий хранит входы, изменения настроек и аварии.</li>
             </ul>
