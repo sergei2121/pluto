@@ -123,7 +123,7 @@ function TagsTab() {
       <Panel title="Создание тега" icon="tag" delay={0}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <div className="flex-1">
-            <Field label="Название" hint="Например: Склад, Камеры, VoIP">
+            <Field label="Название">
               <input className="inp" value={label} onChange={(e) => setLabel(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} placeholder="Новый тег" />
             </Field>
           </div>
@@ -209,11 +209,11 @@ function NotifyTab() {
           right={<Toggle checked={n.telegram.enabled} onChange={(v) => { upd({ telegram: { ...n.telegram, enabled: v } }); if (v) pushEvent('info', 'system', 'Уведомления Telegram включены'); }} />}>
           <div className="space-y-3">
             <Field label="Токен бота" hint="Создайте бота у @BotFather">
-              <input className="inp font-mono text-[12px]" value={n.telegram.botToken} placeholder="123456:ABC-DEF…"
+              <input className="inp font-mono text-[12px]" value={n.telegram.botToken}
                 onChange={(e) => upd({ telegram: { ...n.telegram, botToken: e.target.value } })} />
             </Field>
             <Field label="Chat ID" hint="ID чата или канала для уведомлений">
-              <input className="inp font-mono text-[12px]" value={n.telegram.chatId} placeholder="-100123456789"
+              <input className="inp font-mono text-[12px]" value={n.telegram.chatId}
                 onChange={(e) => upd({ telegram: { ...n.telegram, chatId: e.target.value } })} />
             </Field>
             <button className="btn-ghost w-full justify-center" disabled={!n.telegram.enabled} onClick={() => test('telegram')}>
@@ -229,7 +229,7 @@ function NotifyTab() {
           <div className="space-y-3">
             <div className="grid grid-cols-[1fr_84px] gap-2">
               <Field label="SMTP-сервер">
-                <input className="inp font-mono text-[12px]" value={n.email.smtp} placeholder="smtp.yandex.ru"
+                <input className="inp font-mono text-[12px]" value={n.email.smtp}
                   onChange={(e) => upd({ email: { ...n.email, smtp: e.target.value } })} />
               </Field>
               <Field label="Порт">
@@ -238,11 +238,11 @@ function NotifyTab() {
               </Field>
             </div>
             <Field label="Отправитель">
-              <input className="inp font-mono text-[12px]" value={n.email.from} placeholder="pluto@example.com"
+              <input className="inp font-mono text-[12px]" value={n.email.from}
                 onChange={(e) => upd({ email: { ...n.email, from: e.target.value } })} />
             </Field>
             <Field label="Получатель">
-              <input className="inp font-mono text-[12px]" value={n.email.to} placeholder="ops@example.com"
+              <input className="inp font-mono text-[12px]" value={n.email.to}
                 onChange={(e) => upd({ email: { ...n.email, to: e.target.value } })} />
             </Field>
             <button className="btn-ghost w-full justify-center" disabled={!n.email.enabled} onClick={() => test('email')}>
@@ -312,8 +312,8 @@ function UserModal({ initial, onClose }: { initial?: User; onClose: () => void }
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Имя"><input className="inp" value={name} onChange={(e) => setName(e.target.value)} placeholder="Иван Петров" /></Field>
-        <Field label="Логин"><input className="inp font-mono" value={login} onChange={(e) => { setLogin(e.target.value); setErr(''); }} disabled={initial?.builtIn} placeholder="operator1" /></Field>
+        <Field label="Имя"><input className="inp" value={name} onChange={(e) => setName(e.target.value)} /></Field>
+        <Field label="Логин"><input className="inp font-mono" value={login} onChange={(e) => { setLogin(e.target.value); setErr(''); }} disabled={initial?.builtIn} /></Field>
         <div className="col-span-2">
           <Field label={initial ? 'Новый пароль (пусто — без изменений)' : 'Пароль'}>
             <input className="inp font-mono" type="password" value={pass} onChange={(e) => { setPass(e.target.value); setErr(''); }} placeholder="••••••" />

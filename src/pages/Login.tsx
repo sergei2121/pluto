@@ -117,7 +117,7 @@ export default function Login() {
             </p>
             <div className="flex flex-wrap gap-2">
               {['ICMP ping', 'HTTP / порты', 'API-команды', 'RTSP-потоки', 'SIP OPTIONS', 'агенты Windows'].map((t) => (
-                <span key={t} className="rounded-md border border-line bg-deep/70 px-2.5 py-1 font-mono text-[10.5px] font-medium tracking-wide text-mut backdrop-blur-sm">
+                <span key={t} className="rounded-md border border-line bg-deep/85 px-2.5 py-1 font-mono text-[10.5px] font-medium tracking-wide text-mut">
                   {t}
                 </span>
               ))}

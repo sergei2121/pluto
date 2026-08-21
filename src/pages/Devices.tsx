@@ -95,16 +95,16 @@ function DeviceForm({ initial, onClose }: { initial?: Device; onClose: () => voi
         </div>
         <div className={cls(type === 'ping' || type === 'rtsp' || type === 'sip' ? 'col-span-2' : 'col-span-2')}>
           <Field label={ADDR_LABEL[type].label}>
-            <input className="inp font-mono" value={address} onChange={(e) => { setAddress(e.target.value); setErr(''); }} placeholder={ADDR_LABEL[type].ph} />
+            <input className="inp font-mono" value={address} onChange={(e) => { setAddress(e.target.value); setErr(''); }} />
           </Field>
         </div>
         {(type === 'http' || type === 'api') && (
           <>
             <Field label="Порт">
-              <input className="inp font-mono" value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ''))} placeholder="8080" inputMode="numeric" />
+              <input className="inp font-mono" value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ''))} inputMode="numeric" />
             </Field>
             <Field label="Путь">
-              <input className="inp font-mono" value={path} onChange={(e) => setPath(e.target.value)} placeholder="/health" />
+              <input className="inp font-mono" value={path} onChange={(e) => setPath(e.target.value)} />
             </Field>
           </>
         )}
@@ -126,7 +126,7 @@ function DeviceForm({ initial, onClose }: { initial?: Device; onClose: () => voi
             {method === 'POST' && (
               <div className="col-span-2">
                 <Field label="Тело команды (JSON)" hint="Отправляется как payload кастомной команды">
-                  <textarea className="inp min-h-[74px] resize-y font-mono text-[12px]" value={body} onChange={(e) => setBody(e.target.value)} placeholder='{"action":"reboot","target":"relay-4"}' />
+                  <textarea className="inp min-h-[74px] resize-y font-mono text-[12px]" value={body} onChange={(e) => setBody(e.target.value)} />
                 </Field>
               </div>
             )}

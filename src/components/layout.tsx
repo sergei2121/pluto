@@ -12,8 +12,8 @@ export function Starfield() {
   return (
     <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden" aria-hidden>
       <div className="nebula absolute inset-0" />
-      <div className="stars absolute inset-0" />
-      <div className="stars stars-2 absolute inset-0" />
+      <div className="stars-a" />
+      <div className="stars-b" />
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_45%,rgba(7,10,22,.55)_100%)]" />
     </div>
   );
@@ -35,7 +35,7 @@ export function ToastHost() {
       {list.map((t) => {
         const m = TOAST_META[t.kind];
         return (
-          <div key={t.id} className={cls('toast-in pointer-events-auto flex items-start gap-2.5 rounded-lg border bg-panel/95 px-3.5 py-3 shadow-[0_12px_40px_-8px_rgba(0,0,0,.8)] backdrop-blur', m.cls)}>
+          <div key={t.id} className={cls('toast-in pointer-events-auto flex items-start gap-2.5 rounded-lg border bg-panel px-3.5 py-3 shadow-[0_12px_40px_-8px_rgba(0,0,0,.8)]', m.cls)}>
             <I n={m.icon} className="mt-0.5 h-4 w-4 shrink-0" />
             <p className="flex-1 text-[13px] leading-snug text-ink">{t.text}</p>
             <button onClick={() => drop(t.id)} className="text-dim transition-colors hover:text-ink">
@@ -73,7 +73,7 @@ export function Sidebar() {
   });
 
   return (
-    <aside className="relative z-10 flex h-screen w-[228px] shrink-0 flex-col border-r border-line bg-deep/80 backdrop-blur-sm">
+    <aside className="relative z-10 flex h-screen w-[228px] shrink-0 flex-col border-r border-line bg-deep/95">
       <div className="flex items-center gap-3 px-5 pb-5 pt-6">
         <PlanetMark className="h-9 w-9 drop-shadow-[0_0_12px_rgba(143,125,240,.45)]" />
         <div>
@@ -110,10 +110,7 @@ export function Sidebar() {
       <div className="space-y-3 border-t border-line-soft p-4">
         <div className="rounded-lg border border-line bg-raised/50 px-3 py-2.5">
           <div className="flex items-center gap-2">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute h-full w-full animate-ping rounded-full bg-ok opacity-50" style={{ animationDuration: '2.5s' }} />
-              <span className="relative h-2 w-2 rounded-full bg-ok" />
-            </span>
+            <span className="dot-live h-2 w-2 shrink-0 rounded-full bg-ok" />
             <span className="text-[11px] font-semibold text-mut">Ядро: встроенное</span>
             <span className="ml-auto font-mono text-[10px] text-dim">v1.4</span>
           </div>
@@ -194,7 +191,7 @@ export function Topbar() {
   const hasResults = results.devs.length > 0 || results.ags.length > 0;
 
   return (
-    <header className="relative z-10 flex h-[60px] shrink-0 items-center gap-4 border-b border-line bg-deep/60 px-6 backdrop-blur-sm">
+    <header className="relative z-10 flex h-[60px] shrink-0 items-center gap-4 border-b border-line bg-deep/90 px-6">
       <h1 className="font-display text-[15px] font-semibold tracking-wide text-ink">{TITLES[route]}</h1>
 
       <div ref={boxRef} className="relative ml-auto w-[340px] max-w-[44vw]">
@@ -255,10 +252,7 @@ export function Topbar() {
       </div>
 
       <div className="hidden items-center gap-2 rounded-lg border border-line bg-raised/50 px-3 py-1.5 md:flex">
-        <span className="relative flex h-1.5 w-1.5">
-          <span className="absolute h-full w-full animate-ping rounded-full bg-vio opacity-60" style={{ animationDuration: '2s' }} />
-          <span className="relative h-1.5 w-1.5 rounded-full bg-vio" />
-        </span>
+        <span className="dot-live h-1.5 w-1.5 rounded-full bg-vio" />
         <span className="text-[11px] font-semibold text-mut">опрос активен</span>
       </div>
       <Clock />

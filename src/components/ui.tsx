@@ -40,13 +40,16 @@ export const STATUS_META: Record<DeviceStatus, { label: string; dot: string; tex
 
 export function StatusDot({ status, pulse = true }: { status: DeviceStatus; pulse?: boolean }) {
   const m = STATUS_META[status];
+  // только opacity-пульсация (композитинг), без растущих scale-слоёв
+  const live = pulse && status !== 'unknown';
   return (
-    <span className="relative inline-flex h-2.5 w-2.5 shrink-0">
-      {pulse && status !== 'unknown' && (
-        <span className={cls('absolute inline-flex h-full w-full animate-ping rounded-full opacity-40', m.dot)} style={{ animationDuration: '2.2s' }} />
+    <span
+      className={cls(
+        'inline-flex h-2.5 w-2.5 shrink-0 rounded-full',
+        m.dot,
+        live && (status === 'down' ? 'dot-crit' : 'dot-live'),
       )}
-      <span className={cls('relative inline-flex h-2.5 w-2.5 rounded-full', m.dot)} />
-    </span>
+    />
   );
 }
 
@@ -98,7 +101,7 @@ export function Modal({
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-[#070a16]/80 backdrop-blur-[3px]" onClick={onClose} />
+      <div className="absolute inset-0 bg-[#070a16]/85" onClick={onClose} />
       <div className={cls('pop relative w-full rounded-xl border border-line bg-panel shadow-[0_30px_80px_-20px_rgba(0,0,0,.9)]', width)}>
         <header className="flex items-center justify-between border-b border-line-soft px-5 py-3.5">
           <h3 className="font-display text-sm font-semibold tracking-wide text-ink">{title}</h3>
