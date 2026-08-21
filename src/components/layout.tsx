@@ -158,6 +158,30 @@ function Clock() {
   return <span className="font-mono text-[12px] tabular-nums text-dim">{fmtClock(now)}</span>;
 }
 
+/** Индикатор режима ядра: серверное (реальные проверки) или встроенное */
+function ModeChip() {
+  const apiMode = useStore((s) => s.apiMode);
+  const server = apiMode === 'server';
+  return (
+    <div
+      className={cls(
+        'hidden items-center gap-2 rounded-lg border px-3 py-1.5 lg:flex',
+        server ? 'border-ok/35 bg-ok/10' : 'border-warn/35 bg-warn/10',
+      )}
+      title={
+        server
+          ? 'Консоль подключена к серверному ядру: ping, HTTP, RTSP и SIP выполняются по-настоящему, телеметрия приходит от агентов.'
+          : 'Серверное ядро не найдено — работает встроенный браузерный движок (эмуляция). Разверните сервер: git pull && docker compose up -d --build.'
+      }
+    >
+      <span className={cls('h-1.5 w-1.5 rounded-full', server ? 'dot-live bg-ok' : 'bg-warn')} />
+      <span className={cls('text-[11px] font-bold uppercase tracking-[0.1em]', server ? 'text-ok' : 'text-warn')}>
+        {server ? 'ядро: сервер' : 'ядро: эмуляция'}
+      </span>
+    </div>
+  );
+}
+
 export function Topbar() {
   const route = useStore((s) => s.route);
   const nav = useStore((s) => s.nav);
@@ -254,6 +278,7 @@ export function Topbar() {
         )}
       </div>
 
+      <ModeChip />
       <div className="hidden items-center gap-2 rounded-lg border border-line bg-raised/50 px-3 py-1.5 md:flex">
         <span className="dot-live h-1.5 w-1.5 rounded-full bg-vio" />
         <span className="text-[11px] font-semibold text-mut">опрос активен</span>
