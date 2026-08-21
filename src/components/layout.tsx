@@ -63,6 +63,7 @@ export function Sidebar() {
   const nav = useStore((s) => s.nav);
   const logout = useStore((s) => s.logout);
   const apiMode = useStore((s) => s.apiMode);
+  const coreVersion = useStore((s) => s.coreVersion);
   const user = useCurrentUser();
   const critCount = useStore((s) => s.devices.filter((d) => d.status === 'down').length + s.agents.filter((a) => !a.online).length);
 
@@ -111,8 +112,14 @@ export function Sidebar() {
       <div className="space-y-3 border-t border-line-soft p-4">
         <div className="rounded-lg border border-line bg-raised/50 px-3 py-2.5">
           <div className="flex items-center gap-2">
-            <span className="dot-live h-2 w-2 shrink-0 rounded-full bg-ok" />
-            <span className="text-[11px] font-semibold text-mut">{apiMode === 'server' ? 'Ядро: серверное' : 'Ядро: встроенное'}</span>
+            <span className={cls('h-2 w-2 shrink-0 rounded-full', apiMode === 'server' ? 'dot-live bg-ok' : 'bg-warn')} />
+            <span className="text-[11px] font-semibold text-mut">
+              {apiMode === 'server'
+                ? coreVersion === 'legacy'
+                  ? 'Ядро: серверное · старое'
+                  : `Ядро: серверное · v${coreVersion ?? '?'}`
+                : 'Ядро: встроенное'}
+            </span>
             <span className="ml-auto font-mono text-[10px] text-dim">v1.5</span>
           </div>
           <p className="mt-1 text-[10.5px] leading-relaxed text-dim">
@@ -181,7 +188,9 @@ function ModeChip() {
           ? coreVersion === 'legacy'
             ? 'ядро: сервер · старая сборка'
             : `ядро: сервер · v${coreVersion ?? '?'}`
-          : 'ядро: эмуляция'}
+          : coreVersion
+            ? 'ядро найдено'
+            : 'ядро: эмуляция'}
       </span>
     </div>
   );
@@ -295,10 +304,26 @@ export function Topbar() {
 
 // ─── Оболочка страниц ────────────────────────────────────────────────────────
 
-/** Яркая плашка, когда консоль работает без серверного ядра (эмуляция) */
+/** Плашка режима: эмуляция (ядра нет) или «ядро найдено, но сессия встроенная» */
 function EmuBanner() {
   const apiMode = useStore((s) => s.apiMode);
+  const coreVersion = useStore((s) => s.coreVersion);
   if (apiMode === 'server') return null;
+
+  if (coreVersion !== null) {
+    return (
+      <div className="flex items-start gap-3 border-b border-blu/30 bg-blu/10 px-6 py-2.5">
+        <I n="bell" className="mt-0.5 h-4 w-4 shrink-0 text-blu" />
+        <p className="text-[12px] leading-relaxed text-blu">
+          <span className="font-bold">
+            Серверное ядро обнаружено{coreVersion === 'legacy' ? ' (старая сборка)' : ` · v${coreVersion}`} — но активна встроенная сессия.
+          </span>{' '}
+          Выйдите и войдите заново (админ / пароль из .env), чтобы видеть реальные проверки.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-start gap-3 border-b border-warn/30 bg-warn/10 px-6 py-2.5">
       <I n="alert" className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
@@ -306,8 +331,8 @@ function EmuBanner() {
         <span className="font-bold">Работа без серверного ядра — задержки и статусы синтетические:</span>{' '}
         браузер не умеет слать ping, поэтому даже несуществующие хосты могут выглядеть «живыми». Это не данные сети.
         <span className="mt-0.5 block text-warn/85">
-          На сервере выполните <code className="rounded bg-void/50 px-1.5 py-0.5 font-mono text-[11px] text-ink">git pull &amp;&amp; docker compose up -d --build</code>{' '}
-          и обновите страницу (Ctrl+Shift+R) — плашка исчезнет, проверки станут настоящими.
+          Разверните ядро на сервере (<code className="rounded bg-void/50 px-1.5 py-0.5 font-mono text-[11px] text-ink">docker compose up -d --build</code>) —
+          консоль найдёт его автоматически в течение нескольких секунд.
         </span>
       </p>
     </div>
