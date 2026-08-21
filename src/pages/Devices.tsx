@@ -10,12 +10,12 @@ import { DEVICE_TYPES, DEVICE_TYPE_META } from '../lib/types';
 
 // ─── Форма устройства ────────────────────────────────────────────────────────
 
-const ADDR_LABEL: Record<DeviceType, { label: string; ph: string }> = {
-  ping: { label: 'IP-адрес или хост', ph: '192.168.1.10' },
-  http: { label: 'Хост', ph: 'cam-office.local' },
-  api: { label: 'Хост или полный URL', ph: 'gateway.local или http://…' },
-  rtsp: { label: 'RTSP-ссылка', ph: 'rtsp://192.168.1.20:554/stream1' },
-  sip: { label: 'SIP URI', ph: 'sip:100@pbx.local:5060' },
+const ADDR_LABEL: Record<DeviceType, { label: string }> = {
+  ping: { label: 'IP-адрес или хост' },
+  http: { label: 'Хост' },
+  api: { label: 'Хост или полный URL' },
+  rtsp: { label: 'RTSP-ссылка' },
+  sip: { label: 'SIP URI' },
 };
 
 function DeviceForm({ initial, onClose }: { initial?: Device; onClose: () => void }) {
@@ -90,7 +90,7 @@ function DeviceForm({ initial, onClose }: { initial?: Device; onClose: () => voi
       <div className="grid grid-cols-2 gap-3">
         <div className="col-span-2">
           <Field label="Название">
-            <input className="inp" value={name} onChange={(e) => setName(e.target.value)} placeholder={initial ? undefined : 'Например: Камера склада'} />
+            <input className="inp" value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
         </div>
         <div className={cls(type === 'ping' || type === 'rtsp' || type === 'sip' ? 'col-span-2' : 'col-span-2')}>
