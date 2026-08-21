@@ -56,6 +56,7 @@ interface PlutoState {
   route: Route;
   routeParam: string;
   apiMode: 'embedded' | 'server';
+  coreVersion: string | null;
 
   nav: (r: Route, param?: string) => void;
   login: (l: string, p: string) => string | null;
@@ -111,6 +112,7 @@ export const useStore = create<PlutoState>()(
       route: 'dashboard',
       routeParam: '',
       apiMode: 'embedded',
+      coreVersion: null,
 
       nav: (r, param = '') => set({ route: r, routeParam: param }),
 

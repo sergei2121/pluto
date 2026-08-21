@@ -47,16 +47,18 @@ async function req<T>(path: string, opts: { method?: string; body?: unknown } = 
   }
 }
 
-/** Проверка доступности ядра */
-export async function detectApi(): Promise<boolean> {
+/** Проверка доступности ядра; возвращает его версию или null */
+export async function detectApi(): Promise<string | null> {
   try {
     const ctrl = new AbortController();
     const to = setTimeout(() => ctrl.abort(), 1500);
     const res = await fetch('/api/health', { signal: ctrl.signal });
     clearTimeout(to);
-    return res.ok;
+    if (!res.ok) return null;
+    const j = (await res.json().catch(() => ({}))) as { version?: string };
+    return j.version || 'core';
   } catch {
-    return false;
+    return null;
   }
 }
 

@@ -288,7 +288,7 @@ const server = http.createServer(async (req, res) => {
 
   try {
     // ── публичные ──
-    if (p === '/api/health') return json(res, 200, { ok: true, name: 'pluto-core', version: '1.4.0' });
+    if (p === '/api/health') return json(res, 200, { ok: true, name: 'pluto-core', version: '1.5.0', console: 'api' });
 
     if (p === '/api/auth/login' && method === 'POST') {
       const { name, password } = await readBody(req);
@@ -487,6 +487,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(HTTP_PORT, () => {
-  console.log(`[pluto] консоль и API: http://0.0.0.0:${HTTP_PORT}`);
+  console.log(`[pluto] core v1.5.0 · консоль и API: http://0.0.0.0:${HTTP_PORT} · шлюз агентов: :${AGENT_PORT}`);
   console.log(`[pluto] база: ${path.resolve(process.env.DATA_DIR || './data')}/db.json · пользователь admin`);
 });
