@@ -26,9 +26,10 @@ export default function App() {
     let alive = true;
 
     const probe = async (first: boolean) => {
-      const ok = await detectApi();
+      const ver = await detectApi();
       if (!alive) return;
-      if (ok) {
+      if (ver) useStore.setState({ coreVersion: ver });
+      if (ver) {
         if (getApiToken()) {
           try {
             const me = await apiMe();

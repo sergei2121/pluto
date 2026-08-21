@@ -113,7 +113,7 @@ export function Sidebar() {
           <div className="flex items-center gap-2">
             <span className="dot-live h-2 w-2 shrink-0 rounded-full bg-ok" />
             <span className="text-[11px] font-semibold text-mut">{apiMode === 'server' ? 'Ядро: серверное' : 'Ядро: встроенное'}</span>
-            <span className="ml-auto font-mono text-[10px] text-dim">v1.4</span>
+            <span className="ml-auto font-mono text-[10px] text-dim">v1.5</span>
           </div>
           <p className="mt-1 text-[10.5px] leading-relaxed text-dim">
             {apiMode === 'server' ? 'реальные проверки · опрос каждые 2.5 с' : 'движок опроса активен · браузерный режим'}
@@ -161,6 +161,7 @@ function Clock() {
 /** Индикатор режима ядра: серверное (реальные проверки) или встроенное */
 function ModeChip() {
   const apiMode = useStore((s) => s.apiMode);
+  const coreVersion = useStore((s) => s.coreVersion);
   const server = apiMode === 'server';
   return (
     <div
@@ -176,7 +177,7 @@ function ModeChip() {
     >
       <span className={cls('h-1.5 w-1.5 rounded-full', server ? 'dot-live bg-ok' : 'bg-warn')} />
       <span className={cls('text-[11px] font-bold uppercase tracking-[0.1em]', server ? 'text-ok' : 'text-warn')}>
-        {server ? 'ядро: сервер' : 'ядро: эмуляция'}
+        {server ? `ядро: сервер · v${coreVersion ?? '?'}` : 'ядро: эмуляция'}
       </span>
     </div>
   );
