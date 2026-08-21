@@ -291,6 +291,23 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { token: issueSession(user.id), user: publicUser(user) });
     }
 
+    // ── статика веб-консоли (без авторизации — вход выполняет сам интерфейс) ──
+    if (method === 'GET' && !p.startsWith('/api/')) {
+      let file = path.normalize(path.join(WEB_DIR, p === '/' ? 'index.html' : p));
+      if (!file.startsWith(WEB_DIR)) return json(res, 403, { error: 'forbidden' });
+      if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(WEB_DIR, 'index.html');
+      if (!fs.existsSync(file)) {
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+        return res.end('PLUTO Core работает. Веб-консоль не найдена: соберите её (npm run build) или пересоберите образ Docker.');
+      }
+      const ext = path.extname(file);
+      res.writeHead(200, {
+        'Content-Type': MIME[ext] || 'application/octet-stream',
+        'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable',
+      });
+      return fs.createReadStream(file).pipe(res);
+    }
+
     const user = authUser(req);
     if (!user) return json(res, 401, { error: 'Требуется авторизация' });
 
@@ -447,19 +464,8 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { settings: db.settings });
     }
 
-    // ── статика веб-консоли ──
-    if (method === 'GET') {
-      let file = path.normalize(path.join(WEB_DIR, p === '/' ? 'index.html' : p));
-      if (!file.startsWith(WEB_DIR)) return json(res, 403, { error: 'forbidden' });
-      if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(WEB_DIR, 'index.html');
-      if (!fs.existsSync(file)) {
-        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-        return res.end('PLUTO Core работает. Веб-консоль не найдена: соберите её (npm run build) или используйте образ Docker.');
-      }
-      res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
-      return fs.createReadStream(file).pipe(res);
-    }
-    json(res, 404, { error: 'not found' });
+    // сюда доходят только unmatched /api/*-маршруты
+    json(res, 404, { error: 'Маршрут не найден' });
   } catch (e) {
     console.error('[pluto]', e);
     json(res, 500, { error: 'internal error' });
