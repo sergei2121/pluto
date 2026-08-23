@@ -155,31 +155,35 @@ function TagsTab() {
 
 // ─── Уведомления ────────────────────────────────────────────────────────────
 
+function EvToggleRow({ checked, label, onChange }: { checked: boolean; label: string; onChange: (v: boolean) => void }) {
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-line bg-raised/40 px-3.5 py-2.5">
+      <span className="text-[12.5px] font-medium text-mut">{label}</span>
+      <Toggle checked={checked} onChange={onChange} />
+    </div>
+  );
+}
+
 function NotifyTab() {
   const settings = usePluto((s) => s.settings);
-  const setRaw = usePluto((s) => s.setSettingsRaw);
+  const saveSettings = usePluto((s) => s.saveSettings);
   const toast = (k: 'ok' | 'warn', t: string) => useToasts.push(k, t);
-  const n = settings.notifications;
+  // Локальный черновик: поллинг ядра не должен стирать несохранённый ввод.
+  // Коммит происходит по кнопке «Сохранить» (и автоматически перед тестом).
+  const [n, setN] = useState<TSettings['notifications']>(settings.notifications);
 
-  const upd = (patch: Partial<TSettings['notifications']>) => {
-    setRaw({ ...settings, notifications: { ...n, ...patch } });
-  };
+  const upd = (patch: Partial<TSettings['notifications']>) => setN((prev) => ({ ...prev, ...patch }));
+  const commit = () => saveSettings({ ...settings, notifications: n });
 
   const test = async (kind: 'push' | 'telegram' | 'email') => {
     if (kind === 'push') {
       const granted = await requestPushPermission();
       if (!granted) { toast('warn', 'Разрешение на уведомления не выдано'); return; }
     }
+    commit(); // тест уходит с актуальными значениями
     const r = sendTestNotification(kind);
     toast(r.ok ? 'ok' : 'warn', r.text);
   };
-
-  const EvToggle = ({ k, label }: { k: keyof TSettings['notifications']['on']; label: string }) => (
-    <div className="flex items-center justify-between rounded-lg border border-line bg-raised/40 px-3.5 py-2.5">
-      <span className="text-[12.5px] font-medium text-mut">{label}</span>
-      <Toggle checked={n.on[k]} onChange={(v) => upd({ on: { ...n.on, [k]: v } })} />
-    </div>
-  );
 
   return (
     <div className="space-y-4">
@@ -227,11 +231,14 @@ function NotifyTab() {
 
       <Panel title="Какие события присылать" icon={Bell} delay={180}>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          <EvToggle k="down" label="Авария (потеря связи)" />
-          <EvToggle k="degraded" label="Деградация связи" />
-          <EvToggle k="recover" label="Восстановление" />
-          <EvToggle k="agentOff" label="Агент офлайн" />
-          <EvToggle k="agentOn" label="Агент в сети" />
+          <EvToggleRow checked={n.on.down} label="Авария (потеря связи)" onChange={(v) => upd({ on: { ...n.on, down: v } })} />
+          <EvToggleRow checked={n.on.degraded} label="Деградация связи" onChange={(v) => upd({ on: { ...n.on, degraded: v } })} />
+          <EvToggleRow checked={n.on.recover} label="Восстановление" onChange={(v) => upd({ on: { ...n.on, recover: v } })} />
+          <EvToggleRow checked={n.on.agentOff} label="Агент офлайн" onChange={(v) => upd({ on: { ...n.on, agentOff: v } })} />
+          <EvToggleRow checked={n.on.agentOn} label="Агент в сети" onChange={(v) => upd({ on: { ...n.on, agentOn: v } })} />
+        </div>
+        <div className="mt-4 flex justify-end">
+          <button className="btn-acc" onClick={commit}>Сохранить уведомления</button>
         </div>
       </Panel>
     </div>

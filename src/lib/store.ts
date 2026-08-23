@@ -265,14 +265,18 @@ function initialState(): PlutoState {
     },
 
     applyServerState: (st) => {
+      const cur = get();
       const patch: Partial<PlutoState> = {
         devices: st.devices,
         agents: st.agents,
-        tags: st.tags,
         events: st.events,
-        settings: st.settings,
       };
-      if (st.users) patch.users = st.users;
+      // настройки и теги меняются редко (по действию админа): не заменяем
+      // объект, если содержимое то же — иначе каждый поллинг перерисовывает
+      // все подписанные компоненты и сбрасывает открытые формы
+      if (JSON.stringify(st.settings) !== JSON.stringify(cur.settings)) patch.settings = st.settings;
+      if (JSON.stringify(st.tags) !== JSON.stringify(cur.tags)) patch.tags = st.tags;
+      if (st.users && JSON.stringify(st.users) !== JSON.stringify(cur.users)) patch.users = st.users;
       set(patch);
     },
 
