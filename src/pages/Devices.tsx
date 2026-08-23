@@ -53,11 +53,15 @@ function DeviceModal({ open, onClose, initial }: { open: boolean; onClose: () =>
       setMethod('GET'); setBody(''); setIntervalV(String(settings.intervals.ping)); setSelTags([]);
     }
     setErr('');
-  }, [open, initial, settings]);
+    // намеренно без settings в зависимостях: поллинг ядра отдаёт новый объект
+    // настроек каждые 2.5 с, и форма сбрасывала бы введённый текст
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initial]);
 
   useEffect(() => {
     if (!initial) setIntervalV(String(settings.intervals[type] ?? 60));
-  }, [type, initial, settings]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [type, initial]);
 
   const submit = () => {
     if (!address.trim()) { setErr('Укажите адрес'); return; }
