@@ -1,0 +1,272 @@
+// ─── PLUTO: агенты ───────────────────────────────────────────────────────────
+import { useMemo, useState } from 'react';
+import { Cpu, HardDrive, KeyRound, Monitor, Network, Plus, Star, Terminal, Thermometer, Trash2 } from 'lucide-react';
+import { AreaChart, Bar, CopyBlock, Drawer, EmptyState, Panel, Ring, StatusDot, TimeAgo } from '../components/ui';
+import { usePluto, useCurrentUser, visibleAgents, useToasts } from '../lib/store';
+import { api, syncAll } from '../lib/api';
+import { cls, fmtBytes, fmtGb, pct } from '../lib/util';
+import type { Agent } from '../lib/types';
+
+function AgentCard({ a, delay, onOpen }: { a: Agent; delay: number; onOpen: () => void }) {
+  const toggleFav = usePluto((s) => s.toggleAgentFav);
+  return (
+    <div
+      className="rise group cursor-pointer rounded-xl border border-line bg-panel/85 p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-vio/40 hover:bg-raised/70"
+      style={{ animationDelay: `${delay}ms` }}
+      onClick={onOpen}
+    >
+      <div className="flex items-center gap-2.5">
+        <StatusDot status={a.online ? 'up' : 'down'} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[14px] font-bold text-ink">{a.hostname}</div>
+          <div className="font-mono text-[10.5px] text-dim">{a.ip} · {a.os || 'Windows'}</div>
+        </div>
+        <button onClick={(e) => { e.stopPropagation(); toggleFav(a.id); }} className="rounded-md p-1 text-dim transition-all hover:text-warn">
+          <Star className={cls('h-4 w-4', a.favorite && 'fill-warn text-warn')} />
+        </button>
+      </div>
+
+      <div className="mt-3.5 flex items-center gap-4">
+        <Ring value={a.online ? a.cpuLoad : 0} size={58} label="ЦП" color={a.cpuLoad > 85 ? '#e07a80' : '#8f7df0'} />
+        <div className="min-w-0 flex-1 space-y-2.5">
+          <div>
+            <div className="mb-1 flex justify-between font-mono text-[10px] text-dim">
+              <span>ОЗУ {fmtGb(a.ramUsed)} / {fmtGb(a.ramTotal)}</span>
+              <span className="text-mut">{a.online ? pct(a.ramUsed, a.ramTotal) + '%' : '—'}</span>
+            </div>
+            <Bar value={a.online ? pct(a.ramUsed, a.ramTotal) : 0} color="#7ba4e6" />
+          </div>
+          <div>
+            <div className="mb-1 flex justify-between font-mono text-[10px] text-dim">
+              <span>Диски ({a.disks.length})</span>
+              <span className="text-mut">{a.online && a.disks.length ? pct(a.disks.reduce((s, d) => s + d.used, 0), a.disks.reduce((s, d) => s + d.total, 0)) + '%' : '—'}</span>
+            </div>
+            <Bar value={a.online && a.disks.length ? pct(a.disks.reduce((s, d) => s + d.used, 0), a.disks.reduce((s, d) => s + d.total, 0)) : 0} color="#5fc6d8" />
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 flex items-center justify-between border-t border-linesoft pt-2.5 font-mono text-[10.5px] text-dim">
+        <span className="flex items-center gap-1.5 text-warn"><Thermometer className="h-3 w-3" />{a.online ? `${Math.round(a.cpuTemp)}°C` : '—'}</span>
+        <span className="flex items-center gap-1.5 text-blu"><Network className="h-3 w-3" />{a.online ? `${Math.round(a.rxRate)} КБ/с` : '—'}</span>
+        <span className={a.online ? 'text-ok' : 'text-crit'}>{a.online ? 'в сети' : 'офлайн'}</span>
+      </div>
+    </div>
+  );
+}
+
+function AgentDrawer({ id, onClose }: { id: string | null; onClose: () => void }) {
+  const a = usePluto((s) => s.agents.find((x) => x.id === id));
+  const removeAgent = usePluto((s) => s.removeAgent);
+  const toggleFav = usePluto((s) => s.toggleAgentFav);
+  const apiMode = usePluto((s) => s.apiMode);
+  const [confirmDel, setConfirmDel] = useState(false);
+
+  if (!a) return <Drawer open={false} onClose={onClose} title={null}><div /></Drawer>;
+
+  const cpuHist = a.history.map((h) => h.cpu);
+  const ramHist = a.history.map((h) => h.ram);
+
+  return (
+    <Drawer
+      open={!!id}
+      onClose={onClose}
+      title={
+        <div className="flex items-center gap-2.5">
+          <StatusDot status={a.online ? 'up' : 'down'} />
+          <div>
+            <div className="font-display text-[15px] font-semibold text-ink">{a.hostname}</div>
+            <div className="font-mono text-[11px] text-dim">{a.ip} · агент v{a.version}</div>
+          </div>
+        </div>
+      }
+    >
+      <div className="space-y-5">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="flex items-center justify-center rounded-lg border border-line bg-raised/50 p-3">
+            <Ring value={a.online ? a.cpuLoad : 0} size={76} label={`ЦП · ${a.cpuCores} яд.`} color={a.cpuLoad > 85 ? '#e07a80' : '#8f7df0'} />
+          </div>
+          <div className="flex flex-col justify-center gap-1.5 rounded-lg border border-line bg-raised/50 p-3.5 font-mono text-[12px]">
+            <div className="flex justify-between"><span className="text-dim">Темп. ЦП</span><span className="text-warn">{a.online ? `${Math.round(a.cpuTemp)}°C` : '—'}</span></div>
+            <div className="flex justify-between"><span className="text-dim">Темп. ОЗУ</span><span className="text-warn">{a.online ? `${Math.round(a.ramTemp)}°C` : '—'}</span></div>
+            <div className="flex justify-between"><span className="text-dim">RX всего</span><span className="text-blu">{fmtBytes(a.rxBytes)}</span></div>
+            <div className="flex justify-between"><span className="text-dim">TX всего</span><span className="text-blu">{fmtBytes(a.txBytes)}</span></div>
+          </div>
+        </div>
+
+        <div>
+          <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-dim">Загрузка ЦП</div>
+          <AreaChart values={cpuHist} height={80} color="#8f7df0" unit="%" max={100} />
+        </div>
+        <div>
+          <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-dim">Загрузка ОЗУ</div>
+          <AreaChart values={ramHist} height={80} color="#7ba4e6" unit="%" max={100} />
+        </div>
+
+        <div>
+          <div className="mb-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-dim">
+            <HardDrive className="h-3.5 w-3.5" /> Диски ({a.disks.length})
+          </div>
+          <div className="space-y-2">
+            {a.disks.map((d) => (
+              <div key={d.id} className="rounded-lg border border-line bg-raised/40 p-3">
+                <div className="mb-1.5 flex justify-between font-mono text-[11.5px]">
+                  <span className="font-bold text-ink">{d.label}</span>
+                  <span className="text-dim">{fmtGb(d.used)} / {fmtGb(d.total)} · {Math.round(d.temp)}°C</span>
+                </div>
+                <Bar value={pct(d.used, d.total)} color="#5fc6d8" />
+              </div>
+            ))}
+            {a.disks.length === 0 && <p className="text-[12px] text-dim">Нет данных о дисках</p>}
+          </div>
+        </div>
+
+        <div>
+          <div className="mb-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-dim">
+            <Network className="h-3.5 w-3.5" /> Локальные сети (ARP-скан)
+          </div>
+          {a.networks.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-line bg-raised/30 p-3 text-[12px] text-dim">
+              Скан ещё не выполнялся или сети не обнаружены.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {a.networks.map((n) => (
+                <div key={n.cidr} className="rounded-lg border border-line bg-raised/40 p-3">
+                  <div className="mb-1.5 font-mono text-[11.5px] font-bold text-ink">{n.cidr} <span className="font-normal text-dim">· {n.iface}</span></div>
+                  <div className="space-y-1">
+                    {n.hosts.slice(0, 8).map((h) => (
+                      <div key={h.ip} className="flex items-center gap-2 font-mono text-[11px]">
+                        <span className={cls('h-1.5 w-1.5 rounded-full', h.online ? 'bg-ok' : 'bg-dim')} />
+                        <span className="text-mut">{h.ip}</span>
+                        <span className="text-dim/70">{h.mac}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-1.5 rounded-lg border border-line bg-raised/40 p-3.5 font-mono text-[12px]">
+          <div className="flex justify-between"><span className="text-dim">Последний heartbeat</span><TimeAgo ts={a.lastSeen} className="text-mut" /></div>
+          <div className="flex justify-between"><span className="text-dim">Источник данных</span><span className={apiMode === 'server' ? 'text-ok' : 'text-warn'}>{apiMode === 'server' ? 'реальный агент' : 'эмуляция'}</span></div>
+        </div>
+
+        <div className="flex gap-2 border-t border-linesoft pt-4">
+          <button className="btn-ghost flex-1 justify-center" onClick={() => toggleFav(a.id)}>
+            <Star className={cls('h-4 w-4', a.favorite && 'fill-warn text-warn')} /> Избранное
+          </button>
+          {confirmDel ? (
+            <button className="btn-ghost flex-1 justify-center border-crit/50 text-crit" onClick={() => { removeAgent(a.id); onClose(); }}>
+              Подтвердить удаление
+            </button>
+          ) : (
+            <button className="btn-ghost flex-1 justify-center hover:border-crit/50 hover:text-crit" onClick={() => setConfirmDel(true)}>
+              <Trash2 className="h-4 w-4" /> Удалить
+            </button>
+          )}
+        </div>
+      </div>
+    </Drawer>
+  );
+}
+
+export default function Agents() {
+  const user = useCurrentUser();
+  const isAdmin = user?.role === 'admin';
+  const allAgents = usePluto((s) => s.agents);
+  const agents = useMemo(() => visibleAgents(allAgents, user), [allAgents, user]);
+  const addEmulated = usePluto((s) => s.addEmulatedAgent);
+  const apiMode = usePluto((s) => s.apiMode);
+  const metrics = usePluto((s) => s.settings.metrics);
+  const toast = (k: 'ok' | 'warn', t: string) => useToasts.push(k, t);
+
+  const [showInstall, setShowInstall] = useState(false);
+  const [drawer, setDrawer] = useState<string | null>(null);
+
+  const online = agents.filter((a) => a.online).length;
+
+  const createToken = () => {
+    api.createAgentToken('agent-' + Date.now().toString(36).slice(-4))
+      .then((r) => { toast('ok', `Токен создан: ${r.token}`); void syncAll(); })
+      .catch((e) => toast('warn', (e as Error)?.message || 'Не удалось создать токен'));
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="rise flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-4 rounded-lg border border-line bg-raised/60 px-4 py-2.5">
+          <span className="font-mono text-[12px] text-mut"><span className="font-bold text-ok">{online}</span> / {agents.length} в сети</span>
+          <span className="h-4 w-px bg-line" />
+          <span className="font-mono text-[12px] text-dim">телеметрия каждые {metrics} с</span>
+        </div>
+
+        <div className="ml-auto flex gap-2">
+          {isAdmin && (
+            <>
+              <button className="btn-ghost" onClick={() => setShowInstall((v) => !v)}>
+                <Terminal className="h-4 w-4" /> Установка на Windows
+              </button>
+              {apiMode === 'server' ? (
+                <button className="btn-acc" onClick={createToken}>
+                  <KeyRound className="h-4 w-4" /> Создать токен агента
+                </button>
+              ) : (
+                <button className="btn-acc" onClick={() => { const a = addEmulated(); if (a) { toast('ok', `Тестовый агент ${a.hostname} подключён`); setDrawer(a.id); } }}>
+                  <Plus className="h-4 w-4" /> Подключить тестового агента
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {showInstall && isAdmin && (
+        <Panel title="Подключение реального агента (Windows)" icon={Terminal} delay={40}>
+          <div className="space-y-3">
+            <p className="text-[12.5px] leading-relaxed text-mut">
+              Агент — один исполняемый файл на Go, без зависимостей. Ставится одной командой PowerShell, регистрируется как служба Windows
+              и подключается к ядру по WebSocket с токеном. Токен создаётся кнопкой «Создать токен агента».
+            </p>
+            <CopyBlock label="powershell · сборка из исходников" code={`cd agent\ngo build -o pluto-agent.exe .`} />
+            <CopyBlock label="powershell · установка службой" code={`pluto-agent.exe -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН_АГЕНТА>`} />
+            <p className="text-[11.5px] text-dim">
+              Агент собирает: ЦП (загрузка, температура), ОЗУ, диски (объёмы, занятость, температуры), сетевые счётчики RX/TX и ARP-скан доступных локальных сетей.
+            </p>
+          </div>
+        </Panel>
+      )}
+
+      {agents.length === 0 ? (
+        <Panel title="Реестр агентов" icon={Monitor} delay={80}>
+          <EmptyState
+            icon={Monitor}
+            title="Агентов пока нет"
+            text={apiMode === 'server'
+              ? 'Создайте токен и запустите pluto-agent на Windows-машине — телеметрия появится в течение секунд.'
+              : 'Подключите Windows-машину по токену или поднимите тестового агента, чтобы увидеть телеметрию: ЦП, ОЗУ, диски, температуры, сеть и LAN-скан.'}
+            action={isAdmin ? (
+              apiMode === 'server' ? (
+                <button className="btn-acc" onClick={createToken}><KeyRound className="h-4 w-4" /> Создать токен агента</button>
+              ) : (
+                <button className="btn-acc" onClick={() => { const a = addEmulated(); if (a) { toast('ok', `Тестовый агент ${a.hostname} подключён`); setDrawer(a.id); } }}>
+                  <Plus className="h-4 w-4" /> Подключить тестового агента
+                </button>
+              )
+            ) : undefined}
+          />
+        </Panel>
+      ) : (
+        <div className="grid gap-3.5 md:grid-cols-2 2xl:grid-cols-3">
+          {agents.map((a, i) => (
+            <AgentCard key={a.id} a={a} delay={Math.min(i * 60, 360)} onOpen={() => setDrawer(a.id)} />
+          ))}
+        </div>
+      )}
+
+      <AgentDrawer id={drawer} onClose={() => setDrawer(null)} />
+    </div>
+  );
+}
