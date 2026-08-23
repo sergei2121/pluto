@@ -1,23 +1,24 @@
 @import "tailwindcss";
 
 @theme {
-  --font-display: "Unbounded", "Manrope", sans-serif;
-  --font-sans: "Manrope", "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", "Consolas", monospace;
+  --font-display: "Space Grotesk", "IBM Plex Sans", sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
 
-  --color-void: #0d1120;
-  --color-deep: #111729;
-  --color-panel: #151c31;
-  --color-raised: #1c2440;
-  --color-line: #27304f;
-  --color-line-soft: #1f2846;
-  --color-ink: #e4e8f7;
-  --color-mut: #97a0c3;
-  --color-dim: #626d95;
+  --color-void: #0b0e1a;
+  --color-deep: #0f1322;
+  --color-panel: #131830;
+  --color-raised: #1a2040;
+  --color-line: #262e52;
+  --color-linesoft: #1e2544;
+  --color-ink: #e7eaf9;
+  --color-mut: #a7aed0;
+  --color-dim: #6b7399;
 
-  --color-vio: #9a8cfa;
-  --color-vio-deep: #6355c9;
+  --color-vio: #8f7df0;
+  --color-viodeep: #574aa8;
   --color-blu: #7ba4e6;
+  --color-cyan: #5fc6d8;
   --color-ok: #55c795;
   --color-warn: #dfa65e;
   --color-crit: #e07a80;
@@ -30,205 +31,162 @@ body,
 }
 
 body {
-  margin: 0;
-  background-color: #0d1120;
-  color: #e4e8f7;
-  font-family: "Manrope", "Segoe UI", sans-serif;
+  background: var(--color-void);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  font-size: 14px;
   -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
 }
 
-::selection {
-  background: rgba(154, 140, 250, 0.35);
+.font-display {
+  font-family: var(--font-display);
 }
 
-/* ─── Звёздное небо (GPU-композитинг: только transform/opacity, без перерисовки) ─── */
+/* ── Живой космический фон: GPU-композитинг, без перерисовок ── */
+.nebula {
+  background:
+    radial-gradient(1100px 700px at 12% -8%, rgba(87, 74, 168, 0.28), transparent 60%),
+    radial-gradient(900px 620px at 96% 12%, rgba(64, 92, 168, 0.2), transparent 58%),
+    radial-gradient(820px 600px at 52% 118%, rgba(95, 198, 216, 0.08), transparent 62%);
+}
+
 .stars-a,
 .stars-b {
   position: absolute;
-  inset: -60%; /* слой больше экрана — сдвиг never не обнажает края */
+  inset: -50% 0 0 0;
+  background-repeat: repeat;
   will-change: transform;
-  transform: translateZ(0);
-  pointer-events: none;
 }
 
 .stars-a {
   background-image:
-    radial-gradient(1px 1px at 22px 34px, rgba(214, 220, 255, 0.75), transparent 100%),
-    radial-gradient(1px 1px at 118px 92px, rgba(180, 190, 255, 0.55), transparent 100%),
-    radial-gradient(1.5px 1.5px at 200px 160px, rgba(224, 228, 255, 0.8), transparent 100%),
-    radial-gradient(1px 1px at 300px 60px, rgba(170, 180, 240, 0.5), transparent 100%),
-    radial-gradient(1px 1px at 410px 200px, rgba(200, 208, 255, 0.6), transparent 100%),
-    radial-gradient(1.5px 1.5px at 520px 120px, rgba(190, 170, 255, 0.55), transparent 100%),
-    radial-gradient(1px 1px at 80px 220px, rgba(210, 216, 255, 0.5), transparent 100%),
-    radial-gradient(1px 1px at 360px 250px, rgba(180, 188, 250, 0.65), transparent 100%);
-  background-size: 560px 280px;
-  animation: drift-a 280s linear infinite;
-  opacity: 0.7;
+    radial-gradient(1px 1px at 22px 34px, rgba(231, 234, 249, 0.7) 50%, transparent 51%),
+    radial-gradient(1px 1px at 120px 90px, rgba(167, 174, 208, 0.55) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 200px 40px, rgba(143, 125, 240, 0.6) 50%, transparent 51%),
+    radial-gradient(1px 1px at 300px 160px, rgba(231, 234, 249, 0.5) 50%, transparent 51%);
+  background-size: 340px 240px;
+  animation: drift-a 300s linear infinite;
 }
 
 .stars-b {
   background-image:
-    radial-gradient(1px 1px at 70px 50px, rgba(154, 140, 250, 0.6), transparent 100%),
-    radial-gradient(2px 2px at 260px 190px, rgba(123, 164, 230, 0.5), transparent 100%),
-    radial-gradient(1px 1px at 450px 90px, rgba(220, 226, 255, 0.7), transparent 100%),
-    radial-gradient(1.5px 1.5px at 640px 260px, rgba(154, 140, 250, 0.5), transparent 100%),
-    radial-gradient(1px 1px at 180px 300px, rgba(190, 200, 255, 0.55), transparent 100%);
-  background-size: 720px 360px;
-  animation: drift-b 420s linear infinite, twinkle 9s ease-in-out infinite alternate;
-  opacity: 0.5;
+    radial-gradient(1px 1px at 60px 120px, rgba(123, 164, 230, 0.5) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 170px 30px, rgba(231, 234, 249, 0.42) 50%, transparent 51%),
+    radial-gradient(1px 1px at 260px 200px, rgba(95, 198, 216, 0.45) 50%, transparent 51%);
+  background-size: 300px 260px;
+  animation: drift-b 460s linear infinite;
 }
 
-/* сдвиг ровно на размер тайла → бесшовный цикл */
 @keyframes drift-a {
-  to { transform: translate3d(-560px, -280px, 0); }
+  to { transform: translate3d(0, -340px, 0); }
 }
 @keyframes drift-b {
-  to { transform: translate3d(-720px, -360px, 0); }
+  to { transform: translate3d(-300px, -260px, 0); }
 }
 
-@keyframes twinkle {
-  from { opacity: 0.35; }
-  to { opacity: 0.7; }
-}
-
-.nebula {
-  background:
-    radial-gradient(900px 600px at 12% -8%, rgba(106, 88, 214, 0.16), transparent 62%),
-    radial-gradient(800px 620px at 96% 14%, rgba(64, 102, 178, 0.13), transparent 60%),
-    radial-gradient(1000px 700px at 70% 110%, rgba(86, 70, 190, 0.12), transparent 60%),
-    linear-gradient(180deg, #0d1120 0%, #0e1325 55%, #0c101e 100%);
-}
-
-/* дешёвая «живая» пульсация индикаторов — только opacity, без scale-слоёв */
 @keyframes breathe {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.45; }
+  50% { opacity: 0.35; }
 }
 .dot-live { animation: breathe 2.4s ease-in-out infinite; }
 .dot-crit { animation: breathe 1.1s ease-in-out infinite; }
 
-/* уважение к настройке «уменьшить движение» */
-@media (prefers-reduced-motion: reduce) {
-  .stars-a, .stars-b, .dot-live, .dot-crit { animation: none; }
-}
-
-/* ─── Анимации появления ─── */
+/* ── Появление блоков ── */
 @keyframes rise {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
 }
-.rise { animation: rise 0.45s cubic-bezier(0.22, 0.9, 0.3, 1) both; }
+.rise {
+  animation: rise 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
 
 @keyframes pop {
-  from { opacity: 0; transform: scale(0.96) translateY(6px); }
-  to { opacity: 1; transform: scale(1) translateY(0); }
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
 }
-.pop { animation: pop 0.22s cubic-bezier(0.22, 0.9, 0.3, 1) both; }
-
-@keyframes evin {
-  from { opacity: 0; transform: translateX(-6px); }
-  to { opacity: 1; transform: translateX(0); }
-}
-.ev-in { animation: evin 0.3s ease-out both; }
+.pop { animation: pop 0.18s cubic-bezier(0.22, 1, 0.36, 1) both; }
 
 @keyframes toastin {
-  from { opacity: 0; transform: translateY(12px) scale(0.97); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: translateX(18px); }
+  to { opacity: 1; transform: translateX(0); }
 }
-.toast-in { animation: toastin 0.25s cubic-bezier(0.22, 0.9, 0.3, 1) both; }
+.toast-in { animation: toastin 0.25s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@keyframes evin {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.ev-in { animation: evin 0.3s cubic-bezier(0.22, 1, 0.36, 1) both; }
 
 @keyframes shake {
-  10%, 90% { transform: translateX(-1px); }
-  20%, 80% { transform: translateX(2px); }
-  30%, 50%, 70% { transform: translateX(-4px); }
-  40%, 60% { transform: translateX(4px); }
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-7px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(3px); }
 }
-.shake { animation: shake 0.5s ease both; }
+.shake { animation: shake 0.4s ease-in-out; }
 
-/* ─── Кнопки и поля ─── */
+@keyframes scan {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(120%); }
+}
+
+/* ── Скроллбары ── */
+.scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+.scroll-thin::-webkit-scrollbar-track { background: transparent; }
+.scroll-thin::-webkit-scrollbar-thumb { background: #2a3258; border-radius: 8px; }
+.scroll-thin::-webkit-scrollbar-thumb:hover { background: #38417a; }
+
+/* ── Формы ── */
+.inp {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--color-line);
+  background: var(--color-raised);
+  padding: 8px 11px;
+  font-size: 13px;
+  color: var(--color-ink);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.inp::placeholder { color: #4c5480; }
+.inp:focus {
+  border-color: var(--color-vio);
+  box-shadow: 0 0 0 3px rgba(143, 125, 240, 0.16);
+}
+.inp:disabled { opacity: 0.55; cursor: not-allowed; }
+
 .btn-acc {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  border-radius: 0.5rem;
-  background: #6355c9;
-  padding: 0.55rem 1rem;
+  gap: 7px;
+  border-radius: 8px;
+  background: var(--color-vio);
+  color: #10101c;
+  font-weight: 600;
   font-size: 13px;
-  font-weight: 700;
-  color: #e4e8f7;
-  border: 1px solid rgba(154, 140, 250, 0.4);
-  transition: all 0.18s ease;
-  box-shadow: 0 4px 18px -6px rgba(99, 85, 201, 0.55);
+  padding: 8px 15px;
+  transition: filter 0.15s, transform 0.15s;
 }
-.btn-acc:hover { background: #7264dd; transform: translateY(-1px); }
-.btn-acc:active { transform: translateY(0) scale(0.99); }
-.btn-acc:disabled { opacity: 0.5; pointer-events: none; }
+.btn-acc:hover { filter: brightness(1.12); }
+.btn-acc:active { transform: translateY(1px); }
 
 .btn-ghost {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  border-radius: 0.5rem;
-  border: 1px solid #27304f;
-  background: rgba(28, 36, 64, 0.6);
-  padding: 0.55rem 1rem;
+  gap: 7px;
+  border-radius: 8px;
+  border: 1px solid var(--color-line);
+  background: var(--color-raised);
+  color: var(--color-mut);
+  font-weight: 500;
   font-size: 13px;
-  font-weight: 600;
-  color: #97a0c3;
-  transition: all 0.18s ease;
+  padding: 8px 14px;
+  transition: all 0.15s;
 }
-.btn-ghost:hover { color: #e4e8f7; border-color: #3a4570; background: rgba(28, 36, 64, 0.95); }
-.btn-ghost:disabled { opacity: 0.45; pointer-events: none; }
+.btn-ghost:hover { color: var(--color-ink); border-color: #3a4376; background: #20274a; }
 
-.btn-danger {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  border-radius: 0.5rem;
-  border: 1px solid rgba(224, 122, 128, 0.4);
-  background: rgba(224, 122, 128, 0.1);
-  padding: 0.55rem 1rem;
-  font-size: 13px;
-  font-weight: 700;
-  color: #e07a80;
-  transition: all 0.18s ease;
+@media (prefers-reduced-motion: reduce) {
+  .stars-a, .stars-b, .dot-live, .dot-crit { animation: none; }
 }
-.btn-danger:hover { background: rgba(224, 122, 128, 0.2); border-color: rgba(224, 122, 128, 0.6); }
-
-.icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 0.45rem;
-  padding: 0.4rem;
-  color: #626d95;
-  transition: all 0.15s ease;
-}
-.icon-btn:hover { color: #e4e8f7; background: rgba(28, 36, 64, 0.95); }
-
-.inp {
-  width: 100%;
-  border-radius: 0.5rem;
-  border: 1px solid #27304f;
-  background: rgba(28, 36, 64, 0.55);
-  padding: 0.55rem 0.8rem;
-  font-size: 13.5px;
-  color: #e4e8f7;
-  outline: none;
-  transition: all 0.18s ease;
-}
-.inp::placeholder { color: rgba(98, 109, 149, 0.75); }
-.inp:focus {
-  border-color: rgba(154, 140, 250, 0.6);
-  box-shadow: 0 0 0 3px rgba(143, 125, 240, 0.12);
-  background: rgba(28, 36, 64, 0.85);
-}
-.inp:disabled { opacity: 0.6; }
-
-/* ─── Скроллбары ─── */
-.scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
-.scroll-thin::-webkit-scrollbar-track { background: transparent; }
-.scroll-thin::-webkit-scrollbar-thumb { background: #27304f; border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
-.scroll-thin::-webkit-scrollbar-thumb:hover { background: #3a4570; background-clip: content-box; border: 2px solid transparent; }
-.scroll-thin { scrollbar-width: thin; scrollbar-color: #27304f transparent; }

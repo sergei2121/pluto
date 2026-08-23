@@ -1,4 +1,4 @@
-// ─── PLUTO Core: хранилище, авторизация, WebSocket-сервер, уведомления ──────
+// ─── PLUTO Core: хранилище, авторизация, WebSocket-сервер ───────────────────
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -6,40 +6,29 @@ import crypto from 'node:crypto';
 export const DATA_DIR = process.env.DATA_DIR || './data';
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
-// ─── Хранилище (JSON-файл, атомарная запись) ────────────────────────────────
-
 export const DEFAULT_SETTINGS = {
-  ping: 60,
-  http: 60,
-  rtsp: 120,
-  sip: 120,
-  api: 180,
-  metrics: 5,
-  lanScan: 300,
-  timeoutMs: 3000,
-  failThreshold: 3,
-  degradeFactor: 10,
-  degradeMinMs: 250,
+  ping: 30, http: 60, api: 120, rtsp: 60, sip: 120,
+  metrics: 3, lanScan: 300, timeoutMs: 3000,
+  failThreshold: 3, degradeFactor: 10, degradeMinMs: 250,
   notifications: {
     telegram: { enabled: false, botToken: '', chatId: '' },
-    email: { enabled: false, smtpHost: '', smtpPort: 587, smtpUser: '', smtpPass: '', from: '', to: '' },
+    email: { enabled: false, smtpHost: '', smtpPort: 587, from: '', to: '' },
     push: { enabled: false },
     on: { down: true, degraded: true, recover: true, agentOff: true, agentOn: false },
   },
 };
 
 const DEFAULT_DB = () => ({
-  users: [],
-  sessions: [],
-  devices: [],
-  agents: [],
-  tags: [],
-  events: [],
+  users: [], sessions: [], devices: [], agents: [], tags: [], events: [],
   settings: DEFAULT_SETTINGS,
 });
 
 let db = null;
 let saveTimer = null;
+
+export function uid() {
+  return crypto.randomBytes(6).toString('hex');
+}
 
 export function loadDb() {
   if (db) return db;
@@ -51,13 +40,9 @@ export function loadDb() {
   }
   db = { ...DEFAULT_DB(), ...(data || {}) };
   db.settings = { ...DEFAULT_SETTINGS, ...db.settings, notifications: { ...DEFAULT_SETTINGS.notifications, ...(db.settings?.notifications || {}) } };
-  // первый запуск: администратор по умолчанию
   if (db.users.length === 0) {
     db.users.push({
-      id: uid(),
-      name: 'admin',
-      role: 'admin',
-      scope: [],
+      id: uid(), name: 'admin', role: 'admin', scope: [],
       passHash: hashPass(process.env.ADMIN_PASSWORD || 'pluto'),
       createdAt: Date.now(),
     });
@@ -69,7 +54,6 @@ export function loadDb() {
 }
 
 export function saveDb() {
-  // дебаунс: частые метрики агентов не дёргают диск каждую секунду
   if (saveTimer) return;
   saveTimer = setTimeout(() => {
     saveTimer = null;
@@ -84,17 +68,13 @@ export function saveDb() {
   }, 250);
 }
 
-export function uid() {
-  return crypto.randomBytes(6).toString('hex');
-}
-
 export function pushEvent(sev, source, text) {
   db.events.unshift({ id: uid(), ts: Date.now(), sev, source, text });
   if (db.events.length > 300) db.events.length = 300;
   saveDb();
 }
 
-// ─── Авторизация (scrypt + сессии-токены) ───────────────────────────────────
+// ─── Авторизация (scrypt + сессии) ──────────────────────────────────────────
 
 export function hashPass(password) {
   const salt = crypto.randomBytes(16);
@@ -158,22 +138,17 @@ function wrapSocket(socket) {
       if (closed) return;
       const payload = Buffer.from(text, 'utf8');
       let header;
-      if (payload.length < 126) {
-        header = Buffer.from([0x81, payload.length]);
-      } else if (payload.length < 65536) {
+      if (payload.length < 126) header = Buffer.from([0x81, payload.length]);
+      else if (payload.length < 65536) {
         header = Buffer.alloc(4);
-        header[0] = 0x81;
-        header[1] = 126;
+        header[0] = 0x81; header[1] = 126;
         header.writeUInt16BE(payload.length, 2);
       } else {
         header = Buffer.alloc(10);
-        header[0] = 0x81;
-        header[1] = 127;
+        header[0] = 0x81; header[1] = 127;
         header.writeBigUInt64BE(BigInt(payload.length), 2);
       }
-      try {
-        socket.write(Buffer.concat([header, payload]));
-      } catch { /* сокет уже закрыт */ }
+      try { socket.write(Buffer.concat([header, payload])); } catch { /* закрыт */ }
     },
     close() {
       closed = true;
@@ -200,26 +175,21 @@ function wrapSocket(socket) {
       let off = 2;
       if (len === 126) {
         if (buf.length < 4) return;
-        len = buf.readUInt16BE(2);
-        off = 4;
+        len = buf.readUInt16BE(2); off = 4;
       } else if (len === 127) {
         if (buf.length < 10) return;
-        len = Number(buf.readBigUInt64BE(2));
-        off = 10;
+        len = Number(buf.readBigUInt64BE(2)); off = 10;
       }
       if (buf.length < off + (masked ? 4 : 0) + len) return;
       let mask = null;
-      if (masked) {
-        mask = buf.subarray(off, off + 4);
-        off += 4;
-      }
+      if (masked) { mask = buf.subarray(off, off + 4); off += 4; }
       const payload = Buffer.from(buf.subarray(off, off + len));
       if (mask) for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i & 3];
       buf = buf.subarray(off + len);
 
-      if (opcode === 0x8) { emitClose(); socket.end(); return; }           // close
-      if (opcode === 0x9) { socket.write(Buffer.concat([Buffer.from([0x8a, payload.length]), payload])); continue; } // ping → pong
-      if (opcode === 0xa) continue;                                          // pong
+      if (opcode === 0x8) { emitClose(); socket.end(); return; }
+      if (opcode === 0x9) { socket.write(Buffer.concat([Buffer.from([0x8a, payload.length]), payload])); continue; }
+      if (opcode === 0xa) continue;
       if (opcode === 0x1 || opcode === 0x2) onMessage.forEach((f) => f(payload.toString('utf8')));
     }
   });

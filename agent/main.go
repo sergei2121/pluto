@@ -1,14 +1,11 @@
-// PLUTO Agent для Windows: телеметрия машины + скан локальных сетей.
-// Сборка: go build -o pluto-agent.exe .
-// Запуск: pluto-agent.exe -server wss://pluto.example.com:8443/ws -token <ТОКЕН>
-// Служба: pluto-agent.exe -install -server ... -token ...
+// PLUTO Agent — телеметрия Windows-машины для серверного ядра.
+// Один бинарник, без внешних зависимостей. Ставится службой через -install.
 package main
 
 import (
 	"bufio"
 	"crypto/rand"
 	"crypto/sha1"
-	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -16,28 +13,27 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
-	"os/signal"
-	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
 )
 
-const version = "1.4.0"
+const wsGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
-// ─── Минимальный WebSocket-клиент (RFC 6455, только stdlib) ─────────────────
+// ─── Минимальный WebSocket-клиент (RFC 6455) ────────────────────────────────
 
 type wsConn struct {
-	c   net.Conn
-	br  *bufio.Reader
-	buf []byte
+	c net.Conn
+	r *bufio.Reader
 }
 
-func wsDial(server string) (*wsConn, error) {
-	u, err := url.Parse(server)
+func wsDial(raw string) (*wsConn, error) {
+	u, err := url.Parse(raw)
 	if err != nil {
 		return nil, err
 	}
@@ -49,93 +45,106 @@ func wsDial(server string) (*wsConn, error) {
 			host += ":80"
 		}
 	}
-	var c net.Conn
 	if u.Scheme == "wss" {
-		c, err = tls.Dial("tcp", host, &tls.Config{ServerName: u.Hostname()})
-	} else {
-		c, err = net.DialTimeout("tcp", host, 10*time.Second)
+		return nil, fmt.Errorf("wss требует TLS-прокси; используйте ws:// или поставьте Caddy")
 	}
+	c, err := net.DialTimeout("tcp", host, 8*time.Second)
 	if err != nil {
 		return nil, err
 	}
-	keyRaw := make([]byte, 16)
-	rand.Read(keyRaw)
-	key := base64.StdEncoding.EncodeToString(keyRaw)
-	path := u.RequestURI()
-	if path == "" {
-		path = "/ws"
+	keyBytes := make([]byte, 16)
+	rand.Read(keyBytes)
+	key := base64.StdEncoding.EncodeToString(keyBytes)
+	req := "GET " + u.RequestURI() + " HTTP/1.1\r\n" +
+		"Host: " + u.Host + "\r\n" +
+		"Upgrade: websocket\r\n" +
+		"Connection: Upgrade\r\n" +
+		"Sec-WebSocket-Key: " + key + "\r\n" +
+		"Sec-WebSocket-Version: 13\r\n\r\n"
+	if _, err := c.Write([]byte(req)); err != nil {
+		c.Close()
+		return nil, err
 	}
-	fmt.Fprintf(c, "GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n", path, u.Host, key)
-	br := bufio.NewReader(c)
-	status, err := br.ReadString('\n')
+	r := bufio.NewReader(c)
+	resp, err := http.ReadResponse(r, nil)
 	if err != nil {
 		c.Close()
 		return nil, err
 	}
-	if !strings.Contains(status, "101") {
+	if resp.StatusCode != 101 {
 		c.Close()
-		return nil, fmt.Errorf("handshake: %s", strings.TrimSpace(status))
+		return nil, fmt.Errorf("рукопожатие отклонено: %d", resp.StatusCode)
 	}
-	for {
-		line, err := br.ReadString('\n')
-		if err != nil || strings.TrimSpace(line) == "" {
-			break
-		}
+	h := sha1.Sum([]byte(key + wsGUID))
+	want := base64.StdEncoding.EncodeToString(h[:])
+	if resp.Header.Get("Sec-WebSocket-Accept") != want {
+		c.Close()
+		return nil, fmt.Errorf("неверный Sec-WebSocket-Accept")
 	}
-	return &wsConn{c: c, br: br}, nil
+	return &wsConn{c: c, r: r}, nil
 }
 
-func (w *wsConn) WriteText(s string) error {
+func (w *wsConn) SendText(s string) error {
 	payload := []byte(s)
 	mask := make([]byte, 4)
 	rand.Read(mask)
-	header := []byte{0x81, 0}
-	if len(payload) < 126 {
-		header[1] = byte(len(payload)) | 0x80
-	} else if len(payload) < 65536 {
-		header[1] = 126 | 0x80
-		header = append(header, 0, 0)
-		binary.BigEndian.PutUint16(header[2:], uint16(len(payload)))
-	} else {
-		header[1] = 127 | 0x80
-		header = append(header, make([]byte, 8)...)
-		binary.BigEndian.PutUint64(header[2:], uint64(len(payload)))
+	var hdr []byte
+	hdr = append(hdr, 0x81) // FIN + text
+	n := len(payload)
+	switch {
+	case n < 126:
+		hdr = append(hdr, byte(n)|0x80)
+	case n < 65536:
+		hdr = append(hdr, 126|0x80, 0, 0)
+		binary.BigEndian.PutUint16(hdr[2:], uint16(n))
+	default:
+		hdr = append(hdr, 127|0x80, 0, 0, 0, 0, 0, 0, 0, 0)
+		binary.BigEndian.PutUint64(hdr[2:], uint64(n))
 	}
-	frame := append(header, mask...)
-	masked := make([]byte, len(payload))
-	for i, b := range payload {
-		masked[i] = b ^ mask[i%4]
+	hdr = append(hdr, mask...)
+	masked := make([]byte, n)
+	for i := range payload {
+		masked[i] = payload[i] ^ mask[i%4]
 	}
-	frame = append(frame, masked...)
-	_, err := w.c.Write(frame)
-	return err
+	if _, err := w.c.Write(append(hdr, masked...)); err != nil {
+		return err
+	}
+	return nil
 }
 
-func (w *wsConn) ReadText() (string, error) {
+func (w *wsConn) ReadMessage() (string, error) {
 	hdr := make([]byte, 2)
-	if _, err := io.ReadFull(w.br, hdr); err != nil {
+	if _, err := io.ReadFull(w.r, hdr); err != nil {
 		return "", err
 	}
-	length := int64(hdr[1] & 0x7f)
-	switch {
-	case length == 126:
-		ext := make([]byte, 2)
-		if _, err := io.ReadFull(w.br, ext); err != nil {
-			return "", err
-		}
-		length = int64(binary.BigEndian.Uint16(ext))
-	case length == 127:
-		ext := make([]byte, 8)
-		if _, err := io.ReadFull(w.br, ext); err != nil {
-			return "", err
-		}
-		length = int64(binary.BigEndian.Uint64(ext))
+	op := hdr[0] & 0x0f
+	masked := hdr[1]&0x80 != 0
+	n := int64(hdr[1] & 0x7f)
+	switch n {
+	case 126:
+		b := make([]byte, 2)
+		io.ReadFull(w.r, b)
+		n = int64(binary.BigEndian.Uint16(b))
+	case 127:
+		b := make([]byte, 8)
+		io.ReadFull(w.r, b)
+		n = int64(binary.BigEndian.Uint64(b))
 	}
-	payload := make([]byte, length)
-	if _, err := io.ReadFull(w.br, payload); err != nil {
+	var mask []byte
+	if masked {
+		mask = make([]byte, 4)
+		io.ReadFull(w.r, mask)
+	}
+	payload := make([]byte, n)
+	if _, err := io.ReadFull(w.r, payload); err != nil {
 		return "", err
 	}
-	if hdr[0]&0x0f == 0x8 {
+	if masked {
+		for i := range payload {
+			payload[i] ^= mask[i%4]
+		}
+	}
+	if op == 0x8 {
 		return "", io.EOF
 	}
 	return string(payload), nil
@@ -143,256 +152,213 @@ func (w *wsConn) ReadText() (string, error) {
 
 func (w *wsConn) Close() { w.c.Close() }
 
-// ─── Сборщики телеметрии (PowerShell / WMI / arp) ───────────────────────────
+// ─── Сборщики телеметрии ────────────────────────────────────────────────────
+
+type Disk struct {
+	Label string  `json:"label"`
+	Total float64 `json:"total"`
+	Used  float64 `json:"used"`
+	Temp  float64 `json:"temp"`
+}
+
+type Metrics struct {
+	CPULoad  float64 `json:"cpuLoad"`
+	CPUCores int     `json:"cpuCores"`
+	CPUTemp  float64 `json:"cpuTemp"`
+	RamUsed  float64 `json:"ramUsed"`
+	RamTotal float64 `json:"ramTotal"`
+	RamTemp  float64 `json:"ramTemp"`
+	Disks    []Disk  `json:"disks"`
+	RxRate   float64 `json:"rxRate"`
+	TxRate   float64 `json:"txRate"`
+	RxBytes  float64 `json:"rxBytes"`
+	TxBytes  float64 `json:"txBytes"`
+}
 
 func ps(script string) string {
-	out, err := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script).Output()
+	out, err := exec.Command("powershell", "-NoProfile", "-Command", script).Output()
 	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
 }
 
-type Disk struct {
-	Letter string  `json:"letter"`
-	Total  float64 `json:"total"`
-	Used   float64 `json:"used"`
-	Temp   float64 `json:"temp"`
-}
-
-func collectCPU() float64 {
-	v := ps("(Get-CimInstance Win32_Processor | Measure-Object LoadPercentage -Average).Average")
-	f, _ := strconv.ParseFloat(strings.Replace(v, ",", ".", 1), 64)
+func toFloat(s string) float64 {
+	s = strings.ReplaceAll(s, ",", ".")
+	f, _ := strconv.ParseFloat(strings.TrimSpace(s), 64)
 	return f
 }
 
-func collectRAM() (totalKB, freeKB float64) {
-	out := ps("$o = Get-CimInstance Win32_OperatingSystem; \"$($o.TotalVisibleMemorySize) $($o.FreePhysicalMemory)\"")
-	parts := strings.Fields(out)
-	if len(parts) == 2 {
-		totalKB, _ = strconv.ParseFloat(parts[0], 64)
-		freeKB, _ = strconv.ParseFloat(parts[1], 64)
-	}
-	return
-}
+func collect(prev *Metrics) Metrics {
+	m := Metrics{CPUCores: runtime.NumCPU()}
 
-func collectDisks() []Disk {
-	var disks []Disk
-	out := ps("Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object { \"$($_.DeviceID) $($_.Size) $($_.FreeSpace)\" }")
-	for _, line := range strings.Split(out, "\n") {
-		parts := strings.Fields(strings.TrimSpace(line))
-		if len(parts) != 3 {
-			continue
+	m.CPULoad = toFloat(ps(`(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average`))
+
+	os := ps(`$o = Get-CimInstance Win32_OperatingSystem; "$($o.TotalVisibleMemorySize) $($o.FreePhysicalMemory)"`)
+	if parts := strings.Fields(os); len(parts) == 2 {
+		total := toFloat(parts[0]) * 1024
+		free := toFloat(parts[1]) * 1024
+		m.RamTotal = total
+		m.RamUsed = total - free
+	}
+
+	m.CPUTemp = toFloat(ps(`$t = Get-CimInstance -Namespace root/WMI -Class MSAcpi_ThermalZoneTemperature -ErrorAction SilentlyContinue | Select -First 1; if($t){($t.CurrentTemperature-2732)/10}`))
+
+	if out := ps(`Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | % { "$($_.DeviceID) $($_.Size) $($_.FreeSpace)" }`); out != "" {
+		for _, line := range strings.Split(out, "\n") {
+			f := strings.Fields(strings.TrimSpace(line))
+			if len(f) == 3 {
+				total := toFloat(f[1])
+				m.Disks = append(m.Disks, Disk{Label: f[0], Total: total, Used: total - toFloat(f[2])})
+			}
 		}
-		size, _ := strconv.ParseFloat(parts[1], 64)
-		free, _ := strconv.ParseFloat(parts[2], 64)
-		disks = append(disks, Disk{Letter: parts[0], Total: size, Used: size - free})
 	}
-	return disks
+
+	net := ps(`$n = Get-CimInstance Win32_PerfFormattedData_Tcpip_NetworkInterface | % { "$($_.BytesReceivedPersec) $($_.BytesSentPersec) $($_.BytesReceivedTotal) $($_.BytesSentTotal)" }`)
+	if net != "" {
+		var rx, tx, rxt, txt float64
+		for _, line := range strings.Split(net, "\n") {
+			f := strings.Fields(strings.TrimSpace(line))
+			if len(f) == 4 {
+				rx += toFloat(f[0]); tx += toFloat(f[1]); rxt += toFloat(f[2]); txt += toFloat(f[3])
+			}
+		}
+		m.RxRate = rx / 1024
+		m.TxRate = tx / 1024
+		m.RxBytes = rxt
+		m.TxBytes = txt
+	}
+	return m
 }
 
-// Температура через WMI (требует прав администратора; 0 = недоступно)
-func collectTemp() float64 {
-	out := ps("(Get-CimInstance -Namespace root\\wmi -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction SilentlyContinue | Select-Object -First 1).CurrentTemperature")
-	v, _ := strconv.ParseFloat(strings.Replace(out, ",", ".", 1), 64)
-	if v > 0 {
-		return v/10 - 273.15
-	}
-	return 0
-}
-
-var (
-	prevRx, prevTx   uint64
-	prevNet          time.Time
-	netRe            = regexp.MustCompile(`(\d+)`)
-)
-
-func collectNet() (rxRate, txRate float64) {
-	out := ps("$s = Get-NetAdapterStatistics | Measure-Object -Property ReceivedBytes,SentBytes -Sum; \"$($s[0].Sum) $($s[1].Sum)\"")
-	nums := netRe.FindAllString(out, -1)
-	if len(nums) < 2 {
-		return 0, 0
-	}
-	rx, _ := strconv.ParseUint(nums[0], 10, 64)
-	tx, _ := strconv.ParseUint(nums[1], 10, 64)
-	now := time.Now()
-	if !prevNet.IsZero() && rx >= prevRx && tx >= prevTx {
-		dt := now.Sub(prevNet).Seconds()
-		rxRate = float64(rx-prevRx) / 1024 / dt
-		txRate = float64(tx-prevTx) / 1024 / dt
-	}
-	prevRx, prevTx, prevNet = rx, tx, now
-	return
-}
+// ─── ARP-скан локальных сетей ───────────────────────────────────────────────
 
 type Host struct {
-	IP       string `json:"ip"`
-	MAC      string `json:"mac"`
-	Hostname string `json:"hostname"`
-	Online   bool   `json:"online"`
+	IP     string `json:"ip"`
+	Mac    string `json:"mac"`
+	Online bool   `json:"online"`
 }
-
 type Network struct {
-	Iface  string `json:"iface"`
-	Subnet string `json:"subnet"`
-	Hosts  []Host `json:"hosts"`
+	CIDR  string `json:"cidr"`
+	Iface string `json:"iface"`
+	Hosts []Host `json:"hosts"`
 }
 
-// Доступные локальные сети: ARP-таблица машины
 func scanLAN() []Network {
-	bySubnet := map[string][]Host{}
-	out, err := exec.Command("arp", "-a").Output()
-	if err == nil {
-		re := regexp.MustCompile(`^\s+(\d+\.\d+\.\d+\.\d+)\s+([0-9a-fA-F-]{11,17})\s+(\w+)`)
-		for _, line := range strings.Split(string(out), "\n") {
-			m := re.FindStringSubmatch(line)
-			if m == nil {
-				continue
-			}
-			ip := m[1]
-			sub := ip[:strings.LastIndex(ip, ".")] + ".0/24"
-			bySubnet[sub] = append(bySubnet[sub], Host{IP: ip, MAC: strings.ToUpper(m[2]), Online: m[3] == "dynamic"})
+	var nets []Network
+	ips := ps(`Get-NetIPAddress -AddressFamily IPv4 | ? { $_.IPAddress -notlike "127.*" -and $_.PrefixOrigin -ne "WellKnown" } | % { "$($_.IPAddress)/$($_.PrefixLength) $($_.InterfaceAlias)" }`)
+	if ips == "" {
+		return nets
+	}
+	exec.Command("arp", "-a").Run()
+	time.Sleep(300 * time.Millisecond)
+	out, _ := exec.Command("arp", "-a").Output()
+	var hosts []Host
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Fields(strings.TrimSpace(line))
+		if len(f) >= 2 && strings.Contains(f[0], ".") && strings.Contains(f[1], "-") {
+			hosts = append(hosts, Host{IP: f[0], Mac: f[1], Online: true})
 		}
 	}
-	var nets []Network
-	ifaces, _ := net.Interfaces()
-	for _, ifc := range ifaces {
-		addrs, _ := ifc.Addrs()
-		for _, a := range addrs {
-			ipn, ok := a.(*net.IPNet)
-			if !ok || ipn.IP.To4() == nil {
-				continue
-			}
-			ones, _ := ipn.Mask.Size()
-			sub := fmt.Sprintf("%s/%d", ipn.IP.Mask(ipn.Mask).String(), ones)
-			nets = append(nets, Network{Iface: ifc.Name, Subnet: sub, Hosts: bySubnet[sub]})
+	for _, line := range strings.Split(ips, "\n") {
+		f := strings.Fields(strings.TrimSpace(line))
+		if len(f) == 2 {
+			nets = append(nets, Network{CIDR: f[0], Iface: f[1], Hosts: hosts})
 		}
 	}
 	return nets
 }
 
-// ─── Цикл агента ────────────────────────────────────────────────────────────
+// ─── Установка службой Windows ──────────────────────────────────────────────
 
-func sendJSON(w *wsConn, v any) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
+func installService(server, token string) {
+	exe, _ := os.Executable()
+	args := fmt.Sprintf(`create pluto-agent binPath= "\"%s\" -server %s -token %s" start= auto DisplayName= "PLUTO Agent"`, exe, server, token)
+	cmd := exec.Command("sc.exe", strings.Fields(args)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		fmt.Println("ошибка установки:", string(out))
+		os.Exit(1)
 	}
-	return w.WriteText(string(b))
+	exec.Command("sc.exe", "start", "pluto-agent").Run()
+	fmt.Println("служба pluto-agent установлена и запущена")
 }
+
+func uninstallService() {
+	exec.Command("sc.exe", "stop", "pluto-agent").Run()
+	exec.Command("sc.exe", "delete", "pluto-agent").Run()
+	fmt.Println("служба pluto-agent удалена")
+}
+
+// ─── Главный цикл ───────────────────────────────────────────────────────────
 
 func run(server, token string, metricsSec, lanSec int) {
 	hostname, _ := os.Hostname()
-	backoff := time.Second
+	var prev *Metrics
+	var lastLAN time.Time
+
 	for {
 		conn, err := wsDial(server + "?token=" + url.QueryEscape(token))
 		if err != nil {
-			fmt.Printf("[pluto-agent] нет связи с сервером (%v), повтор через %s\n", err, backoff)
-			time.Sleep(backoff)
-			if backoff < time.Minute {
-				backoff *= 2
-			}
+			fmt.Println("[pluto-agent] подключение:", err, "— повтор через 5 с")
+			time.Sleep(5 * time.Second)
 			continue
 		}
-		backoff = time.Second
-		fmt.Printf("[pluto-agent] подключён к %s\n", server)
+		hello, _ := json.Marshal(map[string]any{
+			"type": "hello", "hostname": hostname, "os": "Windows " + runtime.GOARCH, "version": "1.6.0",
+		})
+		conn.SendText(string(hello))
+		fmt.Println("[pluto-agent] подключено к", server)
 
-		osName := ps("(Get-CimInstance Win32_OperatingSystem).Caption")
-		sendJSON(conn, map[string]any{"type": "hello", "hostname": hostname, "os": osName, "version": version})
-
-		metricsTick := time.NewTicker(time.Duration(metricsSec) * time.Second)
+		metTick := time.NewTicker(time.Duration(metricsSec) * time.Second)
 		lanTick := time.NewTicker(time.Duration(lanSec) * time.Second)
-		readErr := make(chan error, 1)
-		go func() {
+		func() {
+			defer metTick.Stop()
+			defer lanTick.Stop()
 			for {
-				if _, err := conn.ReadText(); err != nil {
-					readErr <- err
-					return
+				select {
+				case <-metTick.C:
+					m := collect(prev)
+					prev = &m
+					msg, _ := json.Marshal(map[string]any{"type": "metrics", "data": m})
+					if conn.SendText(string(msg)) != nil {
+						return
+					}
+				case <-lanTick.C:
+					if time.Since(lastLAN) > time.Duration(lanSec-1)*time.Second {
+						lastLAN = time.Now()
+						msg, _ := json.Marshal(map[string]any{"type": "lan", "networks": scanLAN()})
+						if conn.SendText(string(msg)) != nil {
+							return
+						}
+					}
 				}
 			}
 		}()
-
-	collect := func() {
-		totalKB, freeKB := collectRAM()
-		rx, tx := collectNet()
-		data := map[string]any{
-			"cpuLoad":  collectCPU(),
-			"cpuTemp":  collectTemp(),
-			"ramTotal": totalKB * 1024,
-			"ramUsed":  (totalKB - freeKB) * 1024,
-			"disks":    collectDisks(),
-			"rxRate":   rx,
-			"txRate":   tx,
-		}
-		if err := sendJSON(conn, map[string]any{"type": "metrics", "data": data}); err != nil {
-			readErr <- err
-		}
-	}
-	collect()
-	sendJSON(conn, map[string]any{"type": "lan", "networks": scanLAN()})
-
-	loop:
-		for {
-			select {
-			case <-metricsTick.C:
-				collect()
-			case <-lanTick.C:
-				if err := sendJSON(conn, map[string]any{"type": "lan", "networks": scanLAN()}); err != nil {
-					break loop
-				}
-			case <-readErr:
-				break loop
-			}
-		}
-		metricsTick.Stop()
-		lanTick.Stop()
 		conn.Close()
-		fmt.Println("[pluto-agent] соединение потеряно, переподключение…")
-		time.Sleep(2 * time.Second)
+		fmt.Println("[pluto-agent] соединение потеряно — переподключение через 5 с")
+		time.Sleep(5 * time.Second)
 	}
 }
 
 func main() {
-	server := flag.String("server", "ws://localhost:8443/ws", "адрес шлюза агентов")
-	token := flag.String("token", "", "токен подключения из консоли PLUTO")
-	metricsSec := flag.Int("metrics", 3, "интервал телеметрии, сек")
-	lanSec := flag.Int("lan", 300, "интервал скана локальных сетей, сек")
-	install := flag.Bool("install", false, "установить как службу Windows (pluto-agent)")
-	uninstall := flag.Bool("uninstall", false, "удалить службу Windows")
+	server := flag.String("server", "ws://127.0.0.1:8443/ws", "адрес шлюза ядра")
+	token := flag.String("token", "", "токен из консоли (Агенты → Создать токен)")
+	metrics := flag.Int("metrics", 3, "интервал телеметрии, сек")
+	lan := flag.Int("lan", 300, "интервал скана локальных сетей, сек")
+	install := flag.Bool("install", false, "установить службой Windows")
+	uninstall := flag.Bool("uninstall", false, "удалить службу")
 	flag.Parse()
 
-	if *uninstall {
-		exec.Command("sc.exe", "stop", "pluto-agent").Run()
-		out, err := exec.Command("sc.exe", "delete", "pluto-agent").CombinedOutput()
-		fmt.Printf("%s (%v)\n", out, err)
-		return
-	}
-	if *install {
-		exe, _ := os.Executable()
-		bin := fmt.Sprintf("\"%s\" -server %s -token %s -metrics %d -lan %d", exe, *server, *token, *metricsSec, *lanSec)
-		if out, err := exec.Command("sc.exe", "create", "pluto-agent", "binPath=", bin, "start=", "auto", "DisplayName=", "PLUTO Agent").CombinedOutput(); err != nil {
-			fmt.Printf("ошибка установки службы: %s (%v)\n", out, err)
+	switch {
+	case *install:
+		installService(*server, *token)
+	case *uninstall:
+		uninstallService()
+	default:
+		if *token == "" {
+			fmt.Println("укажите -token (создаётся в консоли: Агенты → Создать токен агента)")
 			os.Exit(1)
 		}
-		exec.Command("sc.exe", "description", "pluto-agent", "PLUTO monitoring agent").Run()
-		out, err := exec.Command("sc.exe", "start", "pluto-agent").CombinedOutput()
-		fmt.Printf("%s (%v)\n", out, err)
-		return
+		run(*server, *token, *metrics, *lan)
 	}
-	if *token == "" {
-		fmt.Println("укажите -token (создаётся в консоли PLUTO: Агенты → Токен подключения)")
-		os.Exit(1)
-	}
-
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt)
-	go func() {
-		<-stop
-		fmt.Println("\n[pluto-agent] остановлен")
-		os.Exit(0)
-	}()
-
-	// убедимся, что неиспользуемые импорты sha1/binary не вычищены линтером
-	_ = sha1.Size
-	run(*server, *token, *metricsSec, *lanSec)
 }

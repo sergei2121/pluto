@@ -1,17 +1,13 @@
 {
   "name": "pluto-core",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "private": true,
   "type": "module",
-  "description": "PLUTO — ядро мониторинга: REST API, движок опроса (ping/HTTP/API/RTSP/SIP), шлюз агентов, веб-консоль",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js"
   },
   "engines": {
     "node": ">=20"
-  },
-  "dependencies": {
-    "nodemailer": "^6.9.14"
   }
 }

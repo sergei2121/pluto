@@ -1,15 +1,15 @@
 // ─── PLUTO: UI-кит ───────────────────────────────────────────────────────────
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { I, type IconName } from './icons';
+import { useEffect, useState, type ReactNode } from 'react';
+import { AlertTriangle, Bell, Check, X, type LucideIcon } from 'lucide-react';
 import { cls, timeAgo } from '../lib/util';
 import type { DeviceStatus } from '../lib/types';
 
-// ─── Панель ──────────────────────────────────────────────────────────────────
+// ─── Панель ─────────────────────────────────────────────────────────────────
 
 export function Panel({
-  title, icon, right, children, className, bodyClass, delay = 0,
+  title, icon: Icon, right, children, className, bodyClass, delay = 0,
 }: {
-  title?: string; icon?: IconName; right?: ReactNode; children: ReactNode;
+  title?: string; icon?: LucideIcon; right?: ReactNode; children: ReactNode;
   className?: string; bodyClass?: string; delay?: number;
 }) {
   return (
@@ -18,8 +18,8 @@ export function Panel({
       style={{ animationDelay: `${delay}ms` }}
     >
       {title && (
-        <header className="flex items-center gap-2.5 border-b border-line-soft px-4 py-3">
-          {icon && <I n={icon} className="h-4 w-4 text-vio" />}
+        <header className="flex items-center gap-2.5 border-b border-linesoft px-4 py-3">
+          {Icon && <Icon className="h-4 w-4 text-vio" strokeWidth={2} />}
           <h2 className="font-display text-[11px] font-semibold uppercase tracking-[0.14em] text-mut">{title}</h2>
           <div className="ml-auto flex items-center gap-2">{right}</div>
         </header>
@@ -40,16 +40,13 @@ export const STATUS_META: Record<DeviceStatus, { label: string; dot: string; tex
 
 export function StatusDot({ status, pulse = true }: { status: DeviceStatus; pulse?: boolean }) {
   const m = STATUS_META[status];
-  // только opacity-пульсация (композитинг), без растущих scale-слоёв
-  const live = pulse && status !== 'unknown';
   return (
-    <span
-      className={cls(
-        'inline-flex h-2.5 w-2.5 shrink-0 rounded-full',
-        m.dot,
-        live && (status === 'down' ? 'dot-crit' : 'dot-live'),
+    <span className="relative inline-flex h-2.5 w-2.5 shrink-0">
+      {pulse && status !== 'unknown' && (
+        <span className={cls('absolute inline-flex h-full w-full rounded-full opacity-40', m.dot, status === 'down' ? 'dot-crit' : 'dot-live')} />
       )}
-    />
+      <span className={cls('relative inline-flex h-2.5 w-2.5 rounded-full', m.dot)} />
+    </span>
   );
 }
 
@@ -70,7 +67,7 @@ export function Toggle({ checked, onChange, disabled }: { checked: boolean; onCh
       onClick={() => !disabled && onChange(!checked)}
       className={cls(
         'relative h-[22px] w-10 shrink-0 rounded-full border transition-colors duration-200',
-        checked ? 'border-vio/60 bg-vio-deep/80' : 'border-line bg-raised',
+        checked ? 'border-vio/60 bg-viodeep/80' : 'border-line bg-raised',
         disabled && 'cursor-not-allowed opacity-50',
       )}
       aria-pressed={checked}
@@ -101,12 +98,12 @@ export function Modal({
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-[#070a16]/85" onClick={onClose} />
+      <div className="absolute inset-0 bg-[#070a16]/80" onClick={onClose} />
       <div className={cls('pop relative w-full rounded-xl border border-line bg-panel shadow-[0_30px_80px_-20px_rgba(0,0,0,.9)]', width)}>
-        <header className="flex items-center justify-between border-b border-line-soft px-5 py-3.5">
+        <header className="flex items-center justify-between border-b border-linesoft px-5 py-3.5">
           <h3 className="font-display text-sm font-semibold tracking-wide text-ink">{title}</h3>
           <button onClick={onClose} className="rounded-md p-1.5 text-dim transition-colors hover:bg-raised hover:text-ink">
-            <I n="x" className="h-4 w-4" />
+            <X className="h-4 w-4" />
           </button>
         </header>
         <div className="max-h-[78vh] overflow-y-auto p-5 scroll-thin">{children}</div>
@@ -133,10 +130,10 @@ export function Drawer({ open, onClose, children, title }: { open: boolean; onCl
           open ? 'translate-x-0' : 'translate-x-full',
         )}
       >
-        <header className="flex items-center justify-between border-b border-line-soft px-5 py-3.5">
+        <header className="flex items-center justify-between border-b border-linesoft px-5 py-3.5">
           <div className="min-w-0">{title}</div>
           <button onClick={onClose} className="ml-3 rounded-md p-1.5 text-dim transition-colors hover:bg-raised hover:text-ink">
-            <I n="x" className="h-4 w-4" />
+            <X className="h-4 w-4" />
           </button>
         </header>
         <div className="flex-1 overflow-y-auto p-5 scroll-thin">{children}</div>
@@ -147,13 +144,13 @@ export function Drawer({ open, onClose, children, title }: { open: boolean; onCl
 
 // ─── Пустые состояния ────────────────────────────────────────────────────────
 
-export function EmptyState({ icon = 'box', title, text, action }: { icon?: IconName; title: string; text?: string; action?: ReactNode }) {
+export function EmptyState({ icon: Icon = Bell, title, text, action }: { icon?: LucideIcon; title: string; text?: string; action?: ReactNode }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
       <div className="relative">
         <div className="absolute inset-0 rounded-full bg-vio/10 blur-xl" />
         <div className="relative flex h-14 w-14 items-center justify-center rounded-full border border-line bg-raised text-dim">
-          <I n={icon} className="h-6 w-6" />
+          <Icon className="h-6 w-6" />
         </div>
       </div>
       <div>
@@ -179,7 +176,6 @@ export function Field({ label, children, hint }: { label: string; children: Reac
 
 // ─── Графики (SVG, без зависимостей) ─────────────────────────────────────────
 
-/** Полоски истории проверок: -1 = сбой */
 export function Sparkbar({ data, height = 26, width = 120 }: { data: number[]; height?: number; width?: number }) {
   const view = data.slice(-30);
   if (view.length === 0) {
@@ -209,7 +205,6 @@ export function Sparkbar({ data, height = 26, width = 120 }: { data: number[]; h
   );
 }
 
-/** Площадь-график для метрик */
 export function AreaChart({
   values, height = 90, color = '#8f7df0', unit = '', max: maxProp,
 }: {
@@ -252,7 +247,6 @@ export function AreaChart({
   );
 }
 
-/** Кольцевой индикатор */
 export function Ring({ value, size = 64, color = '#8f7df0', label }: { value: number; size?: number; color?: string; label?: string }) {
   const r = (size - 8) / 2;
   const c = 2 * Math.PI * r;
@@ -274,7 +268,6 @@ export function Ring({ value, size = 64, color = '#8f7df0', label }: { value: nu
   );
 }
 
-/** Прогресс-бар */
 export function Bar({ value, color = '#8f7df0', className }: { value: number; color?: string; className?: string }) {
   const v = Math.min(100, Math.max(0, value));
   const c = v > 85 ? '#e07a80' : v > 65 ? '#dfa65e' : color;
@@ -296,7 +289,7 @@ export function Seg<T extends string>({ options, value, onChange }: { options: {
           onClick={() => onChange(o.v)}
           className={cls(
             'rounded-md px-2.5 py-1 text-[11px] font-semibold transition-all duration-150',
-            value === o.v ? 'bg-vio-deep/70 text-ink shadow-sm' : 'text-dim hover:text-mut',
+            value === o.v ? 'bg-viodeep/70 text-ink shadow-sm' : 'text-dim hover:text-mut',
           )}
         >
           {o.label}
@@ -308,27 +301,17 @@ export function Seg<T extends string>({ options, value, onChange }: { options: {
 
 export function CopyBlock({ code, label }: { code: string; label?: string }) {
   const [copied, setCopied] = useState(false);
-  const ref = useRef<HTMLPreElement>(null);
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(code);
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
-    } catch {
-      const el = ref.current;
-      if (el) {
-        const r = document.createRange();
-        r.selectNodeContents(el);
-        const sel = window.getSelection();
-        sel?.removeAllRanges();
-        sel?.addRange(r);
-      }
-    }
+    } catch { /* нет доступа к буферу */ }
   };
   return (
     <div className="group relative overflow-hidden rounded-lg border border-line bg-[#0b0f1f]">
-      {label && <div className="border-b border-line-soft px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-dim">{label}</div>}
-      <pre ref={ref} className="overflow-x-auto p-3.5 font-mono text-[12px] leading-relaxed text-[#b9c2e8] scroll-thin">{code}</pre>
+      {label && <div className="border-b border-linesoft px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-dim">{label}</div>}
+      <pre className="overflow-x-auto p-3.5 font-mono text-[12px] leading-relaxed text-[#b9c2e8] scroll-thin">{code}</pre>
       <button
         onClick={copy}
         className={cls(
@@ -336,10 +319,19 @@ export function CopyBlock({ code, label }: { code: string; label?: string }) {
           copied ? 'border-ok/50 bg-ok/10 text-ok' : 'border-line bg-raised text-dim opacity-0 hover:text-ink group-hover:opacity-100',
         )}
       >
-        <I n={copied ? 'check' : 'copy'} className="h-3 w-3" />
+        {copied ? <Check className="h-3 w-3" /> : <CopyIcon className="h-3 w-3" />}
         {copied ? 'Готово' : 'Копия'}
       </button>
     </div>
+  );
+}
+
+function CopyIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+      <rect x="9" y="9" width="13" height="13" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
   );
 }
 
@@ -351,3 +343,5 @@ export function TimeAgo({ ts, className }: { ts: number; className?: string }) {
   }, []);
   return <span className={className}>{timeAgo(ts)}</span>;
 }
+
+export { AlertTriangle };

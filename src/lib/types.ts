@@ -1,65 +1,44 @@
-// ─── PLUTO: модель данных ────────────────────────────────────────────────────
+// ─── PLUTO: модель данных ───────────────────────────────────────────────────
 
-export type Role = 'admin' | 'viewer';
 export type DeviceType = 'ping' | 'http' | 'api' | 'rtsp' | 'sip';
-export type DeviceStatus = 'unknown' | 'up' | 'down' | 'degraded';
-export type CheckScope = DeviceType | 'agent';
+export type DeviceStatus = 'up' | 'down' | 'degraded' | 'unknown';
 export type Route = 'dashboard' | 'devices' | 'agents' | 'settings' | 'deploy';
-
-export interface User {
-  id: string;
-  login: string;
-  pass: string;
-  name: string;
-  role: Role;
-  scope: CheckScope[]; // для viewer — разрешённые типы устройств
-  builtIn?: boolean;
-  createdAt: number;
-}
-
-export interface Session {
-  userId: string;
-  at: number;
-}
-
-/** Скрытый профиль поведения цели (используется встроенным ядром) */
-export interface DeviceProfile {
-  base: number;   // базовая задержка, мс
-  failP: number;  // вероятность сбоя проверки
-  spikeP: number; // вероятность деградации
-}
+export type Severity = 'ok' | 'warn' | 'crit' | 'info';
+export type Role = 'admin' | 'viewer';
 
 export interface Device {
   id: string;
   name: string;
   type: DeviceType;
   address: string;
-  port?: number;
+  port?: number | null;
   path?: string;
-  method?: 'GET' | 'POST';
-  body?: string;
-  interval: number; // секунды, кастомный интервал опроса
+  method?: string | null;
+  body?: string | null;
+  interval: number; // сек
   tags: string[];
   favorite: boolean;
   status: DeviceStatus;
-  latency: number | null;
-  approx: boolean; // результат получен эмуляцией протокола
-  checking: boolean;
+  latency: number | null; // мс, null = нет ответа
+  baseline: number | null; // скользящая базовая задержка
+  history: number[]; // -1 = сбой
+  fails: number;
   lastCheck: number;
   lastChange: number;
-  fails: number;
-  history: number[]; // задержки; -1 = сбой
-  spikeUntil: number;
-  profile: DeviceProfile;
+  checking: boolean;
+  approx: boolean; // true = значение синтезировано (не реальный зонд)
   createdAt: number;
+  /** эмуляционный профиль — используется только встроенным (браузерным) движком */
+  profile?: { base: number; failP: number; spikeP: number };
+  spikeUntil?: number;
 }
 
-export interface DiskInfo {
-  letter: string;
+export interface Disk {
+  id: string;
   label: string;
+  total: number; // байт
   used: number;
-  total: number;
-  temp: number;
+  temp: number; // °C
 }
 
 export interface LanHost {
@@ -69,18 +48,10 @@ export interface LanHost {
   online: boolean;
 }
 
-export interface LanNet {
+export interface LanNetwork {
   cidr: string;
   iface: string;
   hosts: LanHost[];
-}
-
-export interface MetricPoint {
-  t: number;
-  cpu: number;
-  ram: number;
-  rx: number; // КБ/с
-  tx: number;
 }
 
 export interface Agent {
@@ -93,25 +64,22 @@ export interface Agent {
   version: string;
   online: boolean;
   emulated: boolean;
-  lastSeen: number;
-  connectedAt: number;
-  reconnectAt: number;
   cpuLoad: number;
   cpuCores: number;
   cpuTemp: number;
-  ramUsed: number;  // байты
+  ramUsed: number;
   ramTotal: number;
   ramTemp: number;
-  disks: DiskInfo[];
-  netIface: string;
+  disks: Disk[];
   rxBytes: number;
   txBytes: number;
   rxRate: number; // КБ/с
   txRate: number;
-  networks: LanNet[];
-  nextScan: number;
+  networks: LanNetwork[];
+  lastSeen: number;
   lastMetrics: number;
-  history: MetricPoint[];
+  lastScan: number;
+  history: { t: number; cpu: number; ram: number }[];
   favorite: boolean;
   createdAt: number;
 }
@@ -122,49 +90,48 @@ export interface Tag {
   color: string;
 }
 
-export type Severity = 'info' | 'ok' | 'warn' | 'crit';
-
 export interface EventItem {
   id: string;
   ts: number;
   sev: Severity;
-  source: 'device' | 'agent' | 'system' | 'auth';
+  source: 'device' | 'agent' | 'system';
   text: string;
 }
 
-export interface NotificationSettings {
-  telegram: { enabled: boolean; botToken: string; chatId: string };
-  email: { enabled: boolean; smtp: string; port: number; from: string; to: string };
-  push: { enabled: boolean };
-  on: {
-    down: boolean;
-    degraded: boolean;
-    recover: boolean;
-    agentOff: boolean;
-    agentOn: boolean;
-  };
+export interface User {
+  id: string;
+  login: string;
+  name: string;
+  role: Role;
+  scope: DeviceType[]; // для viewer — разрешённые типы; 'agent' как псевдо-тип
+  builtIn: boolean;
+  createdAt: number;
 }
 
 export interface Settings {
   intervals: Record<DeviceType, number>;
-  heartbeat: number;  // сек
-  metrics: number;    // сек
-  lanScan: number;    // сек
+  heartbeat: number;
+  metrics: number;
+  lanScan: number;
   failThreshold: number;
-  degradeFactor: number;
+  degradeFactor: number; // во сколько раз выше базовой = деградация
   degradeMinMs: number;
   timeoutMs: number;
-  simulate: boolean; // сетевая эмуляция встроенного ядра
-  notifications: NotificationSettings;
+  simulate: boolean;
+  notifications: {
+    telegram: { enabled: boolean; botToken: string; chatId: string };
+    email: { enabled: boolean; smtp: string; port: number; from: string; to: string };
+    push: { enabled: boolean };
+    on: { down: boolean; degraded: boolean; recover: boolean; agentOff: boolean; agentOn: boolean };
+  };
 }
 
-export const DEVICE_TYPES: DeviceType[] = ['ping', 'http', 'api', 'rtsp', 'sip'];
-export const SCOPE_ALL: CheckScope[] = ['ping', 'http', 'api', 'rtsp', 'sip', 'agent'];
-
-export const DEVICE_TYPE_META: Record<DeviceType, { label: string; short: string }> = {
-  ping: { label: 'Ping (ICMP)', short: 'PING' },
-  http: { label: 'HTTP-запрос', short: 'HTTP' },
-  api: { label: 'API-команда', short: 'API' },
-  rtsp: { label: 'RTSP-поток', short: 'RTSP' },
-  sip: { label: 'SIP (OPTIONS)', short: 'SIP' },
+export const DEVICE_TYPE_META: Record<DeviceType, { label: string; desc: string; defaultPort?: number }> = {
+  ping: { label: 'PING', desc: 'ICMP-эхо, задержка и потеря пакетов' },
+  http: { label: 'HTTP', desc: 'HTTP-запрос на хост:порт/путь' },
+  api: { label: 'API', desc: 'Кастомная команда GET/POST с телом' },
+  rtsp: { label: 'RTSP', desc: 'Проверка видеопотока (OPTIONS/DESCRIBE)' },
+  sip: { label: 'SIP', desc: 'SIP OPTIONS эндпоинта телефонии' },
 };
+
+export const DEVICE_TYPES: DeviceType[] = ['ping', 'http', 'api', 'rtsp', 'sip'];

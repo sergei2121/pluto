@@ -1,51 +1,97 @@
-// ─── PLUTO: хранилище (чистая база, persist в localStorage) ──────────────────
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-import type {
-  Agent, Device, DeviceType, EventItem, Route, Session, Settings, Severity, Tag, User,
-} from './types';
-import { SCOPE_ALL } from './types';
-import { genToken, hashPass, mulberry32, hashStr, rnd, rndInt, uid, macFrom, clamp } from './util';
-import { api, apiLogin, apiLogout, syncAll, setApiToken, type ServerState } from './api';
+// ─── PLUTO: хранилище (useSyncExternalStore, без внешних зависимостей) ──────
+import { useSyncExternalStore } from 'react';
+import type { Agent, Device, EventItem, Role, Route, Settings, Severity, Tag, User } from './types';
+import { DEVICE_TYPE_META } from './types';
+import { clamp, genToken, hashStr, mulberry32, rnd, rndInt, uid } from './util';
+import { api, apiLogin, getApiToken, setApiToken, syncAll, type ServerState } from './api';
 
 export const FAVORITES_LIMIT = 15;
+const LS_KEY = 'pluto.state.v1';
 
-/** Серверный режим: мутации идут в REST API ядра, локальные — гасятся */
-const srv = () => useStore.getState().apiMode === 'server';
-const sync = () => { void syncAll(); };
+// ─── Тосты (отдельный маленький стор) ───────────────────────────────────────
 
-const defaultSettings: Settings = {
-  intervals: { ping: 30, http: 60, api: 120, rtsp: 60, sip: 120 },
-  heartbeat: 10,
-  metrics: 3,
-  lanScan: 300,
-  failThreshold: 3,
-  degradeFactor: 5,
-  degradeMinMs: 80,
-  timeoutMs: 4000,
-  simulate: true,
-  notifications: {
-    telegram: { enabled: false, botToken: '', chatId: '' },
-    email: { enabled: false, smtp: '', port: 587, from: '', to: '' },
-    push: { enabled: false },
-    on: { down: true, degraded: true, recover: true, agentOff: true, agentOn: false },
+export interface Toast {
+  id: string;
+  kind: 'ok' | 'warn' | 'crit' | 'info';
+  text: string;
+}
+
+let toastState: { list: Toast[] } = { list: [] };
+const toastListeners = new Set<() => void>();
+
+export const useToasts = {
+  getState: () => toastState,
+  subscribe(l: () => void) {
+    toastListeners.add(l);
+    return () => toastListeners.delete(l);
+  },
+  push(kind: Toast['kind'], text: string) {
+    const t: Toast = { id: uid('toast'), kind, text };
+    toastState = { list: [...toastState.list, t].slice(-4) };
+    toastListeners.forEach((l) => l());
+    window.setTimeout(() => {
+      toastState = { list: toastState.list.filter((x) => x.id !== t.id) };
+      toastListeners.forEach((l) => l());
+    }, 4200);
+  },
+  drop(id: string) {
+    toastState = { list: toastState.list.filter((x) => x.id !== id) };
+    toastListeners.forEach((l) => l());
   },
 };
 
-function seedAdmin(): User {
+export function useToastList(): Toast[] {
+  return useSyncExternalStore(
+    (cb) => {
+      toastListeners.add(cb);
+      return () => toastListeners.delete(cb);
+    },
+    () => toastState.list,
+  );
+}
+
+// ─── Значения по умолчанию ──────────────────────────────────────────────────
+
+export function defaultSettings(): Settings {
   return {
-    id: 'u-root',
+    intervals: { ping: 30, http: 60, api: 120, rtsp: 60, sip: 120 },
+    heartbeat: 10,
+    metrics: 3,
+    lanScan: 300,
+    failThreshold: 3,
+    degradeFactor: 10,
+    degradeMinMs: 250,
+    timeoutMs: 3000,
+    simulate: true,
+    notifications: {
+      telegram: { enabled: false, botToken: '', chatId: '' },
+      email: { enabled: false, smtp: '', port: 587, from: '', to: '' },
+      push: { enabled: false },
+      on: { down: true, degraded: true, recover: true, agentOff: true, agentOn: false },
+    },
+  };
+}
+
+export function seedAdmin(): User {
+  return {
+    id: 'u-admin',
     login: 'admin',
-    pass: hashPass('pluto'),
     name: 'Администратор',
     role: 'admin',
-    scope: [...SCOPE_ALL],
+    scope: [],
     builtIn: true,
     createdAt: Date.now(),
   };
 }
 
-interface PlutoState {
+export interface Session {
+  userId: string;
+  at: number;
+}
+
+export type ApiMode = 'embedded' | 'server';
+
+export interface PlutoState {
   users: User[];
   session: Session | null;
   devices: Device[];
@@ -55,517 +101,498 @@ interface PlutoState {
   settings: Settings;
   route: Route;
   routeParam: string;
-  apiMode: 'embedded' | 'server';
+  apiMode: ApiMode;
   coreVersion: string | null;
 
   nav: (r: Route, param?: string) => void;
   login: (l: string, p: string) => string | null;
   logout: () => void;
-
-  enterServer: (user: User) => void;
+  enterServer: (u: User) => void;
   loginServer: (l: string, p: string) => Promise<string | null>;
   serverLogout: () => void;
-  applyServerState: (st: import('./api').ServerState) => void;
-
+  applyServerState: (st: ServerState) => void;
   pushEvent: (sev: Severity, source: EventItem['source'], text: string) => void;
 
-  saveUser: (u: Omit<User, 'id' | 'createdAt'> & { id?: string }) => string | null;
-  removeUser: (id: string) => string | null;
-
-  addDevice: (d: {
-    name: string; type: DeviceType; address: string; port?: number; path?: string;
-    method?: 'GET' | 'POST'; body?: string; interval: number; tags: string[];
-  }) => void;
+  addDevice: (d: Partial<Device> & { name: string; type: Device['type']; address: string; interval: number; tags: string[] }) => void;
   updateDevice: (id: string, patch: Partial<Device>) => void;
-  patchDevice: (id: string, patch: Partial<Device>) => void; // без событий (движок)
+  patchDevice: (id: string, patch: Partial<Device>) => void;
   removeDevice: (id: string) => void;
   toggleDeviceFav: (id: string) => void;
 
-  addEmulatedAgent: () => Agent;
+  addEmulatedAgent: () => Agent | null;
   patchAgent: (id: string, patch: Partial<Agent>) => void;
   removeAgent: (id: string) => void;
   toggleAgentFav: (id: string) => void;
-  regenAgentToken: (id: string) => string;
 
   addTag: (label: string, color: string) => string | null;
   removeTag: (id: string) => void;
 
   saveSettings: (s: Settings) => void;
   setSettingsRaw: (s: Settings) => void;
+
+  addUser: (u: { login: string; name: string; role: Role; scope: string[]; pass: string }) => string | null;
+  updateUser: (id: string, patch: Partial<User> & { pass?: string }) => string | null;
+  removeUser: (id: string) => string | null;
+
   resetBase: () => void;
 }
 
 function mkEvent(sev: Severity, source: EventItem['source'], text: string): EventItem {
-  return { id: uid('ev'), ts: Date.now(), sev, source, text };
+  return { id: uid('e'), ts: Date.now(), sev, source, text };
 }
 
-export const useStore = create<PlutoState>()(
-  persist(
-    (set, get) => ({
-      users: [seedAdmin()],
-      session: null,
-      devices: [],
-      agents: [],
-      tags: [],
-      events: [mkEvent('info', 'system', 'Ядро PLUTO инициализировано. Создана чистая база — демонстрационных данных нет.')],
-      settings: defaultSettings,
+function profileFor(type: Device['type'], seed: () => number) {
+  const baseByType: Record<Device['type'], number> = { ping: 24, http: 60, api: 90, rtsp: 45, sip: 70 };
+  return { base: Math.round(baseByType[type] * (0.6 + seed() * 0.9)), failP: 0.02, spikeP: 0.015 };
+}
+
+// ─── Инфраструктура стора ───────────────────────────────────────────────────
+
+const listeners = new Set<() => void>();
+let state: PlutoState;
+
+function set(partial: Partial<PlutoState> | ((s: PlutoState) => Partial<PlutoState>)) {
+  const p = typeof partial === 'function' ? partial(state) : partial;
+  state = { ...state, ...p };
+  persist();
+  listeners.forEach((l) => l());
+}
+
+function get(): PlutoState {
+  return state;
+}
+
+let persistTimer: number | null = null;
+function persist() {
+  if (persistTimer) return;
+  persistTimer = window.setTimeout(() => {
+    persistTimer = null;
+    try {
+      const { users, session, devices, agents, tags, events, settings } = state;
+      localStorage.setItem(LS_KEY, JSON.stringify({ users, session, devices, agents, tags, events, settings }));
+    } catch {
+      /* переполнение — игнорируем */
+    }
+  }, 300);
+}
+
+// ─── Начальное состояние + все действия ─────────────────────────────────────
+
+function initialState(): PlutoState {
+  const srv = () => get().apiMode === 'server';
+  const sync = () => void syncAll();
+  const toast = (k: Toast['kind'], t: string) => useToasts.push(k, t);
+
+  const s: PlutoState = {
+    users: [seedAdmin()],
+    session: null,
+    devices: [],
+    agents: [],
+    tags: [],
+    events: [mkEvent('info', 'system', 'PLUTO инициализирован — база чистая, устройства не добавлены')],
+    settings: defaultSettings(),
+    route: 'dashboard',
+    routeParam: '',
+    apiMode: 'embedded',
+    coreVersion: null,
+
+    nav: (r, param = '') => set({ route: r, routeParam: param }),
+
+    login: (l, p) => {
+      const st = get();
+      const u = st.users.find((x) => x.login === l.trim());
+      if (!u) return 'Пользователь не найден';
+      const stored = (u as User & { pass?: string }).pass;
+      if (u.builtIn) {
+        if (p !== 'pluto' && stored !== p) return 'Неверный пароль';
+      } else if (stored !== p) {
+        return 'Неверный пароль';
+      }
+      set({ session: { userId: u.id, at: Date.now() }, route: 'dashboard', routeParam: '' });
+      get().pushEvent('info', 'system', `Вход в систему: ${u.login}`);
+      return null;
+    },
+
+    logout: () => {
+      const st = get();
+      const u = st.users.find((x) => x.id === st.session?.userId);
+      if (st.apiMode === 'server') {
+        setApiToken(null);
+        set({ session: null, apiMode: 'embedded', users: [seedAdmin()] });
+      } else {
+        set({ session: null });
+      }
+      if (u) get().pushEvent('info', 'system', `Выход из системы: ${u.login}`);
+    },
+
+    enterServer: (user) => {
+      set({
+        apiMode: 'server',
+        users: [user],
+        session: { userId: user.id, at: Date.now() },
+        route: 'dashboard',
+        routeParam: '',
+        events: [mkEvent('info', 'system', 'Консоль подключена к серверному ядру — проверки и телеметрия реальные')],
+      });
+    },
+
+    loginServer: async (l, p) => {
+      try {
+        const user = await apiLogin(l.trim(), p);
+        get().enterServer(user);
+        sync();
+        return null;
+      } catch (e) {
+        return e instanceof Error ? e.message : 'Не удалось связаться с ядром';
+      }
+    },
+
+    serverLogout: () => {
+      setApiToken(null);
+      set({ apiMode: 'embedded', session: null, users: [seedAdmin()] });
+    },
+
+    applyServerState: (st) => {
+      const patch: Partial<PlutoState> = {
+        devices: st.devices,
+        agents: st.agents,
+        tags: st.tags,
+        events: st.events,
+        settings: st.settings,
+      };
+      if (st.users) patch.users = st.users;
+      set(patch);
+    },
+
+    pushEvent: (sev, source, text) => {
+      const st = get();
+      set({ events: [mkEvent(sev, source, text), ...st.events].slice(0, 200) });
+    },
+
+    addDevice: (d) => {
+      if (srv()) {
+        api.addDevice({
+          name: d.name.trim() || d.address,
+          type: d.type,
+          address: d.address.trim(),
+          port: d.port ?? null,
+          path: d.path || '',
+          method: d.method ?? null,
+          body: d.body ?? null,
+          interval: clamp(Math.round(d.interval), 5, 86400),
+          tags: d.tags,
+        }).then(sync).catch((e) => toast('warn', (e as Error)?.message || 'Не удалось добавить устройство'));
+        return;
+      }
+      const st = get();
+      const seed = mulberry32(hashStr(d.type + ':' + d.address));
+      const dev: Device = {
+        id: uid('d'),
+        name: d.name.trim() || d.address,
+        type: d.type,
+        address: d.address.trim(),
+        port: d.port ?? null,
+        path: d.path || '',
+        method: d.method ?? null,
+        body: d.body ?? null,
+        interval: clamp(Math.round(d.interval), 5, 86400),
+        tags: d.tags,
+        favorite: false,
+        status: 'unknown',
+        latency: null,
+        baseline: null,
+        history: [],
+        fails: 0,
+        lastCheck: 0,
+        lastChange: Date.now(),
+        checking: false,
+        approx: true,
+        createdAt: Date.now(),
+        profile: profileFor(d.type, seed),
+        spikeUntil: 0,
+      };
+      set({ devices: [...st.devices, dev] });
+      st.pushEvent('info', 'device', `Добавлено устройство «${dev.name}» (${DEVICE_TYPE_META[dev.type].label} ${dev.address})`);
+    },
+
+    updateDevice: (id, patch) => {
+      if (srv()) {
+        const body: Record<string, unknown> = {};
+        for (const k of ['name', 'type', 'address', 'port', 'path', 'method', 'body', 'interval', 'tags', 'favorite'] as const) {
+          if (k in patch) body[k] = (patch as any)[k];
+        }
+        api.updateDevice(id, body).then(sync).catch((e) => toast('warn', (e as Error)?.message || 'Не удалось обновить'));
+        return;
+      }
+      const st = get();
+      const dev = st.devices.find((x) => x.id === id);
+      set({ devices: st.devices.map((x) => (x.id === id ? { ...x, ...patch } : x)) });
+      if (dev && (patch.name || patch.interval || patch.tags)) {
+        st.pushEvent('info', 'device', `Настройки устройства «${patch.name ?? dev.name}» обновлены`);
+      }
+    },
+
+    patchDevice: (id, patch) => {
+      if (srv()) return;
+      set((st) => ({ devices: st.devices.map((d) => (d.id === id ? { ...d, ...patch } : d)) }));
+    },
+
+    removeDevice: (id) => {
+      if (srv()) {
+        api.deleteDevice(id).then(sync).catch((e) => toast('warn', (e as Error)?.message || 'Не удалось удалить'));
+        return;
+      }
+      const st = get();
+      const dev = st.devices.find((x) => x.id === id);
+      set({ devices: st.devices.filter((x) => x.id !== id) });
+      if (dev) st.pushEvent('info', 'device', `Устройство «${dev.name}» удалено из мониторинга`);
+    },
+
+    toggleDeviceFav: (id) => {
+      const st = get();
+      const d = st.devices.find((x) => x.id === id);
+      if (!d) return;
+      const count = st.devices.filter((x) => x.favorite).length + st.agents.filter((x) => x.favorite).length;
+      if (!d.favorite && count >= FAVORITES_LIMIT) {
+        toast('warn', `В избранном не больше ${FAVORITES_LIMIT} элементов`);
+        return;
+      }
+      if (srv()) {
+        api.updateDevice(id, { favorite: !d.favorite }).then(sync).catch(() => {});
+        return;
+      }
+      set({ devices: st.devices.map((x) => (x.id === id ? { ...x, favorite: !x.favorite } : x)) });
+    },
+
+    addEmulatedAgent: () => {
+      const st = get();
+      if (srv()) {
+        api.createAgentToken('agent-' + uid('t').slice(-4))
+          .then((r) => { toast('ok', `Токен создан: ${r.token}`); sync(); })
+          .catch((e) => toast('warn', (e as Error)?.message || 'Не удалось создать токен'));
+        return null;
+      }
+      const n = st.agents.length + 1;
+      const rng = mulberry32(hashStr('agent' + n + Date.now()));
+      const disks = Array.from({ length: rndInt(1, 3) }, (_, i) => {
+        const total = (i === 0 ? rndInt(240, 520) : rndInt(900, 2000)) * 1024 ** 3;
+        return { id: uid('disk'), label: String.fromCharCode(67 + i) + ':', total, used: total * rnd(0.2, 0.75), temp: rnd(30, 44) };
+      });
+      const a: Agent = {
+        id: uid('a'),
+        name: 'WIN-AGENT-' + String(n).padStart(2, '0'),
+        hostname: 'WIN-AGENT-' + String(n).padStart(2, '0'),
+        token: genToken(),
+        ip: `192.168.1.${rndInt(20, 240)}`,
+        os: 'Windows 11 Pro',
+        version: '1.6.0',
+        online: true,
+        emulated: true,
+        cpuLoad: rnd(8, 45),
+        cpuCores: [4, 6, 8, 12][Math.floor(rng() * 4)],
+        cpuTemp: rnd(38, 55),
+        ramUsed: rnd(4, 9) * 1024 ** 3,
+        ramTotal: [8, 16, 32][Math.floor(rng() * 3)] * 1024 ** 3,
+        ramTemp: rnd(34, 45),
+        disks,
+        rxBytes: 0,
+        txBytes: 0,
+        rxRate: rnd(100, 900),
+        txRate: rnd(40, 300),
+        networks: [],
+        lastSeen: Date.now(),
+        lastMetrics: Date.now(),
+        lastScan: 0,
+        history: [],
+        favorite: false,
+        createdAt: Date.now(),
+      };
+      set({ agents: [...st.agents, a] });
+      st.pushEvent('ok', 'agent', `Агент ${a.hostname} (${a.ip}) подключился`);
+      return a;
+    },
+
+    patchAgent: (id, patch) => {
+      if (srv()) return;
+      set((st) => ({ agents: st.agents.map((a) => (a.id === id ? { ...a, ...patch } : a)) }));
+    },
+
+    removeAgent: (id) => {
+      if (srv()) {
+        api.deleteAgent(id).then(sync).catch((e) => toast('warn', (e as Error)?.message || 'Не удалось удалить агента'));
+        return;
+      }
+      const st = get();
+      const a = st.agents.find((x) => x.id === id);
+      set({ agents: st.agents.filter((x) => x.id !== id) });
+      if (a) st.pushEvent('info', 'agent', `Агент ${a.hostname} отключён и удалён из реестра`);
+    },
+
+    toggleAgentFav: (id) => {
+      const st = get();
+      const a = st.agents.find((x) => x.id === id);
+      if (!a) return;
+      const count = st.devices.filter((x) => x.favorite).length + st.agents.filter((x) => x.favorite).length;
+      if (!a.favorite && count >= FAVORITES_LIMIT) {
+        toast('warn', `В избранном не больше ${FAVORITES_LIMIT} элементов`);
+        return;
+      }
+      if (srv()) {
+        api.patchAgent(id, { favorite: !a.favorite }).then(sync).catch(() => {});
+        return;
+      }
+      set({ agents: st.agents.map((x) => (x.id === id ? { ...x, favorite: !x.favorite } : x)) });
+    },
+
+    addTag: (label, color) => {
+      const st = get();
+      const l = label.trim();
+      if (!l) return 'Укажите название тега';
+      if (srv()) {
+        api.addTag(l, color).then(sync).catch((e) => toast('warn', (e as Error)?.message || 'Не удалось создать тег'));
+        return null;
+      }
+      if (st.tags.some((t) => t.label.toLowerCase() === l.toLowerCase())) return 'Такой тег уже есть';
+      if (st.tags.length >= 30) return 'Не более 30 тегов';
+      set({ tags: [...st.tags, { id: uid('t'), label: l, color }] });
+      st.pushEvent('info', 'system', `Создан тег «${l}»`);
+      return null;
+    },
+
+    removeTag: (id) => {
+      if (srv()) {
+        api.deleteTag(id).then(sync).catch((e) => toast('warn', (e as Error)?.message || 'Не удалось удалить тег'));
+        return;
+      }
+      const st = get();
+      const t = st.tags.find((x) => x.id === id);
+      set({
+        tags: st.tags.filter((x) => x.id !== id),
+        devices: st.devices.map((d) => ({ ...d, tags: d.tags.filter((x) => x !== id) })),
+      });
+      if (t) st.pushEvent('info', 'system', `Тег «${t.label}» удалён`);
+    },
+
+    saveSettings: (settings) => {
+      if (srv()) {
+        api.saveSettings(settings).then(sync).catch((e) => toast('warn', (e as Error)?.message || 'Не удалось сохранить'));
+        return;
+      }
+      set({ settings });
+      get().pushEvent('info', 'system', 'Системные настройки сохранены');
+      toast('ok', 'Настройки сохранены');
+    },
+
+    setSettingsRaw: (settings) => set({ settings }),
+
+    addUser: (u) => {
+      const st = get();
+      if (!u.login.trim()) return 'Укажите логин';
+      if (st.users.some((x) => x.login === u.login.trim())) return 'Логин занят';
+      if (!u.pass || u.pass.length < 4) return 'Пароль минимум 4 символа';
+      const nu: User & { pass?: string } = {
+        id: uid('u'),
+        login: u.login.trim(),
+        name: u.name.trim() || u.login.trim(),
+        role: u.role,
+        scope: u.scope as User['scope'],
+        builtIn: false,
+        createdAt: Date.now(),
+        pass: u.pass,
+      };
+      set({ users: [...st.users, nu] });
+      st.pushEvent('info', 'system', `Создан пользователь ${nu.login} (${nu.role === 'admin' ? 'администратор' : 'наблюдатель'})`);
+      return null;
+    },
+
+    updateUser: (id, patch) => {
+      const st = get();
+      set({ users: st.users.map((u) => (u.id === id ? { ...u, ...patch } : u)) });
+      return null;
+    },
+
+    removeUser: (id) => {
+      const st = get();
+      const u = st.users.find((x) => x.id === id);
+      if (!u) return 'Пользователь не найден';
+      if (u.builtIn) return 'Нельзя удалить администратора по умолчанию';
+      set({ users: st.users.filter((x) => x.id !== id) });
+      st.pushEvent('info', 'system', `Пользователь ${u.login} удалён`);
+      return null;
+    },
+
+    resetBase: () => {
+      localStorage.removeItem(LS_KEY);
+      set({
+        devices: [],
+        agents: [],
+        tags: [],
+        events: [mkEvent('info', 'system', 'База очищена — система готова к первому запуску')],
+        settings: defaultSettings(),
+      });
+      toast('ok', 'База очищена');
+    },
+  };
+
+  return s;
+}
+
+state = initialState();
+
+// rehydrate из localStorage
+try {
+  const raw = localStorage.getItem(LS_KEY);
+  if (raw) {
+    const p = JSON.parse(raw);
+    state = {
+      ...state,
+      ...p,
+      settings: { ...state.settings, ...(p.settings ?? {}), notifications: { ...state.settings.notifications, ...(p.settings?.notifications ?? {}) } },
+      devices: (p.devices ?? []).map((d: Device) => ({ ...d, checking: false })),
+      agents: (p.agents ?? []).map((a: Agent) => ({ ...a, history: [] })),
       route: 'dashboard',
       routeParam: '',
       apiMode: 'embedded',
       coreVersion: null,
-
-      nav: (r, param = '') => set({ route: r, routeParam: param }),
-
-      // ── Серверный режим ──
-      enterServer: (user) => {
-        set({
-          apiMode: 'server',
-          users: [user],
-          session: { userId: user.id, at: Date.now() },
-          route: 'dashboard',
-          routeParam: '',
-          events: [mkEvent('info', 'system', 'Консоль подключена к серверному ядру — проверки и телеметрия реальные')],
-        });
-      },
-
-      loginServer: async (l, p) => {
-        try {
-          const user = await apiLogin(l.trim(), p);
-          get().enterServer(user);
-          sync();
-          return null;
-        } catch (e) {
-          return e instanceof Error ? e.message : 'Не удалось связаться с ядром';
-        }
-      },
-
-      serverLogout: () => {
-        setApiToken(null);
-        set({ apiMode: 'embedded', session: null, users: [seedAdmin()] });
-      },
-
-      applyServerState: (st: ServerState) => {
-        const patch: Partial<PlutoState> = {
-          devices: st.devices,
-          agents: st.agents,
-          tags: st.tags,
-          events: st.events,
-          settings: st.settings,
-        };
-        if (st.users) patch.users = st.users;
-        set(patch);
-      },
-
-      login: (l, p) => {
-        const u = get().users.find((x) => x.login.toLowerCase() === l.trim().toLowerCase());
-        if (!u || u.pass !== hashPass(p)) return 'Неверный логин или пароль';
-        set({
-          session: { userId: u.id, at: Date.now() },
-          route: 'dashboard',
-          events: [mkEvent('info', 'auth', `Вход в систему: ${u.login}`), ...get().events].slice(0, 250),
-        });
-        return null;
-      },
-
-      logout: () => {
-        const u = get().users.find((x) => x.id === get().session?.userId);
-        if (srv()) {
-          apiLogout();
-          set({ apiMode: 'embedded', session: null, users: [seedAdmin()] });
-          return;
-        }
-        set({
-          session: null,
-          events: [mkEvent('info', 'auth', `Выход из системы: ${u?.login ?? '—'}`), ...get().events].slice(0, 250),
-        });
-      },
-
-      pushEvent: (sev, source, text) => {
-        if (srv()) return; // в серверном режиме журнал ведёт ядро
-        set((s) => ({ events: [mkEvent(sev, source, text), ...s.events].slice(0, 250) }));
-      },
-
-      // ── Пользователи ──
-      saveUser: (data) => {
-        if (srv()) {
-          api.saveUser({ id: data.id, login: data.login.trim().toLowerCase(), name: data.name, role: data.role, scope: data.scope, pass: data.pass || undefined })
-            .then(sync).catch((e) => useToasts.getState().push('warn', e?.message || 'Ядро отклонило запрос'));
-          return null;
-        }
-        const s = get();
-        const login = data.login.trim().toLowerCase();
-        if (!login || login.length < 3) return 'Логин — минимум 3 символа';
-        const dup = s.users.find((u) => u.login.toLowerCase() === login && u.id !== data.id);
-        if (dup) return 'Такой логин уже существует';
-        if (data.id) {
-          set({
-            users: s.users.map((u) =>
-              u.id === data.id
-                ? {
-                    ...u, name: data.name, login,
-                    pass: data.pass ? hashPass(data.pass) : u.pass,
-                    role: u.builtIn ? 'admin' : data.role,
-                    scope: data.role === 'admin' ? [...SCOPE_ALL] : data.scope,
-                  }
-                : u,
-            ),
-          });
-          s.pushEvent('info', 'system', `Пользователь ${login} обновлён`);
-        } else {
-          if (!data.pass || data.pass.length < 4) return 'Пароль — минимум 4 символа';
-          const u: User = {
-            id: uid('u'), login, pass: hashPass(data.pass), name: data.name || login,
-            role: data.role, scope: data.role === 'admin' ? [...SCOPE_ALL] : data.scope,
-            createdAt: Date.now(),
-          };
-          set({ users: [...s.users, u] });
-          s.pushEvent('info', 'system', `Создан пользователь ${login} (${data.role === 'admin' ? 'администратор' : 'наблюдатель'})`);
-        }
-        return null;
-      },
-
-      removeUser: (id) => {
-        if (srv()) {
-          api.deleteUser(id).then(sync).catch((e) => useToasts.getState().push('warn', e?.message || 'Не удалось удалить'));
-          return null;
-        }
-        const s = get();
-        const u = s.users.find((x) => x.id === id);
-        if (!u) return 'Пользователь не найден';
-        if (u.builtIn) return 'Встроенного администратора удалить нельзя';
-        if (s.session?.userId === id) return 'Нельзя удалить самого себя';
-        set({ users: s.users.filter((x) => x.id !== id) });
-        s.pushEvent('info', 'system', `Пользователь ${u.login} удалён`);
-        return null;
-      },
-
-      // ── Устройства ──
-      addDevice: (d) => {
-        if (srv()) {
-          api.addDevice({
-            name: d.name.trim() || d.address, type: d.type, address: d.address.trim(),
-            port: d.port, path: d.path, method: d.method, body: d.body,
-            interval: clamp(Math.round(d.interval), 5, 86400), tags: d.tags,
-          }).then(sync).catch((e) => useToasts.getState().push('warn', e?.message || 'Не удалось добавить устройство'));
-          return;
-        }
-        const s = get();
-        const seed = mulberry32(hashStr(d.type + ':' + d.address));
-        const baseByType: Record<DeviceType, [number, number]> = {
-          ping: [2, 38], http: [8, 90], api: [20, 150], rtsp: [15, 120], sip: [10, 80],
-        };
-        const [bMin, bMax] = baseByType[d.type];
-        const base = Math.round(bMin + seed() * (bMax - bMin));
-        const problem = seed() < 0.16;
-        const device: Device = {
-          id: uid('d'),
-          name: d.name.trim() || d.address,
-          type: d.type,
-          address: d.address.trim(),
-          port: d.port, path: d.path, method: d.method, body: d.body,
-          interval: clamp(Math.round(d.interval), 5, 86400),
-          tags: d.tags,
-          favorite: false,
-          status: 'unknown', latency: null, approx: true, checking: false,
-          lastCheck: 0, lastChange: Date.now(), fails: 0,
-          history: [], spikeUntil: 0,
-          profile: {
-            base,
-            failP: problem ? 0.14 : 0.004 + seed() * 0.03,
-            spikeP: 0.012 + seed() * 0.02,
-          },
-          createdAt: Date.now(),
-        };
-        set({ devices: [device, ...s.devices] });
-        s.pushEvent('info', 'device', `Добавлено устройство «${device.name}» (${d.address}, ${d.type.toUpperCase()})`);
-      },
-
-      updateDevice: (id, patch) => {
-        if (srv()) {
-          const editable = ['name', 'type', 'address', 'port', 'path', 'method', 'body', 'interval', 'tags', 'favorite'] as const;
-          const body: Record<string, unknown> = {};
-          for (const k of editable) if (k in patch) body[k] = (patch as Record<string, unknown>)[k];
-          api.updateDevice(id, body).then(sync).catch((e) => useToasts.getState().push('warn', e?.message || 'Не удалось обновить'));
-          return;
-        }
-        const s = get();
-        const dev = s.devices.find((d) => d.id === id);
-        set({ devices: s.devices.map((d) => (d.id === id ? { ...d, ...patch } : d)) });
-        if (dev && (patch.name || patch.interval || patch.tags)) {
-          s.pushEvent('info', 'device', `Настройки устройства «${patch.name ?? dev.name}» обновлены`);
-        }
-      },
-
-      patchDevice: (id, patch) => {
-        if (srv()) return; // телеметрия устройства приходит из ядра
-        set((s) => ({ devices: s.devices.map((d) => (d.id === id ? { ...d, ...patch } : d)) }));
-      },
-
-      removeDevice: (id) => {
-        if (srv()) {
-          api.deleteDevice(id).then(sync).catch((e) => useToasts.getState().push('warn', e?.message || 'Не удалось удалить'));
-          return;
-        }
-        const s = get();
-        const dev = s.devices.find((d) => d.id === id);
-        set({ devices: s.devices.filter((d) => d.id !== id) });
-        if (dev) s.pushEvent('info', 'device', `Устройство «${dev.name}» удалено из мониторинга`);
-      },
-
-      toggleDeviceFav: (id) => {
-        const s = get();
-        const dev = s.devices.find((d) => d.id === id);
-        if (!dev) return;
-        if (srv()) {
-          api.updateDevice(id, { favorite: !dev.favorite }).then(sync).catch(() => {});
-          return;
-        }
-        const favCount = s.devices.filter((d) => d.favorite).length + s.agents.filter((a) => a.favorite).length;
-        if (!dev.favorite && favCount >= FAVORITES_LIMIT) {
-          useToasts.getState().push('warn', `Лимит избранного — ${FAVORITES_LIMIT} элементов`);
-          return;
-        }
-        set({ devices: s.devices.map((d) => (d.id === id ? { ...d, favorite: !d.favorite } : d)) });
-      },
-
-      // ── Агенты ──
-      addEmulatedAgent: () => {
-        const s = get();
-        if (srv()) {
-          // в серверном режиме агенты — только реальные машины по токену
-          api.createAgentToken('agent-' + uid('t').slice(-4))
-            .then((r) => {
-              useToasts.getState().push('ok', `Токен создан: ${r.token}`);
-              sync();
-            })
-            .catch((e) => useToasts.getState().push('warn', e?.message || 'Не удалось создать токен'));
-          // заглушка, чтобы вызовы вида nav('agents', a.hostname) не падали
-          return { id: '', name: '', hostname: '', token: '', ip: '', os: '', version: '', online: false, emulated: false, lastSeen: 0, connectedAt: 0, reconnectAt: 0, cpuLoad: 0, cpuCores: 0, cpuTemp: 0, ramUsed: 0, ramTotal: 0, ramTemp: 0, disks: [], netIface: '', rxBytes: 0, txBytes: 0, rxRate: 0, txRate: 0, networks: [], nextScan: 0, lastMetrics: 0, history: [], favorite: false, createdAt: 0 } as Agent;
-        }
-        const n = s.agents.length + 1;
-        const seed = mulberry32(hashStr('agent-' + Date.now()));
-        const hostname = `WS-${Math.floor(seed() * 46656).toString(36).toUpperCase().padStart(3, '0')}`;
-        const sub = rndInt(2, 250);
-        const myIp = `192.168.${sub}.${rndInt(10, 240)}`;
-        const rng2 = mulberry32(hashStr(hostname));
-        const diskCount = rndInt(1, 3);
-        const letters = ['C', 'D', 'E'];
-        const labels = ['System', 'Data', 'Backup'];
-        const disks = Array.from({ length: diskCount }, (_, i) => {
-          const total = [256, 512, 1024, 2048][rndInt(0, 3)] * 1024 ** 3;
-          return {
-            letter: letters[i], label: labels[i],
-            used: total * (0.2 + rng2() * 0.6), total, temp: rndInt(30, 42),
-          };
-        });
-        const hostHints = ['Роутер', 'IP-камера', 'Принтер', 'NAS', 'Шлюз VoIP', undefined, undefined, 'ПК пользователя'];
-        const hostCount = rndInt(5, 14);
-        const hosts = Array.from({ length: hostCount }, (_, i) => {
-          const ip = `192.168.${sub}.${i + 1}`;
-          return {
-            ip, mac: macFrom(ip),
-            hint: hostHints[rndInt(0, hostHints.length - 1)],
-            online: rng2() > 0.25,
-          };
-        }).filter((h) => h.ip !== myIp);
-        const ramTotal = [8, 16, 32, 64][rndInt(0, 3)] * 1024 ** 3;
-        const agent: Agent = {
-          id: uid('a'),
-          name: `Агент ${hostname}`,
-          hostname,
-          token: genToken(),
-          ip: myIp,
-          os: 'Windows 11 Pro 23H2',
-          version: '1.4.2',
-          online: true,
-          emulated: true,
-          lastSeen: Date.now(),
-          connectedAt: Date.now(),
-          reconnectAt: 0,
-          cpuLoad: rnd(8, 40),
-          cpuCores: [4, 8, 12, 16][rndInt(0, 3)],
-          cpuTemp: rnd(40, 55),
-          ramUsed: ramTotal * rnd(0.25, 0.6),
-          ramTotal,
-          ramTemp: rnd(35, 48),
-          disks,
-          netIface: 'Ethernet 0',
-          rxBytes: 0, txBytes: 0, rxRate: 0, txRate: 0,
-          networks: [{ cidr: `192.168.${sub}.0/24`, iface: 'Ethernet 0', hosts }],
-          nextScan: Date.now() + s.settings.lanScan * 1000,
-          lastMetrics: 0,
-          history: [],
-          favorite: false,
-          createdAt: Date.now(),
-        };
-        set({ agents: [agent, ...s.agents] });
-        s.pushEvent('ok', 'agent', `Агент ${hostname} подключился к ядру (${myIp}, эмуляция)`);
-        return agent;
-      },
-
-      patchAgent: (id, patch) => {
-        if (srv()) return; // телеметрия агента приходит из ядра
-        set((s) => ({ agents: s.agents.map((a) => (a.id === id ? { ...a, ...patch } : a)) }));
-      },
-
-      removeAgent: (id) => {
-        if (srv()) {
-          api.deleteAgent(id).then(sync).catch((e) => useToasts.getState().push('warn', e?.message || 'Не удалось удалить агента'));
-          return;
-        }
-        const s = get();
-        const a = s.agents.find((x) => x.id === id);
-        set({ agents: s.agents.filter((x) => x.id !== id) });
-        if (a) s.pushEvent('info', 'agent', `Агент ${a.hostname} отключён и удалён из реестра`);
-      },
-
-      toggleAgentFav: (id) => {
-        const s = get();
-        const a = s.agents.find((x) => x.id === id);
-        if (!a) return;
-        if (srv()) {
-          api.patchAgent(id, { favorite: !a.favorite }).then(sync).catch(() => {});
-          return;
-        }
-        const favCount = s.devices.filter((d) => d.favorite).length + s.agents.filter((x) => x.favorite).length;
-        if (!a.favorite && favCount >= FAVORITES_LIMIT) {
-          useToasts.getState().push('warn', `Лимит избранного — ${FAVORITES_LIMIT} элементов`);
-          return;
-        }
-        set({ agents: s.agents.map((x) => (x.id === id ? { ...x, favorite: !x.favorite } : x)) });
-      },
-
-      regenAgentToken: (id) => {
-        if (srv()) {
-          api.retokenAgent(id)
-            .then((r) => {
-              useToasts.getState().push('ok', `Новый токен: ${r.token}`);
-              sync();
-            })
-            .catch((e) => useToasts.getState().push('warn', e?.message || 'Не удалось перевыпустить токен'));
-          return '…';
-        }
-        const t = genToken();
-        set((s) => ({ agents: s.agents.map((a) => (a.id === id ? { ...a, token: t } : a)) }));
-        get().pushEvent('warn', 'agent', 'Токен агента перевыпущен — старый токен недействителен');
-        return t;
-      },
-
-      // ── Теги ──
-      addTag: (label, color) => {
-        const s = get();
-        const l = label.trim();
-        if (!l) return 'Укажите название тега';
-        if (srv()) {
-          api.addTag(l, color).then(sync).catch((e) => useToasts.getState().push('warn', e?.message || 'Не удалось создать тег'));
-          return null;
-        }
-        if (s.tags.some((t) => t.label.toLowerCase() === l.toLowerCase())) return 'Такой тег уже есть';
-        if (s.tags.length >= 30) return 'Не более 30 тегов';
-        set({ tags: [...s.tags, { id: uid('t'), label: l, color }] });
-        s.pushEvent('info', 'system', `Создан тег «${l}»`);
-        return null;
-      },
-
-      removeTag: (id) => {
-        if (srv()) {
-          api.deleteTag(id).then(sync).catch((e) => useToasts.getState().push('warn', e?.message || 'Не удалось удалить тег'));
-          return;
-        }
-        const s = get();
-        const t = s.tags.find((x) => x.id === id);
-        set({
-          tags: s.tags.filter((x) => x.id !== id),
-          devices: s.devices.map((d) => (d.tags.includes(id) ? { ...d, tags: d.tags.filter((x) => x !== id) } : d)),
-        });
-        if (t) s.pushEvent('info', 'system', `Тег «${t.label}» удалён`);
-      },
-
-      // ── Настройки ──
-      saveSettings: (settings) => {
-        if (srv()) {
-          api.saveSettings(settings)
-            .then(() => {
-              useToasts.getState().push('ok', 'Настройки сохранены в ядре');
-              sync();
-            })
-            .catch((e) => useToasts.getState().push('warn', e?.message || 'Ядро не приняло настройки'));
-          return;
-        }
-        set({ settings });
-        get().pushEvent('info', 'system', 'Системные настройки сохранены');
-        useToasts.getState().push('ok', 'Настройки сохранены');
-      },
-
-      setSettingsRaw: (settings) => set({ settings }),
-
-      resetBase: () => {
-        if (srv()) {
-          useToasts.getState().push('warn', 'Очистка базы недоступна при подключённом серверном ядре');
-          return;
-        }
-        set({
-          devices: [], agents: [], tags: [],
-          events: [mkEvent('warn', 'system', 'База очищена: удалены все устройства, агенты и теги')],
-        });
-      },
-    }),
-    {
-      name: 'pluto-base-v1',
-      version: 1,
-      partialize: (s) => {
-        const { route: _r, routeParam: _p, ...rest } = s;
-        return rest as PlutoState;
-      },
-      merge: (persisted, current) => {
-        const p = (persisted ?? {}) as Partial<PlutoState>;
-        return {
-          ...current,
-          ...p,
-          settings: { ...current.settings, ...(p.settings ?? {}), notifications: { ...current.settings.notifications, ...(p.settings?.notifications ?? {}) } },
-          devices: (p.devices ?? []).map((d) => ({ ...d, checking: false })),
-          agents: (p.agents ?? []).map((a) => ({ ...a, history: [] })),
-          route: 'dashboard',
-          routeParam: '',
-          apiMode: 'embedded', // определяется заново при старте по /api/health
-        };
-      },
-    },
-  ),
-);
-
-// ─── Тосты (не сохраняются) ──────────────────────────────────────────────────
-
-export interface Toast {
-  id: string;
-  kind: 'ok' | 'warn' | 'crit' | 'info';
-  text: string;
+    };
+  }
+} catch {
+  /* повреждённые данные — чистая база */
 }
 
-export const useToasts = create<{ list: Toast[]; push: (kind: Toast['kind'], text: string) => void; drop: (id: string) => void }>((set) => ({
-  list: [],
-  push: (kind, text) => {
-    const id = uid('toast');
-    set((s) => ({ list: [...s.list.slice(-4), { id, kind, text }] }));
-    window.setTimeout(() => set((s) => ({ list: s.list.filter((t) => t.id !== id) })), 4200);
+export const useStore = {
+  getState: get,
+  setState: set,
+  subscribe(l: () => void) {
+    listeners.add(l);
+    return () => listeners.delete(l);
   },
-  drop: (id) => set((s) => ({ list: s.list.filter((t) => t.id !== id) })),
-}));
+};
 
-// ─── Селекторы ───────────────────────────────────────────────────────────────
+/** Подписка с селектором */
+export function usePluto<T>(selector: (s: PlutoState) => T): T {
+  return useSyncExternalStore(
+    (cb) => {
+      listeners.add(cb);
+      return () => listeners.delete(cb);
+    },
+    () => selector(state),
+  );
+}
 
 export function useCurrentUser(): User | null {
-  return useStore((s) => s.users.find((u) => u.id === s.session?.userId) ?? null);
+  const session = usePluto((s) => s.session);
+  const users = usePluto((s) => s.users);
+  return users.find((u) => u.id === session?.userId) ?? null;
 }
 
 export function visibleDevices(devices: Device[], user: User | null): Device[] {
-  if (!user) return [];
-  if (user.role === 'admin') return devices;
+  if (!user || user.role === 'admin') return devices;
   return devices.filter((d) => user.scope.includes(d.type));
 }
 
 export function visibleAgents(agents: Agent[], user: User | null): Agent[] {
   if (!user) return [];
-  if (user.role === 'admin') return agents;
-  return user.scope.includes('agent') ? agents : [];
+  if (user.role === 'admin' || (user.scope as string[]).includes('agent')) return agents;
+  return [];
 }

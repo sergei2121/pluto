@@ -1,4 +1,7 @@
-// ─── PLUTO: утилиты ──────────────────────────────────────────────────────────
+// ─── PLUTO: утилиты ─────────────────────────────────────────────────────────
+
+/** Версия консоли (запекается в сборку). Должна совпадать с VERSION в корне. */
+export const CONSOLE_VERSION = '1.6.0';
 
 export function hashStr(s: string): number {
   let h = 2166136261;
@@ -9,7 +12,7 @@ export function hashStr(s: string): number {
   return h >>> 0;
 }
 
-/** Детерминированный ГПСЧ (mulberry32) */
+/** Детерминированный ГПСЧ (mulberry32) — только для эмуляционного профиля */
 export function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
@@ -50,11 +53,6 @@ export function genToken(len = 28): string {
   return out;
 }
 
-export function hashPass(p: string): string {
-  // демонстрационный хэш; серверная версия использует argon2id
-  return `h${hashStr('pluto:' + p).toString(36)}`;
-}
-
 export function cls(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ');
 }
@@ -72,12 +70,7 @@ export function timeAgo(ts: number): string {
 }
 
 export function fmtClock(ts: number): string {
-  const d = new Date(ts);
-  return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
-export function fmtDate(ts: number): string {
-  return new Date(ts).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  return new Date(ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 export function fmtBytes(n: number): string {
@@ -116,9 +109,6 @@ export const TAG_COLORS = [
   '#d98bb0', // розовый
   '#98a4c8', // стальной
 ];
-
-/** Версия веб-консоли (фиксируется при сборке образа) */
-export const CONSOLE_VERSION = '1.6.0';
 
 export function macFrom(seedStr: string): string {
   const rng = mulberry32(hashStr(seedStr));

@@ -8,8 +8,6 @@ import type { Agent, Device, EventItem, Settings, Tag, User } from './types';
 
 const TOKEN_KEY = 'pluto.api.token';
 
-export type ApiMode = 'embedded' | 'server';
-
 export function getApiToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
@@ -47,7 +45,7 @@ async function req<T>(path: string, opts: { method?: string; body?: unknown } = 
   }
 }
 
-/** Проверка доступности ядра; возвращает его версию, 'legacy' или null */
+/** Проверка доступности ядра; возвращает версию, 'legacy' или null */
 export async function detectApi(): Promise<string | null> {
   try {
     const ctrl = new AbortController();
@@ -58,9 +56,7 @@ export async function detectApi(): Promise<string | null> {
       const j = (await res.json().catch(() => ({}))) as { version?: string };
       return j.version || 'core';
     }
-    // Старая сборка ядра: /api/health закрыт авторизацией, но JSON с ошибкой —
-    // фирменный ответ PLUTO Core. Считаем ядро присутствующим, чтобы консоль
-    // не падала в эмуляцию.
+    // Старая сборка ядра: health закрыт авторизацией, но JSON-ошибка — фирменная.
     if (res.status === 401) {
       const j = (await res.json().catch(() => null)) as { error?: string } | null;
       if (j && typeof j.error === 'string') return 'legacy';
@@ -79,16 +75,14 @@ function mapDevice(sv: any): Device {
     latency: sv.latency ?? null,
     approx: false,
     checking: false,
-    spikeUntil: 0,
     history: Array.isArray(sv.history) ? sv.history : [],
-    profile: { base: sv.baseline || sv.latency || 10, failP: 0, spikeP: 0 },
+    profile: undefined,
     createdAt: sv.lastChange || Date.now(),
   } as Device;
 }
 
 function mapAgent(sv: any): Agent {
   const hist = Array.isArray(sv.history) ? sv.history : [];
-  const last = hist[hist.length - 1];
   return {
     id: sv.id,
     name: sv.name || sv.hostname || 'Агент',
@@ -100,28 +94,18 @@ function mapAgent(sv: any): Agent {
     online: !!sv.online,
     emulated: false,
     lastSeen: sv.lastSeen || 0,
-    connectedAt: sv.lastSeen || 0,
-    reconnectAt: 0,
-    cpuLoad: last?.cpu ?? sv.cpuLoad ?? 0,
+    cpuLoad: sv.cpuLoad ?? 0,
     cpuCores: sv.cpuCores || 0,
     cpuTemp: sv.cpuTemp || 0,
     ramUsed: sv.ramUsed || 0,
     ramTotal: sv.ramTotal || 0,
     ramTemp: sv.ramTemp || 0,
     disks: Array.isArray(sv.disks) ? sv.disks : [],
-    netIface: sv.netIface || '',
     rxBytes: sv.rxBytes || 0,
     txBytes: sv.txBytes || 0,
     rxRate: sv.rxRate || 0,
     txRate: sv.txRate || 0,
-    networks: (Array.isArray(sv.networks) ? sv.networks : []).map((n: any) => ({
-      cidr: n.cidr || '',
-      iface: n.iface || '',
-      hosts: (Array.isArray(n.hosts) ? n.hosts : []).map((h: any) => ({
-        ip: h.ip || '', mac: h.mac || '', hint: h.hint, online: !!h.online,
-      })),
-    })),
-    nextScan: 0,
+    networks: Array.isArray(sv.networks) ? sv.networks : [],
     lastMetrics: 0,
     lastScan: sv.lastScan || 0,
     history: hist,
@@ -134,7 +118,6 @@ function mapUser(su: any): User {
   return {
     id: su.id,
     login: su.name,
-    pass: '',
     name: su.name,
     role: su.role === 'admin' ? 'admin' : 'viewer',
     scope: su.scope || [],
@@ -150,7 +133,7 @@ function mapSettings(sv: any): Settings {
       ping: sv.ping ?? 30, http: sv.http ?? 60, api: sv.api ?? 120, rtsp: sv.rtsp ?? 60, sip: sv.sip ?? 120,
     },
     heartbeat: 10,
-    metrics: sv.metrics ?? 5,
+    metrics: sv.metrics ?? 3,
     lanScan: sv.lanScan ?? 300,
     failThreshold: sv.failThreshold ?? 3,
     degradeFactor: sv.degradeFactor ?? 10,
@@ -264,7 +247,7 @@ export async function syncAll() {
 // ─── Мутации ─────────────────────────────────────────────────────────────────
 
 export const api = {
-  addDevice: (d: { name: string; type: string; address: string; port?: number; path?: string; method?: string; body?: string; interval: number; tags: string[] }) =>
+  addDevice: (d: { name: string; type: string; address: string; port?: number | null; path?: string; method?: string | null; body?: string | null; interval: number; tags: string[] }) =>
     req<{ device: any }>('/api/devices', { method: 'POST', body: d }),
   updateDevice: (id: string, patch: Record<string, unknown>) =>
     req<{ device: any }>(`/api/devices/${id}`, { method: 'PUT', body: patch }),

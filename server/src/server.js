@@ -7,25 +7,25 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import nodemailer from 'nodemailer';
 import {
   loadDb, saveDb, pushEvent, uid, authUser, hashPass, verifyPass,
   issueSession, attachWs, DEFAULT_SETTINGS,
 } from './lib.js';
 
+const VERSION = '1.6.0';
 const db = loadDb();
 const HTTP_PORT = Number(process.env.HTTP_PORT || 8080);
 const AGENT_PORT = Number(process.env.AGENT_PORT || 8443);
 const WEB_DIR = process.env.WEB_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web');
 
-// ─── Проверки устройств ─────────────────────────────────────────────────────
+// ─── Проверки устройств (настоящие) ─────────────────────────────────────────
 
 function checkPing(addr, timeoutMs) {
   return new Promise((resolve) => {
     const secs = Math.max(1, Math.round(timeoutMs / 1000));
     const t0 = Date.now();
     execFile('ping', ['-c', '1', '-W', String(secs), addr], { timeout: timeoutMs + 2000 }, (err, stdout) => {
-      if (err) return resolve({ ok: false, latency: 0 });
+      if (err) return resolve({ ok: false, latency: 0, error: 'unreachable' });
       const m = /time[=<]\s*([\d.]+)\s*ms/.exec(stdout || '');
       resolve(m ? { ok: true, latency: Math.max(1, Math.round(parseFloat(m[1]))) } : { ok: true, latency: Date.now() - t0 });
     });
@@ -110,8 +110,7 @@ function checkSip(addr, port, timeoutMs) {
 }
 
 async function runCheck(device) {
-  const s = db.settings;
-  const t = s.timeoutMs;
+  const t = db.settings.timeoutMs;
   let r;
   switch (device.type) {
     case 'ping': r = await checkPing(device.address, t); break;
@@ -121,10 +120,7 @@ async function runCheck(device) {
     case 'sip': r = await checkSip(device.address, device.port, t); break;
     default: r = { ok: false, latency: 0, error: 'unknown type' };
   }
-  // живой журнал проверок: docker compose logs -f core
-  console.log(
-    `[pluto] ${device.type.toUpperCase()} ${device.address} → ${r.ok ? `ok ${r.latency} мс` : `недоступен${r.error ? ` (${r.error})` : ''}`}`,
-  );
+  console.log(`[pluto] ${device.type.toUpperCase()} ${device.address} → ${r.ok ? 'ok ' + r.latency + ' мс' : 'недоступен'}`);
   return r;
 }
 
@@ -177,7 +173,6 @@ function tick() {
       runCheck(d).then((res) => { d.checking = false; applyResult(d, res); }).catch(() => { d.checking = false; });
     }
   }
-  // контроль живости агентов
   for (const a of db.agents) {
     if (a.online && now - (a.lastSeen || 0) > Math.max(15000, s.metrics * 3000)) {
       a.online = false;
@@ -189,7 +184,7 @@ function tick() {
 }
 setInterval(tick, 1000);
 
-// ─── Уведомления (Telegram + e-mail) ─────────────────────────────────────────
+// ─── Уведомления (Telegram + минимальный SMTP, без зависимостей) ────────────
 
 function notify(kind, title, body) {
   const n = db.settings.notifications;
@@ -203,13 +198,33 @@ function notify(kind, title, body) {
     req.end(payload);
   }
   if (n.email?.enabled && n.email.smtpHost && n.email.to) {
-    const transport = nodemailer.createTransport({
-      host: n.email.smtpHost, port: n.email.smtpPort || 587, secure: n.email.smtpPort === 465,
-      auth: n.email.smtpUser ? { user: n.email.smtpUser, pass: n.email.smtpPass } : undefined,
-    });
-    transport.sendMail({ from: n.email.from || 'pluto@monitor', to: n.email.to, subject: title, text: body })
-      .catch((e) => console.error('[pluto] smtp:', e.message));
+    sendSmtp(n.email, title, body).catch((e) => console.error('[pluto] smtp:', e.message));
   }
+}
+
+function sendSmtp(cfg, subject, body) {
+  return new Promise((resolve, reject) => {
+    const sock = net.connect({ host: cfg.smtpHost, port: cfg.smtpPort || 587, timeout: 8000 });
+    const from = cfg.from || 'pluto@monitor';
+    const steps = [
+      `EHLO pluto`,
+      `MAIL FROM:<${from}>`,
+      `RCPT TO:<${cfg.to}>`,
+      `DATA`,
+      `From: ${from}\r\nTo: ${cfg.to}\r\nSubject: ${subject}\r\n\r\n${body}\r\n.`,
+      `QUIT`,
+    ];
+    let i = 0;
+    sock.on('connect', () => {});
+    sock.on('data', (d) => {
+      const code = parseInt(d.toString().slice(0, 3), 10);
+      if (code >= 400) { sock.destroy(); return reject(new Error('SMTP ' + code)); }
+      if (i < steps.length) sock.write(steps[i++] + '\r\n');
+      else { sock.end(); resolve(); }
+    });
+    sock.on('timeout', () => { sock.destroy(); reject(new Error('timeout')); });
+    sock.on('error', reject);
+  });
 }
 
 // ─── Шлюз агентов (WebSocket на :8443) ───────────────────────────────────────
@@ -287,9 +302,9 @@ const server = http.createServer(async (req, res) => {
   const method = req.method;
 
   try {
-    // ── публичные (без авторизации) ──
-    if (p === '/api/health' || p === '/api/version')
-      return json(res, 200, { ok: true, name: 'pluto-core', version: '1.6.0', console: 'api' });
+    // ── публичные (до авторизации) ──
+    if (p === '/api/health') return json(res, 200, { ok: true, name: 'pluto-core', version: VERSION, console: 'api' });
+    if (p === '/api/version') return json(res, 200, { version: VERSION });
 
     if (p === '/api/auth/login' && method === 'POST') {
       const { name, password } = await readBody(req);
@@ -298,14 +313,14 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { token: issueSession(user.id), user: publicUser(user) });
     }
 
-    // ── статика веб-консоли (без авторизации — вход выполняет сам интерфейс) ──
+    // ── статика веб-консоли (без авторизации) ──
     if (method === 'GET' && !p.startsWith('/api/')) {
       let file = path.normalize(path.join(WEB_DIR, p === '/' ? 'index.html' : p));
       if (!file.startsWith(WEB_DIR)) return json(res, 403, { error: 'forbidden' });
       if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(WEB_DIR, 'index.html');
       if (!fs.existsSync(file)) {
         res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-        return res.end('PLUTO Core работает. Веб-консоль не найдена: соберите её (npm run build) или пересоберите образ Docker.');
+        return res.end('PLUTO Core работает. Веб-консоль не найдена: пересоберите образ (docker compose up -d --build).');
       }
       const ext = path.extname(file);
       res.writeHead(200, {
@@ -337,7 +352,7 @@ const server = http.createServer(async (req, res) => {
         if (db.users.some((u) => u.name === b.name)) return json(res, 409, { error: 'Имя занято' });
         const nu = { id: uid(), name: b.name, role: b.role || 'viewer', scope: b.scope || [], passHash: hashPass(b.password), createdAt: Date.now() };
         db.users.push(nu);
-        pushEvent('info', 'system', `Создан пользователь ${nu.name} (${nu.role === 'admin' ? 'администратор' : 'наблюдатель'})`);
+        pushEvent('info', 'system', `Создан пользователь ${nu.name} (${nu.role})`);
         saveDb();
         return json(res, 200, { user: publicUser(nu) });
       }
@@ -354,7 +369,7 @@ const server = http.createServer(async (req, res) => {
         return json(res, 200, { user: publicUser(target) });
       }
       if (method === 'DELETE') {
-        if (target.name === 'admin') return json(res, 400, { error: 'Нельзя удалить администратора по умолчанию' });
+        if (target.name === 'admin') return json(res, 400, { error: 'Нельзя удалить администратора' });
         db.users = db.users.filter((u) => u.id !== id);
         db.sessions = db.sessions.filter((s) => s.userId !== id);
         saveDb();
@@ -368,10 +383,7 @@ const server = http.createServer(async (req, res) => {
       if (method === 'GET' && !id) return json(res, 200, { devices: visibleDevices(user) });
       const own = visibleDevices(user);
       const dev = own.find((d) => d.id === id);
-      if (user.role !== 'admin') {
-        if (method !== 'GET') return json(res, 403, { error: 'Только чтение' });
-        if (p.endsWith('/check')) return json(res, 403, { error: 'Только чтение' });
-      }
+      if (user.role !== 'admin' && method !== 'GET') return json(res, 403, { error: 'Только чтение' });
       if (p === '/api/devices' && method === 'POST') {
         const b = await readBody(req);
         if (!b.address || !b.type) return json(res, 400, { error: 'Укажите тип и адрес' });
@@ -398,6 +410,7 @@ const server = http.createServer(async (req, res) => {
         return json(res, 200, { ok: true });
       }
       if (method === 'POST' && p.endsWith('/check')) {
+        if (user.role !== 'admin') return json(res, 403, { error: 'Только чтение' });
         const r = await runCheck(dev);
         applyResult(dev, r);
         return json(res, 200, { result: r, device: dev });
@@ -410,7 +423,6 @@ const server = http.createServer(async (req, res) => {
       if (user.role !== 'admin') return json(res, 403, { error: 'Только чтение' });
       if (p === '/api/tags' && method === 'POST') {
         const b = await readBody(req);
-        if (db.tags.length >= 20) return json(res, 400, { error: 'Предел количества тегов' });
         const tag = { id: uid(), label: b.label || 'тег', color: b.color || '#9a8cfa' };
         db.tags.push(tag);
         saveDb();
@@ -418,7 +430,6 @@ const server = http.createServer(async (req, res) => {
       }
       const tag = db.tags.find((t) => t.id === p.split('/')[3]);
       if (!tag) return json(res, 404, { error: 'Тег не найден' });
-      if (method === 'PUT') { Object.assign(tag, await readBody(req), { id: tag.id }); saveDb(); return json(res, 200, { tag }); }
       if (method === 'DELETE') {
         db.tags = db.tags.filter((t) => t.id !== tag.id);
         db.devices.forEach((d) => (d.tags = (d.tags || []).filter((x) => x !== tag.id)));
@@ -479,7 +490,6 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { settings: db.settings });
     }
 
-    // сюда доходят только unmatched /api/*-маршруты
     json(res, 404, { error: 'Маршрут не найден' });
   } catch (e) {
     console.error('[pluto]', e);
@@ -488,6 +498,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(HTTP_PORT, () => {
-  console.log(`[pluto] core v1.6.0 · консоль и API: http://0.0.0.0:${HTTP_PORT} · шлюз агентов: :${AGENT_PORT} · health: /api/health`);
+  console.log(`[pluto] core v${VERSION} · консоль и API: http://0.0.0.0:${HTTP_PORT} · health: /api/health`);
   console.log(`[pluto] база: ${path.resolve(process.env.DATA_DIR || './data')}/db.json · пользователь admin`);
 });

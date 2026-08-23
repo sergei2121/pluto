@@ -1,6 +1,6 @@
 # ─── PLUTO: серверная часть (Ubuntu / Docker Compose) ────────────────────────
 # Установка (из клонированного репозитория):
-#   cp .env.example .env       # отредактируйте секреты
+#   cp .env.example .env
 #   docker compose up -d --build
 #
 # Консоль: http://<хост>:8080 · вход admin / $ADMIN_PASSWORD

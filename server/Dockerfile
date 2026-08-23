@@ -11,7 +11,7 @@ RUN npm ci && npm run build
 # Этап 2: ядро мониторинга
 FROM node:20-alpine
 # iputils — бинарь ping для ICMP-проверок
-RUN apk add --no-cache iputils iproute2 tzdata
+RUN apk add --no-cache iputils iproute2 tzdata wget
 WORKDIR /app
 ENV NODE_ENV=production \
     DATA_DIR=/data \
@@ -19,7 +19,7 @@ ENV NODE_ENV=production \
     AGENT_PORT=8443
 
 COPY server/package.json ./package.json
-RUN npm install --omit=dev
+# зависимостей у ядра нет — используем только встроенные модули Node
 
 COPY server/src ./src
 COPY --from=web /app/dist ./web
