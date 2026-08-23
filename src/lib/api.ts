@@ -47,6 +47,12 @@ async function req<T>(path: string, opts: { method?: string; body?: unknown } = 
 
 /** Проверка доступности ядра; возвращает версию, 'legacy' или null */
 export async function detectApi(): Promise<string | null> {
+  // 1. Подпись, вшитая ядром в index.html при отдаче страницы. Если она есть —
+  //    страницу отдал настоящий сервер PLUTO Core, и эмуляция невозможна.
+  const injected = (window as unknown as { __PLUTO_CORE__?: { v?: string } }).__PLUTO_CORE__;
+  if (injected && typeof injected.v === 'string') return injected.v;
+
+  // 2. Прямой запрос к API (на случай открытия консоли с другого адреса).
   try {
     const ctrl = new AbortController();
     const to = setTimeout(() => ctrl.abort(), 2000);

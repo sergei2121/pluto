@@ -178,6 +178,12 @@ function persist() {
 
 // ─── Начальное состояние + все действия ─────────────────────────────────────
 
+/** Подпись ядра, вшитая в index.html при отдаче страницы сервером PLUTO Core. */
+const INJECTED_CORE: string | null =
+  typeof window !== 'undefined'
+    ? (((window as unknown as { __PLUTO_CORE__?: { v?: string } }).__PLUTO_CORE__?.v as string) ?? null)
+    : null;
+
 function initialState(): PlutoState {
   const srv = () => get().apiMode === 'server';
   const sync = () => void syncAll();
@@ -193,8 +199,8 @@ function initialState(): PlutoState {
     settings: defaultSettings(),
     route: 'dashboard',
     routeParam: '',
-    apiMode: 'embedded',
-    coreVersion: null,
+    apiMode: INJECTED_CORE ? 'server' : 'embedded',
+    coreVersion: INJECTED_CORE,
 
     nav: (r, param = '') => set({ route: r, routeParam: param }),
 
@@ -249,7 +255,13 @@ function initialState(): PlutoState {
 
     serverLogout: () => {
       setApiToken(null);
-      set({ apiMode: 'embedded', session: null, users: [seedAdmin()] });
+      // Если страницу отдало настоящее ядро (подпись в index.html), остаёмся
+      // в серверном режиме: вход выполнится через API, а не через эмуляцию.
+      if (INJECTED_CORE) {
+        set({ session: null, apiMode: 'server', coreVersion: INJECTED_CORE });
+      } else {
+        set({ apiMode: 'embedded', session: null, users: [seedAdmin()] });
+      }
     },
 
     applyServerState: (st) => {
@@ -552,8 +564,8 @@ try {
       agents: (p.agents ?? []).map((a: Agent) => ({ ...a, history: [] })),
       route: 'dashboard',
       routeParam: '',
-      apiMode: 'embedded',
-      coreVersion: null,
+      apiMode: INJECTED_CORE ? 'server' : 'embedded',
+      coreVersion: INJECTED_CORE,
     };
   }
 } catch {
