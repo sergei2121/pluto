@@ -12,7 +12,7 @@ import {
   issueSession, attachWs, DEFAULT_SETTINGS,
 } from './lib.js';
 
-const VERSION = '1.6.0';
+const VERSION = '1.6.1';
 const db = loadDb();
 const HTTP_PORT = Number(process.env.HTTP_PORT || 8080);
 const AGENT_PORT = Number(process.env.AGENT_PORT || 8443);
@@ -327,6 +327,14 @@ const server = http.createServer(async (req, res) => {
         'Content-Type': MIME[ext] || 'application/octet-stream',
         'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable',
       });
+      if (ext === '.html') {
+        // Подпись ядра: консоль видит её ДО любого fetch и не может ошибочно
+        // уйти в режим эмуляции, когда страница отдана настоящим сервером.
+        const html = fs
+          .readFileSync(file, 'utf8')
+          .replace('<head>', `<head><script>window.__PLUTO_CORE__={v:"${VERSION}"}</script>`);
+        return res.end(html);
+      }
       return fs.createReadStream(file).pipe(res);
     }
 
