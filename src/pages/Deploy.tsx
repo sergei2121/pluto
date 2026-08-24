@@ -33,10 +33,17 @@ const ENV_EXAMPLE = `# .env — создайте рядом с docker-compose.ym
 # Смените после первого входа: Настройки → Пользователи.
 ADMIN_PASSWORD=pluto`;
 
-const AGENT_PS = `# Сборка бинарника (Go 1.12+, один раз). ВАЖНО: кросс-компиляция под Windows,
-# иначе получите Linux-бинарник и «не является действительным приложением»:
-cd agent
-GOOS=windows GOARCH=amd64 go build -o pluto-agent.exe .
+const AGENT_PS = `# ── Вариант A (надёжнее всего): сборка ПРЯМО НА WINDOWS ──────────────────
+# Go на Windows собирает под Windows — ошибка «не является приложением» исключена:
+cd <папка-репозитория>\agent
+powershell -ExecutionPolicy Bypass -File .\build.ps1
+
+# ── Вариант B: кросс-сборка НА СЕРВЕРЕ с самопроверкой ───────────────────
+# Скрипт сам выставит платформу и проверит заголовок PE (MZ) до передачи:
+bash agent/build.sh          # → готовый agent/pluto-agent.exe
+# затем передайте этот файл на Windows (scp в бинарном режиме!)
+
+# ── Размещение и установка службой (на Windows, от администратора) ───────
 mkdir C:\pluto
 move pluto-agent.exe C:\pluto\pluto-agent.exe
 

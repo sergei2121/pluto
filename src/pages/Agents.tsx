@@ -231,10 +231,10 @@ function TokenModal({ info, onClose }: { info: { name: string; token: string } |
             <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Установка на Windows (PowerShell, администратор)</span>
             <CopyBlock label="powershell · с подставленным токеном" code={installCmd} />
             <p className="mt-2 text-[11px] leading-relaxed text-dim">
-              Сначала соберите бинарник <b className="text-mut">под Windows</b> (
-              <span className="font-mono text-mut">cd agent; GOOS=windows GOARCH=amd64 go build -o pluto-agent.exe .</span>),
-              положите его в <span className="font-mono text-mut">C:\pluto</span> и запускайте с префиксом{' '}
-              <span className="font-mono text-mut">.\</span> — без него Windows не найдёт файл в текущей папке.
+              Соберите бинарник одним из защищённых скриптов: на Windows —{' '}
+              <span className="font-mono text-mut">powershell -File agent\build.ps1</span> (надёжнее всего), либо на сервере —{' '}
+              <span className="font-mono text-mut">bash agent/build.sh</span> (сам проверит заголовок PE). Готовый файл положите в{' '}
+              <span className="font-mono text-mut">C:\pluto</span> и запускайте с префиксом <span className="font-mono text-mut">.\</span>.
             </p>
           </div>
 
