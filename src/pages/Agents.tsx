@@ -187,9 +187,11 @@ function AgentDrawer({ id, onClose, onEdit }: { id: string | null; onClose: () =
 function TokenModal({ info, onClose }: { info: { name: string; token: string } | null; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
 
-  const host = typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : '<IP-сервера>';
-  // Одна строка с оператором & и полным путём: не нужны cd и .\, не ломается при склейке строк
-  const installCmd = `& "C:\\pluto\\pluto-agent.exe" -install -server ws://${host}:8443/ws -token ${info?.token ?? '<ТОКЕН>'}`;
+  // хост с портом, по которому открыта консоль (например, 192.168.31.219:8080)
+  const host = typeof window !== 'undefined' && window.location.host ? window.location.host : '<IP-сервера>:8080';
+  // Одна строка: скачивает установщик с ядра и запускает его. Установщик сам
+  // скомпилирует агент встроенным в Windows компилятором и поставит его службой.
+  const installCmd = `iwr http://${host}/agent/install.ps1 -OutFile $env:TEMP\\pluto-install.ps1; & $env:TEMP\\pluto-install.ps1 -Token '${info?.token ?? '<ТОКЕН>'}'`;
 
   const copyToken = async () => {
     if (!info) return;
@@ -230,13 +232,11 @@ function TokenModal({ info, onClose }: { info: { name: string; token: string } |
 
           <div>
             <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Установка на Windows (PowerShell, администратор)</span>
-            <CopyBlock label="powershell · с подставленным токеном" code={installCmd} />
+            <CopyBlock label="powershell · одна строка, токен уже подставлен" code={installCmd} />
             <p className="mt-2 text-[11px] leading-relaxed text-dim">
-              Соберите бинарник под Windows (на сервере:{' '}
-              <span className="font-mono text-mut">cd agent; GOOS=windows GOARCH=amd64 go build -o pluto-agent.exe .</span>) и положите в{' '}
-              <span className="font-mono text-mut">C:\pluto</span>. Команда выше с оператором <span className="font-mono text-mut">&amp;</span> и полным
-              путём работает из любой папки — без <span className="font-mono text-mut">cd</span> и <span className="font-mono text-mut">.\</span>. Если exe
-              лежит в другом месте, замените путь в кавычках.
+              Команда скачивает установщик прямо с ядра. Установщик сам скомпилирует агент встроенным в Windows
+              компилятором (<span className="font-mono text-mut">csc.exe</span>) под вашу архитектуру — ошибки «не является приложением»
+              больше не будет — и поставит его службой с автозапуском. Go и любые другие инструменты на машине не нужны.
             </p>
           </div>
 
@@ -403,17 +403,17 @@ export default function Agents() {
         <Panel title="Подключение реального агента (Windows)" icon={Terminal} delay={40}>
           <div className="space-y-3">
             <p className="text-[12.5px] leading-relaxed text-mut">
-              Агент — один исполняемый файл на Go, без зависимостей. Ставится одной командой PowerShell, регистрируется как служба Windows
-              и подключается к ядру по WebSocket с токеном. Токен создаётся кнопкой «Создать токен агента».
+              Создайте токен кнопкой «Создать токен агента» и вставьте в PowerShell (от администратора) одну строку из открывшегося окна.
+              Установщик скачает исходник с ядра, скомпилирует его встроенным в Windows компилятором и поставит агент службой.
+              Ничего собирать и устанавливать заранее не нужно.
             </p>
-            <CopyBlock label="bash · сборка на сервере (кросс-компиляция под Windows)" code={`cd agent\nGOOS=windows GOARCH=amd64 go build -o pluto-agent.exe .`} />
-            <CopyBlock label="powershell · установка службой (одна строка, полный путь)" code={`& "C:\pluto\pluto-agent.exe" -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН_АГЕНТА>`} />
-            <p className="text-[11.5px] leading-relaxed text-warn">
-              Если Windows пишет «не является действительным приложением» — exe собран под Linux. Пересоберите с{' '}
-              <span className="font-mono">GOOS=windows GOARCH=amd64</span> (для ARM-машин — <span className="font-mono">GOARCH=arm64</span>).
-            </p>
-            <p className="text-[11.5px] text-dim">
-              Агент собирает: ЦП (загрузка, температура), ОЗУ, диски (объёмы, занятость, температуры), сетевые счётчики RX/TX и ARP-скан доступных локальных сетей.
+            <CopyBlock
+              label="powershell · одна строка (вставьте свой IP и токен)"
+              code={`iwr http://<IP-сервера>:8080/agent/install.ps1 -OutFile $env:TEMP\\pluto-install.ps1; & $env:TEMP\\pluto-install.ps1 -Token '<ТОКЕН>'`}
+            />
+            <p className="text-[11.5px] leading-relaxed text-dim">
+              Агент собирает: ЦП (загрузка, температура), ОЗУ, диски (объём, занятость), сетевые счётчики RX/TX и ARP-скан доступных локальных сетей.
+              Лог агента — <span className="font-mono">C:\ProgramData\pluto\agent.log</span>. Служба — <span className="font-mono">pluto-agent</span> (автозапуск).
             </p>
           </div>
         </Panel>

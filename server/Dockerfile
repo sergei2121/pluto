@@ -22,7 +22,9 @@ COPY server/package.json ./package.json
 # зависимостей у ядра нет — используем только встроенные модули Node
 
 COPY server/src ./src
+COPY agent ./agent
 COPY --from=web /app/dist ./web
+ENV AGENT_DIR=/app/agent
 
 VOLUME /data
 EXPOSE 8080 8443
