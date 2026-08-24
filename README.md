@@ -31,8 +31,11 @@ curl -s http://localhost:8080/api/health   # → {"ok":true,"version":"1.6.0",..
 cd agent
 go build -o pluto-agent.exe .
 
-# на целевой машине (PowerShell, администратор) — установка службой:
-pluto-agent.exe -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН>
+# на целевой машине (PowerShell, администратор):
+mkdir C:\pluto
+move pluto-agent.exe C:\pluto\pluto-agent.exe
+cd C:\pluto
+.\pluto-agent.exe -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН>
 ```
 
 Токен выдаётся в консоли: **Агенты → Создать токен агента**. Агент собирает телеметрию:

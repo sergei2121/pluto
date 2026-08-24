@@ -179,7 +179,7 @@ function TokenModal({ info, onClose }: { info: { name: string; token: string } |
   const [copied, setCopied] = useState(false);
 
   const host = typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : '<IP-сервера>';
-  const installCmd = `pluto-agent.exe -install -server ws://${host}:8443/ws -token ${info?.token ?? '<ТОКЕН>'}`;
+  const installCmd = `cd C:\\pluto\n.\\pluto-agent.exe -install -server ws://${host}:8443/ws -token ${info?.token ?? '<ТОКЕН>'}`;
 
   const copyToken = async () => {
     if (!info) return;
@@ -221,6 +221,11 @@ function TokenModal({ info, onClose }: { info: { name: string; token: string } |
           <div>
             <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Установка на Windows (PowerShell, администратор)</span>
             <CopyBlock label="powershell · с подставленным токеном" code={installCmd} />
+            <p className="mt-2 text-[11px] leading-relaxed text-dim">
+              Сначала соберите бинарник (<span className="font-mono text-mut">cd agent; go build -o pluto-agent.exe .</span>),
+              положите его в <span className="font-mono text-mut">C:\pluto</span> и запускайте с префиксом{' '}
+              <span className="font-mono text-mut">.\</span> — без него Windows не найдёт файл в текущей папке.
+            </p>
           </div>
 
           <p className="rounded-lg border border-warn/30 bg-warn/10 px-3.5 py-2.5 text-[11.5px] leading-relaxed text-warn">
@@ -291,8 +296,8 @@ export default function Agents() {
               Агент — один исполняемый файл на Go, без зависимостей. Ставится одной командой PowerShell, регистрируется как служба Windows
               и подключается к ядру по WebSocket с токеном. Токен создаётся кнопкой «Создать токен агента».
             </p>
-            <CopyBlock label="powershell · сборка из исходников" code={`cd agent\ngo build -o pluto-agent.exe .`} />
-            <CopyBlock label="powershell · установка службой" code={`pluto-agent.exe -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН_АГЕНТА>`} />
+            <CopyBlock label="powershell · сборка из исходников" code={`cd agent\ngo build -o pluto-agent.exe .\nmkdir C:\pluto\nmove pluto-agent.exe C:\pluto\pluto-agent.exe`} />
+            <CopyBlock label="powershell · установка службой (из C:\pluto)" code={`cd C:\pluto\n.\pluto-agent.exe -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН_АГЕНТА>`} />
             <p className="text-[11.5px] text-dim">
               Агент собирает: ЦП (загрузка, температура), ОЗУ, диски (объёмы, занятость, температуры), сетевые счётчики RX/TX и ARP-скан доступных локальных сетей.
             </p>

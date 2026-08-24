@@ -36,9 +36,12 @@ ADMIN_PASSWORD=pluto`;
 const AGENT_PS = `# Сборка бинарника из исходников (Go 1.21+, один раз):
 cd agent
 go build -o pluto-agent.exe .
+mkdir C:\pluto
+move pluto-agent.exe C:\pluto\pluto-agent.exe
 
 # PowerShell (от имени администратора) — установка службой:
-pluto-agent.exe -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН_АГЕНТА>
+cd C:\pluto
+.\pluto-agent.exe -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН_АГЕНТА>
 
 # Управление:
 sc.exe query pluto-agent      # статус службы

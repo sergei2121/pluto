@@ -304,7 +304,7 @@ func run(server, token string, metricsSec, lanSec int) {
 			continue
 		}
 		hello, _ := json.Marshal(map[string]interface{}{
-			"type": "hello", "hostname": hostname, "os": "Windows " + runtime.GOARCH, "version": "1.6.2",
+			"type": "hello", "hostname": hostname, "os": "Windows " + runtime.GOARCH, "version": "1.6.3",
 		})
 		conn.SendText(string(hello))
 		fmt.Println("[pluto-agent] подключено к", server)
