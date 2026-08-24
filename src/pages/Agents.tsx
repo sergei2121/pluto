@@ -1,7 +1,7 @@
 // ─── PLUTO: агенты ───────────────────────────────────────────────────────────
 import { useMemo, useState } from 'react';
-import { Cpu, HardDrive, KeyRound, Monitor, Network, Plus, Star, Terminal, Thermometer, Trash2 } from 'lucide-react';
-import { AreaChart, Bar, CopyBlock, Drawer, EmptyState, Panel, Ring, StatusDot, TimeAgo } from '../components/ui';
+import { Copy, Cpu, HardDrive, KeyRound, Monitor, Network, Plus, Star, Terminal, Thermometer, Trash2 } from 'lucide-react';
+import { AreaChart, Bar, CopyBlock, Drawer, EmptyState, Modal, Panel, Ring, StatusDot, TimeAgo } from '../components/ui';
 import { usePluto, useCurrentUser, visibleAgents, useToasts } from '../lib/store';
 import { api, syncAll } from '../lib/api';
 import { cls, fmtBytes, fmtGb, pct } from '../lib/util';
@@ -173,6 +173,65 @@ function AgentDrawer({ id, onClose }: { id: string | null; onClose: () => void }
   );
 }
 
+// ─── Окно с созданным токеном ────────────────────────────────────────────────
+
+function TokenModal({ info, onClose }: { info: { name: string; token: string } | null; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+
+  const host = typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : '<IP-сервера>';
+  const installCmd = `pluto-agent.exe -install -server ws://${host}:8443/ws -token ${info?.token ?? '<ТОКЕН>'}`;
+
+  const copyToken = async () => {
+    if (!info) return;
+    try {
+      await navigator.clipboard.writeText(info.token);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* буфер обмена недоступен — токен можно выделить вручную */
+    }
+  };
+
+  return (
+    <Modal open={!!info} onClose={onClose} title="Токен подключения агента">
+      {info && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 rounded-lg border border-ok/30 bg-ok/10 px-3.5 py-2.5">
+            <KeyRound className="h-4 w-4 shrink-0 text-ok" />
+            <p className="text-[12.5px] text-ok">Токен для «{info.name}» создан. Агент с этим токеном появится в списке автоматически.</p>
+          </div>
+
+          <div>
+            <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Токен</span>
+            <div className="flex items-center gap-2 rounded-lg border border-line bg-[#0b0f1f] px-3.5 py-3">
+              <code className="min-w-0 flex-1 break-all font-mono text-[13px] font-semibold tracking-wide text-vio">{info.token}</code>
+              <button
+                onClick={copyToken}
+                className={cls(
+                  'flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-wider transition-all',
+                  copied ? 'border-ok/50 bg-ok/10 text-ok' : 'border-line bg-raised text-dim hover:text-ink',
+                )}
+              >
+                <Copy className="h-3.5 w-3.5" />
+                {copied ? 'Скопировано' : 'Копировать'}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Установка на Windows (PowerShell, администратор)</span>
+            <CopyBlock label="powershell · с подставленным токеном" code={installCmd} />
+          </div>
+
+          <p className="rounded-lg border border-warn/30 bg-warn/10 px-3.5 py-2.5 text-[11.5px] leading-relaxed text-warn">
+            Токен — ключ доступа к ядру. Храните его как пароль и не передавайте третьим лицам. При компрометации удалите агента и создайте новый токен.
+          </p>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 export default function Agents() {
   const user = useCurrentUser();
   const isAdmin = user?.role === 'admin';
@@ -185,12 +244,14 @@ export default function Agents() {
 
   const [showInstall, setShowInstall] = useState(false);
   const [drawer, setDrawer] = useState<string | null>(null);
+  const [tokenInfo, setTokenInfo] = useState<{ name: string; token: string } | null>(null);
 
   const online = agents.filter((a) => a.online).length;
 
   const createToken = () => {
-    api.createAgentToken('agent-' + Date.now().toString(36).slice(-4))
-      .then((r) => { toast('ok', `Токен создан: ${r.token}`); void syncAll(); })
+    const name = 'agent-' + Date.now().toString(36).slice(-4);
+    api.createAgentToken(name)
+      .then((r) => { setTokenInfo({ name, token: r.token }); void syncAll(); })
       .catch((e) => toast('warn', (e as Error)?.message || 'Не удалось создать токен'));
   };
 
@@ -267,6 +328,7 @@ export default function Agents() {
       )}
 
       <AgentDrawer id={drawer} onClose={() => setDrawer(null)} />
+      <TokenModal info={tokenInfo} onClose={() => setTokenInfo(null)} />
     </div>
   );
 }
