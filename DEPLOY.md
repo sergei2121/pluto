@@ -73,10 +73,15 @@ pluto-ws.example.com {
 
 ### 3.2 Собрать бинарник (один раз, на любой машине с Go)
 
-```powershell
+```bash
 cd agent
-go build -o pluto-agent.exe .
+GOOS=windows GOARCH=amd64 go build -o pluto-agent.exe .
 ```
+
+Без `GOOS=windows` Go соберёт бинарник под ту ОС, где идёт сборка, — на Windows он не запустится
+(«не является действительным приложением»). Для ARM64-машин Windows используйте `GOARCH=arm64`.
+Проверка файла на Windows: `Get-Content .\pluto-agent.exe -AsByteStream -TotalCount 2` →
+должно быть `77 90` (MZ); `127 69` (ELF) — это Linux-бинарник.
 
 Готовый `pluto-agent.exe` можно раздавать по сети (один файл, без зависимостей).
 
