@@ -37,16 +37,14 @@ const AGENT_PS = `# Сборка бинарника (Go 1.12+, один раз).
 # иначе получите Linux-бинарник и «не является действительным приложением»:
 cd agent
 GOOS=windows GOARCH=amd64 go build -o pluto-agent.exe .
-mkdir C:\pluto
-move pluto-agent.exe C:\pluto\pluto-agent.exe
 
-# PowerShell (от имени администратора) — установка службой:
-cd C:\pluto
-.\pluto-agent.exe -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН_АГЕНТА>
+# Передайте pluto-agent.exe на Windows-машину и положите в C:\pluto.
+# PowerShell (от администратора) — установка службой одной строкой, из любой папки:
+& "C:\pluto\pluto-agent.exe" -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН_АГЕНТА>
 
 # Управление:
-sc.exe query pluto-agent      # статус службы
-pluto-agent.exe -uninstall    # удаление`;
+sc.exe query pluto-agent                        # статус службы
+& "C:\pluto\pluto-agent.exe" -uninstall         # удаление`;
 
 const DIAG_CMDS = `# 1. Жив ли API (ожидается {"ok":true,...,"version":"1.6.0"}):
 curl -s http://localhost:8080/api/health

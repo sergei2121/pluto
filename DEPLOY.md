@@ -73,15 +73,27 @@ pluto-ws.example.com {
 
 ### 3.2 Собрать бинарник (один раз, на любой машине с Go)
 
-```bash
-cd agent
-GOOS=windows GOARCH=amd64 go build -o pluto-agent.exe .
+Используйте один из защищённых скриптов — они сами выставляют платформу и **проверяют заголовок PE**,
+поэтому получить Linux-бинарник («не является действительным приложением») невозможно:
+
+**Вариант A — на самой Windows-машине (надёжнее всего).** Go на Windows всегда собирает под Windows:
+
+```powershell
+cd <папка-репозитория>\agent
+powershell -ExecutionPolicy Bypass -File .\build.ps1
 ```
 
-Без `GOOS=windows` Go соберёт бинарник под ту ОС, где идёт сборка, — на Windows он не запустится
-(«не является действительным приложением»). Для ARM64-машин Windows используйте `GOARCH=arm64`.
-Проверка файла на Windows: `Get-Content .\pluto-agent.exe -AsByteStream -TotalCount 2` →
-должно быть `77 90` (MZ); `127 69` (ELF) — это Linux-бинарник.
+**Вариант B — кросс-сборка на сервере с самопроверкой:**
+
+```bash
+bash agent/build.sh          # → готовый agent/pluto-agent.exe, заголовок PE проверен
+```
+
+Затем передайте `pluto-agent.exe` на Windows **в бинарном режиме** (scp/sftp; текстовые способы и FTP
+в ASCII-режиме повреждают exe). Для ARM64-машин Windows: `bash agent/build.sh windows arm64`.
+
+Дополнительная проверка уже на Windows: `Get-Content .\pluto-agent.exe -AsByteStream -TotalCount 2` →
+должно быть `77 90` (MZ); `127 69` (ELF) — это Linux-бинарник, пересоберите.
 
 Готовый `pluto-agent.exe` можно раздавать по сети (один файл, без зависимостей).
 
@@ -90,14 +102,15 @@ GOOS=windows GOARCH=amd64 go build -o pluto-agent.exe .
 PowerShell **от имени администратора**:
 
 ```powershell
-# собранный pluto-agent.exe положите в стабильную папку:
-mkdir C:\pluto
-move pluto-agent.exe C:\pluto\pluto-agent.exe
-cd C:\pluto
+# положите собранный pluto-agent.exe в стабильную папку, например C:\pluto
 
-# установка службой (обязательно с префиксом .\ — иначе Windows не найдёт файл):
-.\pluto-agent.exe -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН>
+# установка службой одной строкой — оператор & с полным путём работает из любой папки:
+& "C:\pluto\pluto-agent.exe" -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН>
 ```
+
+Одна строка с `&` и полным путём исключает ошибки вида «cd … .\pluto-agent.exe …» (когда две команды
+склеиваются в одну) и «не является действительным приложением» (exe собран под Linux — пересоберите с
+`GOOS=windows GOARCH=amd64`).
 
 Служба `pluto-agent` создаётся с автозапуском и сразу стартует. Управление:
 
