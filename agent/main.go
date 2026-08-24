@@ -303,8 +303,8 @@ func run(server, token string, metricsSec, lanSec int) {
 			time.Sleep(5 * time.Second)
 			continue
 		}
-		hello, _ := json.Marshal(map[string]any{
-			"type": "hello", "hostname": hostname, "os": "Windows " + runtime.GOARCH, "version": "1.6.0",
+		hello, _ := json.Marshal(map[string]interface{}{
+			"type": "hello", "hostname": hostname, "os": "Windows " + runtime.GOARCH, "version": "1.6.2",
 		})
 		conn.SendText(string(hello))
 		fmt.Println("[pluto-agent] подключено к", server)
@@ -319,14 +319,14 @@ func run(server, token string, metricsSec, lanSec int) {
 				case <-metTick.C:
 					m := collect(prev)
 					prev = &m
-					msg, _ := json.Marshal(map[string]any{"type": "metrics", "data": m})
+					msg, _ := json.Marshal(map[string]interface{}{"type": "metrics", "data": m})
 					if conn.SendText(string(msg)) != nil {
 						return
 					}
 				case <-lanTick.C:
 					if time.Since(lastLAN) > time.Duration(lanSec-1)*time.Second {
 						lastLAN = time.Now()
-						msg, _ := json.Marshal(map[string]any{"type": "lan", "networks": scanLAN()})
+						msg, _ := json.Marshal(map[string]interface{}{"type": "lan", "networks": scanLAN()})
 						if conn.SendText(string(msg)) != nil {
 							return
 						}
