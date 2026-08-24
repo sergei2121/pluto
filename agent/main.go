@@ -272,7 +272,10 @@ func scanLAN() []Network {
 
 // ─── Установка службой Windows ──────────────────────────────────────────────
 
+const agentVersion = "1.6.4"
+
 func installService(server, token string) {
+	fmt.Println("[pluto-agent] версия", agentVersion)
 	if token == "" {
 		fmt.Println("укажите -token <ТОКЕН> (создаётся в консоли: Агенты → Создать токен агента)")
 		os.Exit(1)
@@ -327,7 +330,7 @@ func run(server, token string, metricsSec, lanSec int) {
 			continue
 		}
 		hello, _ := json.Marshal(map[string]interface{}{
-			"type": "hello", "hostname": hostname, "os": "Windows " + runtime.GOARCH, "version": "1.6.4",
+			"type": "hello", "hostname": hostname, "os": "Windows " + runtime.GOARCH, "version": agentVersion,
 		})
 		conn.SendText(string(hello))
 		fmt.Println("[pluto-agent] подключено к", server)
@@ -371,6 +374,11 @@ func main() {
 	install := flag.Bool("install", false, "установить службой Windows")
 	uninstall := flag.Bool("uninstall", false, "удалить службу")
 	flag.Parse()
+
+	// версию видно в любом режиме — по ней проверяют, что бинарник свежий
+	if !*install && !*uninstall {
+		fmt.Println("[pluto-agent] версия", agentVersion)
+	}
 
 	switch {
 	case *install:
