@@ -1,7 +1,7 @@
 // ─── PLUTO: агенты ───────────────────────────────────────────────────────────
-import { useMemo, useState } from 'react';
-import { Copy, Cpu, HardDrive, KeyRound, Monitor, Network, Plus, Star, Terminal, Thermometer, Trash2 } from 'lucide-react';
-import { AreaChart, Bar, CopyBlock, Drawer, EmptyState, Modal, Panel, Ring, StatusDot, TimeAgo } from '../components/ui';
+import { useEffect, useMemo, useState } from 'react';
+import { Copy, Cpu, HardDrive, KeyRound, Monitor, Network, Pencil, Plus, Star, Terminal, Thermometer, Trash2 } from 'lucide-react';
+import { AreaChart, Bar, CopyBlock, Drawer, EmptyState, Field, Modal, Panel, Ring, StatusDot, TimeAgo } from '../components/ui';
 import { usePluto, useCurrentUser, visibleAgents, useToasts } from '../lib/store';
 import { api, syncAll } from '../lib/api';
 import { cls, fmtBytes, fmtGb, pct } from '../lib/util';
@@ -18,8 +18,10 @@ function AgentCard({ a, delay, onOpen }: { a: Agent; delay: number; onOpen: () =
       <div className="flex items-center gap-2.5">
         <StatusDot status={a.online ? 'up' : 'down'} />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[14px] font-bold text-ink">{a.hostname}</div>
-          <div className="font-mono text-[10.5px] text-dim">{a.ip} · {a.os || 'Windows'}</div>
+          <div className="truncate text-[14px] font-bold text-ink">{a.name || a.hostname}</div>
+          <div className="truncate font-mono text-[10.5px] text-dim">
+            {a.hostname && a.hostname !== a.name ? `${a.hostname} · ` : ''}{a.ip} · {a.os || 'Windows'}
+          </div>
         </div>
         <button onClick={(e) => { e.stopPropagation(); toggleFav(a.id); }} className="rounded-md p-1 text-dim transition-all hover:text-warn">
           <Star className={cls('h-4 w-4', a.favorite && 'fill-warn text-warn')} />
@@ -55,7 +57,7 @@ function AgentCard({ a, delay, onOpen }: { a: Agent; delay: number; onOpen: () =
   );
 }
 
-function AgentDrawer({ id, onClose }: { id: string | null; onClose: () => void }) {
+function AgentDrawer({ id, onClose, onEdit }: { id: string | null; onClose: () => void; onEdit: (a: Agent) => void }) {
   const a = usePluto((s) => s.agents.find((x) => x.id === id));
   const removeAgent = usePluto((s) => s.removeAgent);
   const toggleFav = usePluto((s) => s.toggleAgentFav);
@@ -75,8 +77,10 @@ function AgentDrawer({ id, onClose }: { id: string | null; onClose: () => void }
         <div className="flex items-center gap-2.5">
           <StatusDot status={a.online ? 'up' : 'down'} />
           <div>
-            <div className="font-display text-[15px] font-semibold text-ink">{a.hostname}</div>
-            <div className="font-mono text-[11px] text-dim">{a.ip} · агент v{a.version}</div>
+            <div className="font-display text-[15px] font-semibold text-ink">{a.name || a.hostname}</div>
+            <div className="font-mono text-[11px] text-dim">
+              {a.hostname && a.hostname !== a.name ? `${a.hostname} · ` : ''}{a.ip} · агент v{a.version}
+            </div>
           </div>
         </div>
       }
@@ -158,6 +162,11 @@ function AgentDrawer({ id, onClose }: { id: string | null; onClose: () => void }
           <button className="btn-ghost flex-1 justify-center" onClick={() => toggleFav(a.id)}>
             <Star className={cls('h-4 w-4', a.favorite && 'fill-warn text-warn')} /> Избранное
           </button>
+          {apiMode === 'server' && (
+            <button className="btn-ghost flex-1 justify-center" onClick={() => onEdit(a)}>
+              <Pencil className="h-4 w-4" /> Изменить
+            </button>
+          )}
           {confirmDel ? (
             <button className="btn-ghost flex-1 justify-center border-crit/50 text-crit" onClick={() => { removeAgent(a.id); onClose(); }}>
               Подтвердить удаление
@@ -237,6 +246,109 @@ function TokenModal({ info, onClose }: { info: { name: string; token: string } |
   );
 }
 
+// ─── Создание агента: имя → токен ───────────────────────────────────────────
+
+function NewAgentModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (info: { name: string; token: string }) => void }) {
+  const [name, setName] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const toast = (k: 'ok' | 'warn', t: string) => useToasts.push(k, t);
+
+  useEffect(() => {
+    if (open) { setName(''); setErr(''); }
+  }, [open]);
+
+  const submit = () => {
+    const n = name.trim();
+    if (!n) { setErr('Введите понятное имя — за что отвечает машина'); return; }
+    setBusy(true);
+    api.createAgentToken(n)
+      .then((r) => { onCreated({ name: n, token: r.token }); void syncAll(); onClose(); })
+      .catch((e) => toast('warn', (e as Error)?.message || 'Не удалось создать токен'))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title="Новый агент">
+      <div className="space-y-4">
+        <Field label="Имя агента" hint="как он будет виден в списке: за что отвечает машина">
+          <input
+            className="inp"
+            value={name}
+            onChange={(e) => { setName(e.target.value); setErr(''); }}
+            onKeyDown={(e) => e.key === 'Enter' && submit()}
+            placeholder="Например: Касса №3 · Склад — видеонаблюдение"
+            autoFocus
+          />
+        </Field>
+        <p className="rounded-lg border border-line bg-raised/40 px-3.5 py-2.5 text-[11.5px] leading-relaxed text-dim">
+          Имя можно изменить в любой момент через карточку агента. Hostname машины подставится автоматически при первом подключении.
+        </p>
+        {err && <p className="pop rounded-lg border border-crit/40 bg-crit/10 px-3 py-2 text-[12.5px] text-crit">{err}</p>}
+        <div className="flex justify-end gap-2 pt-1">
+          <button className="btn-ghost" onClick={onClose}>Отмена</button>
+          <button className="btn-acc" onClick={submit} disabled={busy}>
+            <KeyRound className="h-4 w-4" /> {busy ? 'Создание…' : 'Создать токен'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Редактирование агента (имя) ────────────────────────────────────────────
+
+function EditAgentModal({ agent, onClose }: { agent: Agent | null; onClose: () => void }) {
+  const [name, setName] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const toast = (k: 'ok' | 'warn', t: string) => useToasts.push(k, t);
+
+  useEffect(() => {
+    if (agent) { setName(agent.name || agent.hostname || ''); setErr(''); }
+  }, [agent]);
+
+  const submit = () => {
+    if (!agent) return;
+    const n = name.trim();
+    if (!n) { setErr('Имя не может быть пустым'); return; }
+    setBusy(true);
+    api.patchAgent(agent.id, { name: n })
+      .then(() => { toast('ok', `Агент переименован в «${n}»`); void syncAll(); onClose(); })
+      .catch((e) => toast('warn', (e as Error)?.message || 'Не удалось сохранить'))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <Modal open={!!agent} onClose={onClose} title="Изменить агента">
+      {agent && (
+        <div className="space-y-4">
+          <Field label="Имя агента" hint="отображается в списке и на карточке">
+            <input
+              className="inp"
+              value={name}
+              onChange={(e) => { setName(e.target.value); setErr(''); }}
+              onKeyDown={(e) => e.key === 'Enter' && submit()}
+              autoFocus
+            />
+          </Field>
+          <div className="space-y-1.5 rounded-lg border border-line bg-raised/40 p-3.5 font-mono text-[12px]">
+            <div className="flex justify-between"><span className="text-dim">Hostname</span><span className="text-mut">{agent.hostname || '—'}</span></div>
+            <div className="flex justify-between"><span className="text-dim">IP</span><span className="text-mut">{agent.ip || '—'}</span></div>
+          </div>
+          {err && <p className="pop rounded-lg border border-crit/40 bg-crit/10 px-3 py-2 text-[12.5px] text-crit">{err}</p>}
+          <div className="flex justify-end gap-2 pt-1">
+            <button className="btn-ghost" onClick={onClose}>Отмена</button>
+            <button className="btn-acc" onClick={submit} disabled={busy}>
+              <Pencil className="h-4 w-4" /> {busy ? 'Сохранение…' : 'Сохранить'}
+            </button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 export default function Agents() {
   const user = useCurrentUser();
   const isAdmin = user?.role === 'admin';
@@ -250,15 +362,10 @@ export default function Agents() {
   const [showInstall, setShowInstall] = useState(false);
   const [drawer, setDrawer] = useState<string | null>(null);
   const [tokenInfo, setTokenInfo] = useState<{ name: string; token: string } | null>(null);
+  const [newAgent, setNewAgent] = useState(false);
+  const [editing, setEditing] = useState<Agent | null>(null);
 
   const online = agents.filter((a) => a.online).length;
-
-  const createToken = () => {
-    const name = 'agent-' + Date.now().toString(36).slice(-4);
-    api.createAgentToken(name)
-      .then((r) => { setTokenInfo({ name, token: r.token }); void syncAll(); })
-      .catch((e) => toast('warn', (e as Error)?.message || 'Не удалось создать токен'));
-  };
 
   return (
     <div className="space-y-4">
@@ -276,7 +383,7 @@ export default function Agents() {
                 <Terminal className="h-4 w-4" /> Установка на Windows
               </button>
               {apiMode === 'server' ? (
-                <button className="btn-acc" onClick={createToken}>
+                <button className="btn-acc" onClick={() => setNewAgent(true)}>
                   <KeyRound className="h-4 w-4" /> Создать токен агента
                 </button>
               ) : (
@@ -315,7 +422,7 @@ export default function Agents() {
               : 'Подключите Windows-машину по токену или поднимите тестового агента, чтобы увидеть телеметрию: ЦП, ОЗУ, диски, температуры, сеть и LAN-скан.'}
             action={isAdmin ? (
               apiMode === 'server' ? (
-                <button className="btn-acc" onClick={createToken}><KeyRound className="h-4 w-4" /> Создать токен агента</button>
+                <button className="btn-acc" onClick={() => setNewAgent(true)}><KeyRound className="h-4 w-4" /> Создать токен агента</button>
               ) : (
                 <button className="btn-acc" onClick={() => { const a = addEmulated(); if (a) { toast('ok', `Тестовый агент ${a.hostname} подключён`); setDrawer(a.id); } }}>
                   <Plus className="h-4 w-4" /> Подключить тестового агента
@@ -332,8 +439,10 @@ export default function Agents() {
         </div>
       )}
 
-      <AgentDrawer id={drawer} onClose={() => setDrawer(null)} />
+      <AgentDrawer id={drawer} onClose={() => setDrawer(null)} onEdit={(a) => setEditing(a)} />
       <TokenModal info={tokenInfo} onClose={() => setTokenInfo(null)} />
+      <NewAgentModal open={newAgent} onClose={() => setNewAgent(false)} onCreated={(info) => setTokenInfo(info)} />
+      <EditAgentModal agent={editing} onClose={() => setEditing(null)} />
     </div>
   );
 }
