@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -272,15 +273,37 @@ func scanLAN() []Network {
 // ─── Установка службой Windows ──────────────────────────────────────────────
 
 func installService(server, token string) {
-	exe, _ := os.Executable()
-	args := fmt.Sprintf(`create pluto-agent binPath= "\"%s\" -server %s -token %s" start= auto DisplayName= "PLUTO Agent"`, exe, server, token)
-	cmd := exec.Command("sc.exe", strings.Fields(args)...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		fmt.Println("ошибка установки:", string(out))
+	if token == "" {
+		fmt.Println("укажите -token <ТОКЕН> (создаётся в консоли: Агенты → Создать токен агента)")
 		os.Exit(1)
 	}
-	exec.Command("sc.exe", "start", "pluto-agent").Run()
-	fmt.Println("служба pluto-agent установлена и запущена")
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Println("не удалось определить путь к pluto-agent.exe:", err)
+		os.Exit(1)
+	}
+	exe, _ = filepath.Abs(exe)
+
+	// sc.exe принимает пары "ключ= значение" ОТДЕЛЬНЫМИ аргументами
+	// (знак равенства слитно с ключом, значение — следующим элементом).
+	binPath := fmt.Sprintf(`"%s" -server %s -token %s`, exe, server, token)
+	cmd := exec.Command("sc.exe", "create", "pluto-agent", "binPath=", binPath, "start=", "auto", "DisplayName=", "PLUTO Agent")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		fmt.Println("ошибка установки:", string(out))
+		if strings.Contains(string(out), "1073") {
+			fmt.Println("служба уже существует: выполните .\\pluto-agent.exe -uninstall и установите заново")
+		}
+		os.Exit(1)
+	}
+	fmt.Println("служба pluto-agent создана")
+	fmt.Println("  binPath =", binPath)
+
+	if out, err := exec.Command("sc.exe", "start", "pluto-agent").CombinedOutput(); err != nil {
+		fmt.Println("служба создана, но не запустилась:", string(out))
+		fmt.Println("запустите вручную: sc.exe start pluto-agent")
+		return
+	}
+	fmt.Println("служба запущена — агент появится в консоли PLUTO в течение нескольких секунд")
 }
 
 func uninstallService() {
@@ -304,7 +327,7 @@ func run(server, token string, metricsSec, lanSec int) {
 			continue
 		}
 		hello, _ := json.Marshal(map[string]interface{}{
-			"type": "hello", "hostname": hostname, "os": "Windows " + runtime.GOARCH, "version": "1.6.3",
+			"type": "hello", "hostname": hostname, "os": "Windows " + runtime.GOARCH, "version": "1.6.4",
 		})
 		conn.SendText(string(hello))
 		fmt.Println("[pluto-agent] подключено к", server)
