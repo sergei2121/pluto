@@ -33,9 +33,10 @@ const ENV_EXAMPLE = `# .env — создайте рядом с docker-compose.ym
 # Смените после первого входа: Настройки → Пользователи.
 ADMIN_PASSWORD=pluto`;
 
-const AGENT_PS = `# Сборка бинарника из исходников (Go 1.21+, один раз):
+const AGENT_PS = `# Сборка бинарника (Go 1.12+, один раз). ВАЖНО: кросс-компиляция под Windows,
+# иначе получите Linux-бинарник и «не является действительным приложением»:
 cd agent
-go build -o pluto-agent.exe .
+GOOS=windows GOARCH=amd64 go build -o pluto-agent.exe .
 mkdir C:\pluto
 move pluto-agent.exe C:\pluto\pluto-agent.exe
 
