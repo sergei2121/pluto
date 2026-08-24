@@ -27,7 +27,7 @@ curl -s http://localhost:8080/api/health   # → {"ok":true,"version":"1.6.0",..
 ## Агент (Windows)
 
 ```powershell
-# сборка из исходников (Go 1.21+, один раз):
+# сборка из исходников (Go 1.12+, один раз):
 cd agent
 go build -o pluto-agent.exe .
 
