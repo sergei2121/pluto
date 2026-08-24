@@ -85,7 +85,13 @@ go build -o pluto-agent.exe .
 PowerShell **от имени администратора**:
 
 ```powershell
-pluto-agent.exe -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН>
+# собранный pluto-agent.exe положите в стабильную папку:
+mkdir C:\pluto
+move pluto-agent.exe C:\pluto\pluto-agent.exe
+cd C:\pluto
+
+# установка службой (обязательно с префиксом .\ — иначе Windows не найдёт файл):
+.\pluto-agent.exe -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН>
 ```
 
 Служба `pluto-agent` создаётся с автозапуском и сразу стартует. Управление:
