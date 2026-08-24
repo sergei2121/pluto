@@ -12,11 +12,74 @@ import {
   issueSession, attachWs, DEFAULT_SETTINGS,
 } from './lib.js';
 
-const VERSION = '1.6.5';
+const VERSION = '1.7.0';
 const db = loadDb();
 const HTTP_PORT = Number(process.env.HTTP_PORT || 8080);
 const AGENT_PORT = Number(process.env.AGENT_PORT || 8443);
 const WEB_DIR = process.env.WEB_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web');
+const AGENT_DIR = process.env.AGENT_DIR || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'agent');
+
+function text(res, code, body, type) {
+  res.writeHead(code, { 'Content-Type': type, 'Access-Control-Allow-Origin': '*' });
+  res.end(body);
+}
+
+// IP/хост, по которому клиент обратился к ядру (для подстановки в установщик агента)
+function hostIp(req) {
+  const h = (req.headers['x-forwarded-host'] || req.headers.host || '').split(':')[0];
+  return h || '127.0.0.1';
+}
+
+// PowerShell-установщик агента: скачивает исходник, компилирует встроенным csc.exe,
+// ставит службой Windows и запускает. Плейсхолдеры подставляются при отдаче.
+const INSTALL_PS = `# PLUTO Agent — установщик для Windows (запускать от имени администратора)
+param(
+  [string]$Token = "",
+  [string]$Server = "__WS_URL__",
+  [string]$Name = "pluto-agent"
+)
+$ErrorActionPreference = 'Stop'
+$base = "__HTTP_BASE__"
+$dir  = "$env:ProgramData\\pluto"
+$src  = "$dir\\PlutoAgent.cs"
+$exe  = "$dir\\pluto-agent.exe"
+
+if (-not $Token) { $Token = Read-Host "Введите токен агента (консоль: Агенты -> Создать токен)" }
+if (-not $Token) { Write-Host "Токен обязателен." -ForegroundColor Red; exit 1 }
+
+Write-Host "[pluto] каталог: $dir"
+New-Item -ItemType Directory -Force -Path $dir | Out-Null
+
+Write-Host "[pluto] скачиваю исходник агента с ядра..."
+Invoke-WebRequest -UseBasicParsing -Uri "$base/agent/PlutoAgent.cs" -OutFile $src
+
+$csc = Get-ChildItem "$env:WINDIR\\Microsoft.NET\\Framework64\\*\\csc.exe" -ErrorAction SilentlyContinue |
+       Sort-Object FullName -Descending | Select-Object -First 1
+if (-not $csc) { throw "csc.exe не найден. Нужен .NET Framework 4.x (обычно уже установлен в Windows)." }
+
+Write-Host "[pluto] компилирую агент под вашу Windows ($($csc.FullName))..."
+& $csc.FullName /nologo /target:exe /out:$exe \`
+    /reference:System.Management.dll /reference:System.ServiceProcess.dll /reference:System.Net.Http.dll $src
+if ($LASTEXITCODE -ne 0) { throw "компиляция не удалась (код $LASTEXITCODE). Полный вывод выше." }
+Write-Host "[pluto] скомпилировано: $exe"
+
+Write-Host "[pluto] останавливаю и удаляю старую службу (если была)..."
+sc.exe stop $Name 2>$null | Out-Null
+sc.exe delete $Name 2>$null | Out-Null
+Start-Sleep -Seconds 1
+
+Write-Host "[pluto] создаю службу Windows '$Name'..."
+& sc.exe create $Name binPath= "\`"$exe\`" -server $Server -token $Token" start= auto DisplayName= "PLUTO Agent"
+if ($LASTEXITCODE -ne 0) { throw "не удалось создать службу. Убедитесь, что PowerShell запущен от имени администратора." }
+
+Write-Host "[pluto] запускаю службу..."
+& sc.exe start $Name
+
+Write-Host ""
+Write-Host "[pluto] ГОТОВО. Агент появится в консоли PLUTO в течение нескольких секунд." -ForegroundColor Green
+Write-Host "[pluto] сервер : $Server"
+Write-Host "[pluto] лог    : $dir\\agent.log"
+`;
 
 // ─── Проверки устройств (настоящие) ─────────────────────────────────────────
 
@@ -305,6 +368,21 @@ const server = http.createServer(async (req, res) => {
     // ── публичные (до авторизации) ──
     if (p === '/api/health') return json(res, 200, { ok: true, name: 'pluto-core', version: VERSION, console: 'api' });
     if (p === '/api/version') return json(res, 200, { version: VERSION });
+
+    // ── раздача Windows-агента (публично: качает «голая» PowerShell) ──
+    // Агент компилируется НА МАШИНЕ встроенным csc.exe → всегда под нужную архитектуру.
+    if (p === '/agent/PlutoAgent.cs' && method === 'GET') {
+      const f = path.join(AGENT_DIR, 'PlutoAgent.cs');
+      if (!fs.existsSync(f)) return text(res, 404, 'PlutoAgent.cs не найден', 'text/plain; charset=utf-8');
+      return text(res, 200, fs.readFileSync(f, 'utf8'), 'text/plain; charset=utf-8');
+    }
+    if (p === '/agent/install.ps1' && method === 'GET') {
+      const ip = hostIp(req);
+      const body = INSTALL_PS
+        .replace(/__HTTP_BASE__/g, `http://${ip}:${HTTP_PORT}`)
+        .replace(/__WS_URL__/g, `ws://${ip}:${AGENT_PORT}/ws`);
+      return text(res, 200, body, 'text/plain; charset=utf-8');
+    }
 
     if (p === '/api/auth/login' && method === 'POST') {
       const { name, password } = await readBody(req);
