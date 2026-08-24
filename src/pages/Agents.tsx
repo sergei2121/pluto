@@ -188,7 +188,8 @@ function TokenModal({ info, onClose }: { info: { name: string; token: string } |
   const [copied, setCopied] = useState(false);
 
   const host = typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : '<IP-сервера>';
-  const installCmd = `cd C:\\pluto\n.\\pluto-agent.exe -install -server ws://${host}:8443/ws -token ${info?.token ?? '<ТОКЕН>'}`;
+  // Одна строка с оператором & и полным путём: не нужны cd и .\, не ломается при склейке строк
+  const installCmd = `& "C:\\pluto\\pluto-agent.exe" -install -server ws://${host}:8443/ws -token ${info?.token ?? '<ТОКЕН>'}`;
 
   const copyToken = async () => {
     if (!info) return;
@@ -231,10 +232,11 @@ function TokenModal({ info, onClose }: { info: { name: string; token: string } |
             <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Установка на Windows (PowerShell, администратор)</span>
             <CopyBlock label="powershell · с подставленным токеном" code={installCmd} />
             <p className="mt-2 text-[11px] leading-relaxed text-dim">
-              Соберите бинарник одним из защищённых скриптов: на Windows —{' '}
-              <span className="font-mono text-mut">powershell -File agent\build.ps1</span> (надёжнее всего), либо на сервере —{' '}
-              <span className="font-mono text-mut">bash agent/build.sh</span> (сам проверит заголовок PE). Готовый файл положите в{' '}
-              <span className="font-mono text-mut">C:\pluto</span> и запускайте с префиксом <span className="font-mono text-mut">.\</span>.
+              Соберите бинарник под Windows (на сервере:{' '}
+              <span className="font-mono text-mut">cd agent; GOOS=windows GOARCH=amd64 go build -o pluto-agent.exe .</span>) и положите в{' '}
+              <span className="font-mono text-mut">C:\pluto</span>. Команда выше с оператором <span className="font-mono text-mut">&amp;</span> и полным
+              путём работает из любой папки — без <span className="font-mono text-mut">cd</span> и <span className="font-mono text-mut">.\</span>. Если exe
+              лежит в другом месте, замените путь в кавычках.
             </p>
           </div>
 
@@ -405,7 +407,7 @@ export default function Agents() {
               и подключается к ядру по WebSocket с токеном. Токен создаётся кнопкой «Создать токен агента».
             </p>
             <CopyBlock label="bash · сборка на сервере (кросс-компиляция под Windows)" code={`cd agent\nGOOS=windows GOARCH=amd64 go build -o pluto-agent.exe .`} />
-            <CopyBlock label="powershell · установка службой (из C:\pluto)" code={`cd C:\pluto\n.\pluto-agent.exe -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН_АГЕНТА>`} />
+            <CopyBlock label="powershell · установка службой (одна строка, полный путь)" code={`& "C:\pluto\pluto-agent.exe" -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН_АГЕНТА>`} />
             <p className="text-[11.5px] leading-relaxed text-warn">
               Если Windows пишет «не является действительным приложением» — exe собран под Linux. Пересоберите с{' '}
               <span className="font-mono">GOOS=windows GOARCH=amd64</span> (для ARM-машин — <span className="font-mono">GOARCH=arm64</span>).

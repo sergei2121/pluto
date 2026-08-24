@@ -33,27 +33,18 @@ const ENV_EXAMPLE = `# .env — создайте рядом с docker-compose.ym
 # Смените после первого входа: Настройки → Пользователи.
 ADMIN_PASSWORD=pluto`;
 
-const AGENT_PS = `# ── Вариант A (надёжнее всего): сборка ПРЯМО НА WINDOWS ──────────────────
-# Go на Windows собирает под Windows — ошибка «не является приложением» исключена:
-cd <папка-репозитория>\agent
-powershell -ExecutionPolicy Bypass -File .\build.ps1
+const AGENT_PS = `# Сборка бинарника (Go 1.12+, один раз). ВАЖНО: кросс-компиляция под Windows,
+# иначе получите Linux-бинарник и «не является действительным приложением»:
+cd agent
+GOOS=windows GOARCH=amd64 go build -o pluto-agent.exe .
 
-# ── Вариант B: кросс-сборка НА СЕРВЕРЕ с самопроверкой ───────────────────
-# Скрипт сам выставит платформу и проверит заголовок PE (MZ) до передачи:
-bash agent/build.sh          # → готовый agent/pluto-agent.exe
-# затем передайте этот файл на Windows (scp в бинарном режиме!)
-
-# ── Размещение и установка службой (на Windows, от администратора) ───────
-mkdir C:\pluto
-move pluto-agent.exe C:\pluto\pluto-agent.exe
-
-# PowerShell (от имени администратора) — установка службой:
-cd C:\pluto
-.\pluto-agent.exe -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН_АГЕНТА>
+# Передайте pluto-agent.exe на Windows-машину и положите в C:\pluto.
+# PowerShell (от администратора) — установка службой одной строкой, из любой папки:
+& "C:\pluto\pluto-agent.exe" -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН_АГЕНТА>
 
 # Управление:
-sc.exe query pluto-agent      # статус службы
-pluto-agent.exe -uninstall    # удаление`;
+sc.exe query pluto-agent                        # статус службы
+& "C:\pluto\pluto-agent.exe" -uninstall         # удаление`;
 
 const DIAG_CMDS = `# 1. Жив ли API (ожидается {"ok":true,...,"version":"1.6.0"}):
 curl -s http://localhost:8080/api/health

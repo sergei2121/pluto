@@ -27,15 +27,13 @@ curl -s http://localhost:8080/api/health   # → {"ok":true,"version":"1.6.0",..
 ## Агент (Windows)
 
 ```powershell
-# сборка (Go 1.12+, один раз) — защищённые скрипты, сами проверяют заголовок PE:
-#   на Windows:  cd <репо>\agent ; powershell -ExecutionPolicy Bypass -File .\build.ps1
-#   на сервере:  bash agent/build.sh   (затем передайте agent/pluto-agent.exe в бинарном режиме)
+# сборка (Go 1.12+, один раз) — кросс-компиляция под Windows:
+cd agent
+GOOS=windows GOARCH=amd64 go build -o pluto-agent.exe .
 
-# на целевой машине (PowerShell, администратор):
-mkdir C:\pluto
-move pluto-agent.exe C:\pluto\pluto-agent.exe
-cd C:\pluto
-.\pluto-agent.exe -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН>
+# на целевой машине (PowerShell, администратор): положите exe в C:\pluto, затем
+# установка службой одной строкой — работает из любой папки:
+& "C:\pluto\pluto-agent.exe" -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН>
 ```
 
 Токен выдаётся в консоли: **Агенты → Создать токен агента**. Агент собирает телеметрию:

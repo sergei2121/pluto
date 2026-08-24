@@ -102,14 +102,15 @@ bash agent/build.sh          # → готовый agent/pluto-agent.exe, заг�
 PowerShell **от имени администратора**:
 
 ```powershell
-# собранный pluto-agent.exe положите в стабильную папку:
-mkdir C:\pluto
-move pluto-agent.exe C:\pluto\pluto-agent.exe
-cd C:\pluto
+# положите собранный pluto-agent.exe в стабильную папку, например C:\pluto
 
-# установка службой (обязательно с префиксом .\ — иначе Windows не найдёт файл):
-.\pluto-agent.exe -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН>
+# установка службой одной строкой — оператор & с полным путём работает из любой папки:
+& "C:\pluto\pluto-agent.exe" -install -server ws://<IP-сервера>:8443/ws -token <ТОКЕН>
 ```
+
+Одна строка с `&` и полным путём исключает ошибки вида «cd … .\pluto-agent.exe …» (когда две команды
+склеиваются в одну) и «не является действительным приложением» (exe собран под Linux — пересоберите с
+`GOOS=windows GOARCH=amd64`).
 
 Служба `pluto-agent` создаётся с автозапуском и сразу стартует. Управление:
 
