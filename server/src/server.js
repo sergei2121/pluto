@@ -12,7 +12,7 @@ import {
   issueSession, attachWs, DEFAULT_SETTINGS,
 } from './lib.js';
 
-const VERSION = '1.7.0';
+const VERSION = '1.7.1';
 const db = loadDb();
 const HTTP_PORT = Number(process.env.HTTP_PORT || 8080);
 const AGENT_PORT = Number(process.env.AGENT_PORT || 8443);
@@ -52,6 +52,18 @@ New-Item -ItemType Directory -Force -Path $dir | Out-Null
 
 Write-Host "[pluto] скачиваю исходник агента с ядра..."
 Invoke-WebRequest -UseBasicParsing -Uri "$base/agent/PlutoAgent.cs" -OutFile $src
+
+# Самопроверка: устаревший образ ядра отдаёт HTML вместо исходника — прерваться понятно
+$head = (Get-Content $src -TotalCount 1 -Encoding UTF8 -ErrorAction SilentlyContinue)
+if ($head -match '<!doctype|<html') {
+  Write-Host "[pluto] ОШИБКА: ядро отдало HTML, а не исходник агента — образ устарел." -ForegroundColor Red
+  Write-Host "        На сервере выполните: git pull && docker compose up -d --build" -ForegroundColor Yellow
+  exit 1
+}
+if (-not (Select-String -Path $src -Pattern 'class Program' -Quiet)) {
+  Write-Host "[pluto] ОШИБКА: скачанный файл не похож на исходник агента." -ForegroundColor Red
+  exit 1
+}
 
 $csc = Get-ChildItem "$env:WINDIR\\Microsoft.NET\\Framework64\\*\\csc.exe" -ErrorAction SilentlyContinue |
        Sort-Object FullName -Descending | Select-Object -First 1
@@ -371,17 +383,19 @@ const server = http.createServer(async (req, res) => {
 
     // ── раздача Windows-агента (публично: качает «голая» PowerShell) ──
     // Агент компилируется НА МАШИНЕ встроенным csc.exe → всегда под нужную архитектуру.
+    // BOM обязателен: PowerShell 5.1 и csc.exe на Windows без него читают файл
+    // в системной кодовой странице (Windows-1251 на русской ОС) и ломают кириллицу.
     if (p === '/agent/PlutoAgent.cs' && method === 'GET') {
       const f = path.join(AGENT_DIR, 'PlutoAgent.cs');
       if (!fs.existsSync(f)) return text(res, 404, 'PlutoAgent.cs не найден', 'text/plain; charset=utf-8');
-      return text(res, 200, fs.readFileSync(f, 'utf8'), 'text/plain; charset=utf-8');
+      return text(res, 200, '\uFEFF' + fs.readFileSync(f, 'utf8'), 'text/plain; charset=utf-8');
     }
     if (p === '/agent/install.ps1' && method === 'GET') {
       const ip = hostIp(req);
       const body = INSTALL_PS
         .replace(/__HTTP_BASE__/g, `http://${ip}:${HTTP_PORT}`)
         .replace(/__WS_URL__/g, `ws://${ip}:${AGENT_PORT}/ws`);
-      return text(res, 200, body, 'text/plain; charset=utf-8');
+      return text(res, 200, '\uFEFF' + body, 'text/plain; charset=utf-8');
     }
 
     if (p === '/api/auth/login' && method === 'POST') {
@@ -390,6 +404,9 @@ const server = http.createServer(async (req, res) => {
       if (!user || !verifyPass(password || '', user.passHash)) return json(res, 401, { error: 'Неверный логин или пароль' });
       return json(res, 200, { token: issueSession(user.id), user: publicUser(user) });
     }
+
+    // маршруты агента выше; сюда доходят только неизвестные /agent/* — не отдаём HTML
+    if (method === 'GET' && p.startsWith('/agent/')) return text(res, 404, 'not found', 'text/plain');
 
     // ── статика веб-консоли (без авторизации) ──
     if (method === 'GET' && !p.startsWith('/api/')) {
