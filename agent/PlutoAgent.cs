@@ -230,26 +230,35 @@ class Worker
     {
         while (!_stop.WaitOne(0))
         {
-            try { Loop(); }
-            catch (Exception e) { Log("ошибка: " + e.Message); }
+            // ВАЖНО: Loop() возвращает Task и дожидается — иначе ошибки подключения
+            // теряются (async void) и причина сбоя не попадает в лог
+            try { Loop().GetAwaiter().GetResult(); }
+            catch (Exception e)
+            {
+                var root = e.GetBaseException();
+                Log("ошибка: " + root.GetType().Name + ": " + root.Message + "  (сервер: " + _server + ")");
+            }
             if (!_stop.WaitOne(0)) { Log("переподключение через 5 с…"); _stop.WaitOne(5000); }
         }
     }
 
-    async void Loop()
+    async Task Loop()
     {
         using (var ws = new ClientWebSocket())
         {
             string url = _server + (_server.Contains("?") ? "&" : "?") + "token=" + Uri.EscapeDataString(_token);
-            await ws.ConnectAsync(new Uri(url), CancellationToken.None);
+            Log("подключаюсь к " + url.Replace(_token, "***"));
+            var cts = new CancellationTokenSource(15000); // не висеть вечно, если порт закрыт
+            await ws.ConnectAsync(new Uri(url), cts.Token);
             Log("подключено к " + _server);
 
             string hello = "{\"type\":\"hello\",\"hostname\":\"" + Json.Esc(Environment.MachineName) +
-                           "\",\"os\":\"Windows\",\"version\":\"1.7.0-cs\"}";
+                           "\",\"os\":\"Windows\",\"version\":\"1.7.2-cs\"}";
             await Send(ws, hello);
 
-            int lanCounter = _lanSec; // отправить LAN сразу при старте
-            while (ws.State == WebSocketState.Open && !_stop.WaitOne(0))
+            var recv = ReceiveLoop(ws); // читаем ответы сервера (config, ошибки, закрытие)
+            int lanCounter = _lanSec;   // отправить LAN сразу при старте
+            while (ws.State == WebSocketState.Open && !_stop.WaitOne(0) && !recv.IsCompleted)
             {
                 var m = Collector.Metrics();
                 await Send(ws, "{\"type\":\"metrics\",\"data\":" + Collector.MetricsJson(m) + "}");
@@ -263,6 +272,26 @@ class Worker
                 _stop.WaitOne(_metricsSec * 1000);
             }
         }
+    }
+
+    async Task ReceiveLoop(ClientWebSocket ws)
+    {
+        var buf = new byte[8192];
+        try
+        {
+            while (ws.State == WebSocketState.Open && !_stop.WaitOne(0))
+            {
+                var res = await ws.ReceiveAsync(new ArraySegment<byte>(buf), CancellationToken.None);
+                if (res.MessageType == WebSocketMessageType.Close)
+                {
+                    Log("сервер закрыл соединение");
+                    try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye", CancellationToken.None); } catch { }
+                    return;
+                }
+                if (res.EndOfMessage) Log("от сервера: " + Encoding.UTF8.GetString(buf, 0, res.Count));
+            }
+        }
+        catch (Exception e) { Log("приём: " + e.GetBaseException().Message); }
     }
 
     async Task Send(ClientWebSocket ws, string text)
@@ -334,7 +363,7 @@ static class Program
                 Console.WriteLine("пример: pluto-agent.exe -server ws://192.168.31.219:8443/ws -token ТОКЕН");
                 return;
             }
-            Console.WriteLine("[pluto-agent] версия 1.7.0-cs · запуск в консольном режиме (Ctrl+C — выход)");
+            Console.WriteLine("[pluto-agent] версия 1.7.2-cs · запуск в консольном режиме (Ctrl+C — выход)");
             new Worker(o.Server, o.Token, o.Metrics, o.Lan).Run();
         }
         else

@@ -12,7 +12,7 @@ import {
   issueSession, attachWs, DEFAULT_SETTINGS,
 } from './lib.js';
 
-const VERSION = '1.7.1';
+const VERSION = '1.7.2';
 const db = loadDb();
 const HTTP_PORT = Number(process.env.HTTP_PORT || 8080);
 const AGENT_PORT = Number(process.env.AGENT_PORT || 8443);
@@ -305,14 +305,20 @@ function sendSmtp(cfg, subject, body) {
 // ─── Шлюз агентов (WebSocket на :8443) ───────────────────────────────────────
 
 const agentServer = http.createServer();
+// TCP-уровень: видно, доходят ли пакеты агентов до контейнера вообще
+agentServer.on('connection', (sock) => {
+  console.log(`[pluto] шлюз: TCP-соединение от ${sock.remoteAddress}`);
+});
 attachWs(agentServer, (conn, url, remoteIp) => {
   const token = url.searchParams.get('token');
   const agent = db.agents.find((a) => a.token === token);
   if (!agent) {
+    console.log(`[pluto] шлюз: НЕВЕРНЫЙ ТОКЕН от ${remoteIp} (токен: ${String(token).slice(0, 6)}…)`);
     conn.send(JSON.stringify({ type: 'error', text: 'invalid token' }));
     conn.close();
     return;
   }
+  console.log(`[pluto] шлюз: агент «${agent.name}» подключился с ${remoteIp}`);
   agent.online = true;
   agent.lastSeen = Date.now();
   agent.ip = remoteIp || agent.ip;
