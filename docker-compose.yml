@@ -1,0 +1,27 @@
+services:
+  core:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: pluto/core:1.8.0
+    container_name: pluto-core
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATA_DIR=/data
+      - HTTP_PORT=8080
+      - AGENT_PORT=8443
+    ports:
+      - "8080:8080"   # веб-консоль + REST API
+      - "8443:8443"   # шлюз агентов (WebSocket)
+    volumes:
+      - pluto-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/health"]
+      interval: 15s
+      timeout: 4s
+      retries: 3
+
+volumes:
+  pluto-data:
