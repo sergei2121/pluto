@@ -18,6 +18,7 @@ using System.Linq;
 using System.Management;
 using System.Net;
 using System.Net.NetworkInformation;
+using System.Runtime.InteropServices;
 using System.Net.WebSockets;
 using System.ServiceProcess;
 using System.Text;
@@ -262,7 +263,7 @@ class Worker
             Log("подключено к " + _server);
 
             string hello = "{\"type\":\"hello\",\"hostname\":\"" + Json.Esc(Environment.MachineName) +
-                           "\",\"os\":\"Windows\",\"version\":\"1.7.4-cs\"}";
+                           "\",\"os\":\"Windows\",\"version\":\"1.7.5-cs\"}";
             await Send(ws, hello);
 
             var recv = ReceiveLoop(ws); // читаем ответы сервера (config, ошибки, закрытие)
@@ -329,11 +330,51 @@ class PlutoService : ServiceBase
 
     protected override void OnStart(string[] args)
     {
-        var o = Options.From(args);
+        // ВАЖНО: аргументы из ImagePath службы в параметр OnStart НЕ передаются
+        // (особенность .NET-служб) — служба стартовала бы со значениями по умолчанию
+        // (127.0.0.1 и пустым токеном). Читаем настоящую командную строку процесса.
+        var cmdline = RealCommandLine.Args();
+        Log("командная строка службы: " + string.Join(" ", cmdline));
+        var o = Options.From(cmdline.Length > 1 ? cmdline.Skip(1).ToArray() : args);
+        if (string.IsNullOrEmpty(o.Token))
+        {
+            Log("ОШИБКА: токен не получен. Удалите службу (sc.exe delete pluto-agent) и переустановите агент.");
+            return;
+        }
         _w = new Worker(o.Server, o.Token, o.Metrics, o.Lan);
         new Thread(_w.Run) { IsBackground = true }.Start();
     }
     protected override void OnStop() { if (_w != null) _w.Stop(); }
+}
+
+/// <summary>Настоящая командная строка процесса (Win32). Для служб это единственный
+/// надёжный способ получить аргументы из ImagePath.</summary>
+static class RealCommandLine
+{
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    static extern IntPtr GetCommandLineW();
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    static extern IntPtr CommandLineToArgvW(IntPtr lpCmdLine, out int pNumArgs);
+
+    public static string[] Args()
+    {
+        try
+        {
+            IntPtr cmd = GetCommandLineW();
+            int argc;
+            IntPtr argv = CommandLineToArgvW(cmd, out argc);
+            if (argv == IntPtr.Zero) return Environment.GetCommandLineArgs();
+            var args = new string[argc];
+            for (int i = 0; i < argc; i++)
+            {
+                IntPtr p = Marshal.ReadIntPtr(argv, i * IntPtr.Size);
+                args[i] = Marshal.PtrToStringUni(p);
+            }
+            return args;
+        }
+        catch { return Environment.GetCommandLineArgs(); }
+    }
 }
 
 class Options
@@ -372,7 +413,7 @@ static class Program
                 Console.WriteLine("пример: pluto-agent.exe -server ws://192.168.31.219:8443/ws -token ТОКЕН");
                 return;
             }
-            Console.WriteLine("[pluto-agent] версия 1.7.4-cs · запуск в консольном режиме (Ctrl+C — выход)");
+            Console.WriteLine("[pluto-agent] версия 1.7.5-cs · запуск в консольном режиме (Ctrl+C — выход)");
             new Worker(o.Server, o.Token, o.Metrics, o.Lan).Run();
         }
         else
