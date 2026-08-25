@@ -82,6 +82,10 @@ export async function apiState(): Promise<ServerState> {
   return req<ServerState>('GET', '/api/state');
 }
 
+export async function apiMe(): Promise<User> {
+  return req<User>('GET', '/api/auth/me');
+}
+
 export const api = {
   addDevice: (b: Partial<Device>) => req<Device>('POST', '/api/devices', b),
   updateDevice: (id: string, b: Record<string, unknown>) => req<Device>('PUT', `/api/devices/${id}`, b),
