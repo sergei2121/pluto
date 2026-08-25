@@ -1,70 +1,38 @@
 // ─── PLUTO: клиент REST API серверного ядра ─────────────────────────────────
-// Если ядро доступно (GET /api/health), консоль работает с реальными данными:
-// проверки выполняет сервер (системный ping, HTTP, RTSP, SIP), телеметрия
-// приходит от настоящих Windows-агентов. Если ядра нет — встроенный режим.
-
-import { useStore } from './store';
 import type { Agent, Device, EventItem, Settings, Tag, User } from './types';
 
-const TOKEN_KEY = 'pluto.api.token';
+let apiToken: string | null = localStorage.getItem('pluto_token');
+const BASE = ''; // same-origin: ядро отдаёт и консоль, и API
 
 export function getApiToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
+  return apiToken;
 }
-export function setApiToken(t: string | null) {
-  if (t) localStorage.setItem(TOKEN_KEY, t);
-  else localStorage.removeItem(TOKEN_KEY);
-}
-
-export class ApiError extends Error {
-  status: number;
-  constructor(status: number, text: string) {
-    super(text);
-    this.status = status;
-  }
+export function setApiToken(t: string | null): void {
+  apiToken = t;
+  if (t) localStorage.setItem('pluto_token', t);
+  else localStorage.removeItem('pluto_token');
 }
 
-async function req<T>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> {
-  const ctrl = new AbortController();
-  const to = setTimeout(() => ctrl.abort(), 6000);
-  try {
-    const res = await fetch(path, {
-      method: opts.method || 'GET',
-      signal: ctrl.signal,
-      headers: {
-        ...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-        ...(getApiToken() ? { Authorization: `Bearer ${getApiToken()}` } : {}),
-      },
-      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-    });
-    const data = (await res.json().catch(() => ({}))) as T & { error?: string };
-    if (!res.ok) throw new ApiError(res.status, data.error || `HTTP ${res.status}`);
-    return data;
-  } finally {
-    clearTimeout(to);
-  }
-}
-
-/** Проверка доступности ядра; возвращает версию, 'legacy' или null */
+/** Проверка доступности ядра. Возвращает версию, 'legacy' или null. */
 export async function detectApi(): Promise<string | null> {
-  // 1. Подпись, вшитая ядром в index.html при отдаче страницы. Если она есть —
-  //    страницу отдал настоящий сервер PLUTO Core, и эмуляция невозможна.
+  // 1. Подпись, вшитая ядром в index.html. Если она есть — страницу отдал
+  //    настоящий PLUTO Core, эмуляция невозможна.
   const injected = (window as unknown as { __PLUTO_CORE__?: { v?: string } }).__PLUTO_CORE__;
   if (injected && typeof injected.v === 'string') return injected.v;
 
-  // 2. Прямой запрос к API (на случай открытия консоли с другого адреса).
+  // 2. Прямой запрос (на случай открытия консоли с другого адреса).
   try {
     const ctrl = new AbortController();
     const to = setTimeout(() => ctrl.abort(), 2000);
-    const res = await fetch('/api/health', { signal: ctrl.signal });
+    const res = await fetch(BASE + '/api/health', { signal: ctrl.signal });
     clearTimeout(to);
     if (res.ok) {
-      const j = (await res.json().catch(() => ({}))) as { version?: string };
-      return j.version || 'core';
+      const j = await res.json();
+      return typeof j.version === 'string' ? j.version : 'server';
     }
-    // Старая сборка ядра: health закрыт авторизацией, но JSON-ошибка — фирменная.
+    // старая сборка: health требует авторизации, но ошибка фирменная
     if (res.status === 401) {
-      const j = (await res.json().catch(() => null)) as { error?: string } | null;
+      const j = await res.json().catch(() => null);
       if (j && typeof j.error === 'string') return 'legacy';
     }
     return null;
@@ -73,134 +41,27 @@ export async function detectApi(): Promise<string | null> {
   }
 }
 
-// ─── Маппинг моделей ядра ↔ консоли ─────────────────────────────────────────
+class ApiError extends Error {}
 
-function mapDevice(sv: any): Device {
-  return {
-    ...sv,
-    latency: sv.latency ?? null,
-    approx: false,
-    checking: false,
-    history: Array.isArray(sv.history) ? sv.history : [],
-    profile: undefined,
-    createdAt: sv.lastChange || Date.now(),
-  } as Device;
-}
-
-function mapAgent(sv: any): Agent {
-  const hist = Array.isArray(sv.history) ? sv.history : [];
-  return {
-    id: sv.id,
-    name: sv.name || sv.hostname || 'Агент',
-    hostname: sv.hostname || sv.name || '—',
-    token: sv.token || '',
-    ip: sv.ip || '',
-    os: sv.os || '',
-    version: sv.version || '',
-    online: !!sv.online,
-    emulated: false,
-    lastSeen: sv.lastSeen || 0,
-    cpuLoad: sv.cpuLoad ?? 0,
-    cpuCores: sv.cpuCores || 0,
-    cpuTemp: sv.cpuTemp || 0,
-    ramUsed: sv.ramUsed || 0,
-    ramTotal: sv.ramTotal || 0,
-    ramTemp: sv.ramTemp || 0,
-    disks: Array.isArray(sv.disks) ? sv.disks : [],
-    rxBytes: sv.rxBytes || 0,
-    txBytes: sv.txBytes || 0,
-    rxRate: sv.rxRate || 0,
-    txRate: sv.txRate || 0,
-    networks: Array.isArray(sv.networks) ? sv.networks : [],
-    lastMetrics: 0,
-    lastScan: sv.lastScan || 0,
-    history: hist,
-    favorite: !!sv.favorite,
-    createdAt: sv.lastSeen || Date.now(),
-  } as Agent;
-}
-
-function mapUser(su: any): User {
-  return {
-    id: su.id,
-    login: su.name,
-    name: su.name,
-    role: su.role === 'admin' ? 'admin' : 'viewer',
-    scope: su.scope || [],
-    builtIn: su.name === 'admin',
-    createdAt: 0,
-  };
-}
-
-function mapSettings(sv: any): Settings {
-  const n = sv.notifications || {};
-  return {
-    intervals: {
-      ping: sv.ping ?? 30, http: sv.http ?? 60, api: sv.api ?? 120, rtsp: sv.rtsp ?? 60, sip: sv.sip ?? 120,
+async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(BASE + path, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(apiToken ? { Authorization: 'Bearer ' + apiToken } : {}),
     },
-    heartbeat: 10,
-    metrics: sv.metrics ?? 3,
-    lanScan: sv.lanScan ?? 300,
-    failThreshold: sv.failThreshold ?? 3,
-    degradeFactor: sv.degradeFactor ?? 10,
-    degradeMinMs: sv.degradeMinMs ?? 250,
-    timeoutMs: sv.timeoutMs ?? 3000,
-    simulate: false,
-    notifications: {
-      telegram: { enabled: !!n.telegram?.enabled, botToken: n.telegram?.botToken ?? '', chatId: n.telegram?.chatId ?? '' },
-      email: {
-        enabled: !!n.email?.enabled, smtp: n.email?.smtpHost ?? '', port: n.email?.smtpPort ?? 587,
-        from: n.email?.from ?? '', to: n.email?.to ?? '',
-      },
-      push: { enabled: !!n.push?.enabled },
-      on: {
-        down: n.on?.down ?? true, degraded: n.on?.degraded ?? true, recover: n.on?.recover ?? true,
-        agentOff: n.on?.agentOff ?? true, agentOn: n.on?.agentOn ?? false,
-      },
-    },
-  };
-}
-
-function toServerSettings(cs: Settings) {
-  return {
-    ping: cs.intervals.ping, http: cs.intervals.http, api: cs.intervals.api,
-    rtsp: cs.intervals.rtsp, sip: cs.intervals.sip,
-    metrics: cs.metrics, lanScan: cs.lanScan, timeoutMs: cs.timeoutMs,
-    failThreshold: cs.failThreshold, degradeFactor: cs.degradeFactor, degradeMinMs: cs.degradeMinMs,
-    notifications: {
-      telegram: { enabled: cs.notifications.telegram.enabled, botToken: cs.notifications.telegram.botToken, chatId: cs.notifications.telegram.chatId },
-      email: {
-        enabled: cs.notifications.email.enabled, smtpHost: cs.notifications.email.smtp,
-        smtpPort: cs.notifications.email.port, from: cs.notifications.email.from, to: cs.notifications.email.to,
-      },
-      push: { enabled: cs.notifications.push.enabled },
-      on: cs.notifications.on,
-    },
-  };
-}
-
-// ─── Авторизация ─────────────────────────────────────────────────────────────
-
-export async function apiLogin(login: string, password: string): Promise<User> {
-  const r = await req<{ token: string; user: any }>('/api/auth/login', {
-    method: 'POST', body: { name: login, password },
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
-  setApiToken(r.token);
-  return mapUser(r.user);
+  if (res.status === 401) {
+    setApiToken(null);
+    throw new ApiError('Сессия истекла — войдите заново');
+  }
+  if (!res.ok) {
+    const j = await res.json().catch(() => null);
+    throw new ApiError((j && (j as { error?: string }).error) || `Ошибка ${res.status}`);
+  }
+  return (await res.json()) as T;
 }
-
-export async function apiMe(): Promise<User> {
-  const r = await req<{ user: any }>('/api/auth/me');
-  return mapUser(r.user);
-}
-
-export function apiLogout() {
-  const t = getApiToken();
-  setApiToken(null);
-  if (t) fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${t}` } }).catch(() => {});
-}
-
-// ─── Состояние ───────────────────────────────────────────────────────────────
 
 export interface ServerState {
   devices: Device[];
@@ -208,71 +69,36 @@ export interface ServerState {
   tags: Tag[];
   events: EventItem[];
   settings: Settings;
-  users: User[] | null;
+  users?: User[];
 }
 
-export async function fetchServerState(role: string): Promise<ServerState> {
-  const [d, a, t, e, st] = await Promise.all([
-    req<{ devices: any[] }>('/api/devices'),
-    req<{ agents: any[] }>('/api/agents').catch(() => ({ agents: [] })),
-    req<{ tags: Tag[] }>('/api/tags'),
-    req<{ events: EventItem[] }>('/api/events'),
-    req<{ settings: any }>('/api/settings'),
-  ]);
-  let users: User[] | null = null;
-  if (role === 'admin') {
-    users = (await req<{ users: any[] }>('/api/users').catch(() => ({ users: [] }))).users.map(mapUser);
-  }
-  return {
-    devices: d.devices.map(mapDevice),
-    agents: a.agents.map(mapAgent),
-    tags: t.tags,
-    events: e.events,
-    settings: mapSettings(st.settings),
-    users,
-  };
+export async function apiLogin(name: string, password: string): Promise<User> {
+  const r = await req<{ token: string; user: User }>('POST', '/api/auth/login', { name, password });
+  setApiToken(r.token);
+  return r.user;
 }
 
-/** Обновить хранилище консоли данными ядра */
-export async function syncAll() {
-  const s = useStore.getState();
-  const role = s.users.find((u) => u.id === s.session?.userId)?.role || 'viewer';
-  try {
-    const st = await fetchServerState(role);
-    s.applyServerState(st);
-    return true;
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 401) {
-      setApiToken(null);
-      s.serverLogout();
-    }
-    return false;
-  }
+export async function apiState(): Promise<ServerState> {
+  return req<ServerState>('GET', '/api/state');
 }
-
-// ─── Мутации ─────────────────────────────────────────────────────────────────
 
 export const api = {
-  addDevice: (d: { name: string; type: string; address: string; port?: number | null; path?: string; method?: string | null; body?: string | null; interval: number; tags: string[] }) =>
-    req<{ device: any }>('/api/devices', { method: 'POST', body: d }),
-  updateDevice: (id: string, patch: Record<string, unknown>) =>
-    req<{ device: any }>(`/api/devices/${id}`, { method: 'PUT', body: patch }),
-  deleteDevice: (id: string) => req<{ ok: boolean }>(`/api/devices/${id}`, { method: 'DELETE' }),
-  checkDevice: (id: string) => req<{ result: { ok: boolean; latency: number }; device: any }>(`/api/devices/${id}/check`, { method: 'POST' }),
+  addDevice: (b: Partial<Device>) => req<Device>('POST', '/api/devices', b),
+  updateDevice: (id: string, b: Record<string, unknown>) => req<Device>('PUT', `/api/devices/${id}`, b),
+  deleteDevice: (id: string) => req<{ ok: boolean }>('DELETE', `/api/devices/${id}`),
+  checkDevice: (id: string) => req<{ result: { ok: boolean; latency: number } }>('POST', `/api/devices/${id}/check`),
 
-  addTag: (label: string, color: string) => req<{ tag: Tag }>('/api/tags', { method: 'POST', body: { label, color } }),
-  deleteTag: (id: string) => req<{ ok: boolean }>(`/api/tags/${id}`, { method: 'DELETE' }),
+  createAgentToken: (name: string) => req<{ agent: Agent; token: string }>('POST', '/api/agents/token', { name }),
+  updateAgent: (id: string, b: Record<string, unknown>) => req<Agent>('PUT', `/api/agents/${id}`, b),
+  deleteAgent: (id: string) => req<{ ok: boolean }>('DELETE', `/api/agents/${id}`),
+  retokenAgent: (id: string) => req<{ token: string }>('POST', `/api/agents/${id}/retoken`),
 
-  saveSettings: (cs: Settings) => req<{ settings: any }>('/api/settings', { method: 'PUT', body: toServerSettings(cs) }),
+  addTag: (label: string, color: string) => req<Tag>('POST', '/api/tags', { label, color }),
+  deleteTag: (id: string) => req<{ ok: boolean }>('DELETE', `/api/tags/${id}`),
 
-  saveUser: (u: { id?: string; login: string; name: string; role: string; scope: string[]; pass?: string }) =>
-    u.id
-      ? req<{ user: any }>(`/api/users/${u.id}`, { method: 'PUT', body: { name: u.login, role: u.role, scope: u.scope, ...(u.pass ? { password: u.pass } : {}) } })
-      : req<{ user: any }>('/api/users', { method: 'POST', body: { name: u.login, role: u.role, scope: u.scope, password: u.pass } }),
-  deleteUser: (id: string) => req<{ ok: boolean }>(`/api/users/${id}`, { method: 'DELETE' }),
+  saveSettings: (s: Partial<Settings>) => req<Settings>('PUT', '/api/settings', s),
 
-  createAgentToken: (name: string) => req<{ agent: any; token: string }>('/api/agents/token', { method: 'POST', body: { name } }),
-  retokenAgent: (id: string) => req<{ token: string }>(`/api/agents/${id}/retoken`, { method: 'POST' }),
-  deleteAgent: (id: string) => req<{ ok: boolean }>(`/api/agents/${id}`, { method: 'DELETE' }),
-  patchAgent: (id: string, patch: Record<string, unknown>) => req<{ agent: any }>(`/api/agents/${id}`, { method: 'PUT', body: patch }),
+  addUser: (b: { name: string; password: string; role: string; scope: string[] }) => req<User>('POST', '/api/users', b),
+  updateUser: (id: string, b: Record<string, unknown>) => req<User>('PUT', `/api/users/${id}`, b),
+  deleteUser: (id: string) => req<{ ok: boolean }>('DELETE', `/api/users/${id}`),
 };

@@ -15,36 +15,31 @@ export interface Device {
   path?: string;
   method?: string | null;
   body?: string | null;
-  interval: number; // сек
+  interval: number;
   tags: string[];
   favorite: boolean;
   status: DeviceStatus;
-  latency: number | null; // мс, null = нет ответа
-  baseline: number | null; // скользящая базовая задержка
-  history: number[]; // -1 = сбой
+  latency: number | null;
+  baseline: number | null;
+  history: number[];
   fails: number;
   lastCheck: number;
   lastChange: number;
   checking: boolean;
-  approx: boolean; // true = значение синтезировано (не реальный зонд)
+  approx: boolean;
   createdAt: number;
-  /** эмуляционный профиль — используется только встроенным (браузерным) движком */
-  profile?: { base: number; failP: number; spikeP: number };
-  spikeUntil?: number;
 }
 
 export interface Disk {
-  id: string;
   label: string;
-  total: number; // байт
+  total: number;
   used: number;
-  temp: number; // °C
+  temp: number;
 }
 
 export interface LanHost {
   ip: string;
-  mac: string;
-  hint?: string;
+  mac?: string;
   online: boolean;
 }
 
@@ -63,7 +58,6 @@ export interface Agent {
   os: string;
   version: string;
   online: boolean;
-  emulated: boolean;
   cpuLoad: number;
   cpuCores: number;
   cpuTemp: number;
@@ -73,7 +67,7 @@ export interface Agent {
   disks: Disk[];
   rxBytes: number;
   txBytes: number;
-  rxRate: number; // КБ/с
+  rxRate: number;
   txRate: number;
   networks: LanNetwork[];
   lastSeen: number;
@@ -100,10 +94,9 @@ export interface EventItem {
 
 export interface User {
   id: string;
-  login: string;
   name: string;
   role: Role;
-  scope: DeviceType[]; // для viewer — разрешённые типы; 'agent' как псевдо-тип
+  scope: string[];
   builtIn: boolean;
   createdAt: number;
 }
@@ -114,10 +107,9 @@ export interface Settings {
   metrics: number;
   lanScan: number;
   failThreshold: number;
-  degradeFactor: number; // во сколько раз выше базовой = деградация
+  degradeFactor: number;
   degradeMinMs: number;
   timeoutMs: number;
-  simulate: boolean;
   notifications: {
     telegram: { enabled: boolean; botToken: string; chatId: string };
     email: { enabled: boolean; smtp: string; port: number; from: string; to: string };
@@ -126,7 +118,7 @@ export interface Settings {
   };
 }
 
-export const DEVICE_TYPE_META: Record<DeviceType, { label: string; desc: string; defaultPort?: number }> = {
+export const DEVICE_TYPE_META: Record<DeviceType, { label: string; desc: string }> = {
   ping: { label: 'PING', desc: 'ICMP-эхо, задержка и потеря пакетов' },
   http: { label: 'HTTP', desc: 'HTTP-запрос на хост:порт/путь' },
   api: { label: 'API', desc: 'Кастомная команда GET/POST с телом' },

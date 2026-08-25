@@ -1,13 +1,11 @@
 {
   "name": "pluto-core",
-  "version": "1.6.0",
+  "version": "1.8.0",
   "private": true,
   "type": "module",
+  "description": "PLUTO monitoring core: REST API, poll engine, agent gateway",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js"
-  },
-  "engines": {
-    "node": ">=20"
   }
 }

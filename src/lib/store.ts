@@ -1,95 +1,16 @@
-// ─── PLUTO: хранилище (useSyncExternalStore, без внешних зависимостей) ──────
+// ─── PLUTO: центральное хранилище (встроенный + серверный режимы) ───────────
 import { useSyncExternalStore } from 'react';
-import type { Agent, Device, EventItem, Role, Route, Settings, Severity, Tag, User } from './types';
-import { DEVICE_TYPE_META } from './types';
+import type { Agent, Device, DeviceType, EventItem, Role, Route, Severity, Settings, Tag, User } from './types';
+import { DEVICE_TYPES } from './types';
 import { clamp, genToken, hashStr, mulberry32, rnd, rndInt, uid } from './util';
-import { api, apiLogin, getApiToken, setApiToken, syncAll, type ServerState } from './api';
+import { api, apiLogin, apiState, setApiToken, getApiToken, type ServerState } from './api';
 
-export const FAVORITES_LIMIT = 15;
-const LS_KEY = 'pluto.state.v1';
-
-// ─── Тосты (отдельный маленький стор) ───────────────────────────────────────
-
-export interface Toast {
-  id: string;
-  kind: 'ok' | 'warn' | 'crit' | 'info';
-  text: string;
-}
-
-let toastState: { list: Toast[] } = { list: [] };
-const toastListeners = new Set<() => void>();
-
-export const useToasts = {
-  getState: () => toastState,
-  subscribe(l: () => void) {
-    toastListeners.add(l);
-    return () => toastListeners.delete(l);
-  },
-  push(kind: Toast['kind'], text: string) {
-    const t: Toast = { id: uid('toast'), kind, text };
-    toastState = { list: [...toastState.list, t].slice(-4) };
-    toastListeners.forEach((l) => l());
-    window.setTimeout(() => {
-      toastState = { list: toastState.list.filter((x) => x.id !== t.id) };
-      toastListeners.forEach((l) => l());
-    }, 4200);
-  },
-  drop(id: string) {
-    toastState = { list: toastState.list.filter((x) => x.id !== id) };
-    toastListeners.forEach((l) => l());
-  },
-};
-
-export function useToastList(): Toast[] {
-  return useSyncExternalStore(
-    (cb) => {
-      toastListeners.add(cb);
-      return () => toastListeners.delete(cb);
-    },
-    () => toastState.list,
-  );
-}
-
-// ─── Значения по умолчанию ──────────────────────────────────────────────────
-
-export function defaultSettings(): Settings {
-  return {
-    intervals: { ping: 30, http: 60, api: 120, rtsp: 60, sip: 120 },
-    heartbeat: 10,
-    metrics: 3,
-    lanScan: 300,
-    failThreshold: 3,
-    degradeFactor: 10,
-    degradeMinMs: 250,
-    timeoutMs: 3000,
-    simulate: true,
-    notifications: {
-      telegram: { enabled: false, botToken: '', chatId: '' },
-      email: { enabled: false, smtp: '', port: 587, from: '', to: '' },
-      push: { enabled: false },
-      on: { down: true, degraded: true, recover: true, agentOff: true, agentOn: false },
-    },
-  };
-}
-
-export function seedAdmin(): User {
-  return {
-    id: 'u-admin',
-    login: 'admin',
-    name: 'Администратор',
-    role: 'admin',
-    scope: [],
-    builtIn: true,
-    createdAt: Date.now(),
-  };
-}
+export type ApiMode = 'embedded' | 'server';
 
 export interface Session {
   userId: string;
   at: number;
 }
-
-export type ApiMode = 'embedded' | 'server';
 
 export interface PlutoState {
   users: User[];
@@ -103,80 +24,76 @@ export interface PlutoState {
   routeParam: string;
   apiMode: ApiMode;
   coreVersion: string | null;
+}
 
-  nav: (r: Route, param?: string) => void;
-  login: (l: string, p: string) => string | null;
-  logout: () => void;
-  enterServer: (u: User) => void;
-  loginServer: (l: string, p: string) => Promise<string | null>;
-  serverLogout: () => void;
-  applyServerState: (st: ServerState) => void;
-  pushEvent: (sev: Severity, source: EventItem['source'], text: string) => void;
+// ─── Тосты ──────────────────────────────────────────────────────────────────
 
-  addDevice: (d: Partial<Device> & { name: string; type: Device['type']; address: string; interval: number; tags: string[] }) => void;
-  updateDevice: (id: string, patch: Partial<Device>) => void;
-  patchDevice: (id: string, patch: Partial<Device>) => void;
-  removeDevice: (id: string) => void;
-  toggleDeviceFav: (id: string) => void;
+export interface Toast {
+  id: string;
+  kind: 'ok' | 'warn' | 'crit' | 'info';
+  text: string;
+}
 
-  addEmulatedAgent: () => Agent | null;
-  patchAgent: (id: string, patch: Partial<Agent>) => void;
-  removeAgent: (id: string) => void;
-  toggleAgentFav: (id: string) => void;
+let toasts: Toast[] = [];
+const toastListeners = new Set<() => void>();
+function emitToasts() {
+  toastListeners.forEach((l) => l());
+}
 
-  addTag: (label: string, color: string) => string | null;
-  removeTag: (id: string) => void;
+export const useToasts = {
+  subscribe(fn: () => void) {
+    toastListeners.add(fn);
+    return () => {
+      toastListeners.delete(fn);
+    };
+  },
+  list(): Toast[] {
+    return toasts;
+  },
+  push(kind: Toast['kind'], text: string) {
+    const t: Toast = { id: uid('toast'), kind, text };
+    toasts = [...toasts.slice(-3), t];
+    emitToasts();
+    setTimeout(() => useToasts.drop(t.id), 4500);
+  },
+  drop(id: string) {
+    toasts = toasts.filter((t) => t.id !== id);
+    emitToasts();
+  },
+};
 
-  saveSettings: (s: Settings) => void;
-  setSettingsRaw: (s: Settings) => void;
+export function useToastList(): Toast[] {
+  return useSyncExternalStore(useToasts.subscribe, useToasts.list);
+}
 
-  addUser: (u: { login: string; name: string; role: Role; scope: string[]; pass: string }) => string | null;
-  updateUser: (id: string, patch: Partial<User> & { pass?: string }) => string | null;
-  removeUser: (id: string) => string | null;
+// ─── Начальные значения ─────────────────────────────────────────────────────
 
-  resetBase: () => void;
+export function defaultSettings(): Settings {
+  return {
+    intervals: { ping: 60, http: 60, api: 180, rtsp: 120, sip: 120 },
+    heartbeat: 10,
+    metrics: 15,
+    lanScan: 300,
+    failThreshold: 3,
+    degradeFactor: 10,
+    degradeMinMs: 250,
+    timeoutMs: 3000,
+    notifications: {
+      telegram: { enabled: false, botToken: '', chatId: '' },
+      email: { enabled: false, smtp: '', port: 587, from: '', to: '' },
+      push: { enabled: false },
+      on: { down: true, degraded: true, recover: true, agentOff: true, agentOn: false },
+    },
+  };
+}
+
+function seedAdmin(): User {
+  return { id: 'u-admin', name: 'admin', role: 'admin', scope: [], builtIn: true, createdAt: Date.now() };
 }
 
 function mkEvent(sev: Severity, source: EventItem['source'], text: string): EventItem {
-  return { id: uid('e'), ts: Date.now(), sev, source, text };
+  return { id: uid('ev'), ts: Date.now(), sev, source, text };
 }
-
-function profileFor(type: Device['type'], seed: () => number) {
-  const baseByType: Record<Device['type'], number> = { ping: 24, http: 60, api: 90, rtsp: 45, sip: 70 };
-  return { base: Math.round(baseByType[type] * (0.6 + seed() * 0.9)), failP: 0.02, spikeP: 0.015 };
-}
-
-// ─── Инфраструктура стора ───────────────────────────────────────────────────
-
-const listeners = new Set<() => void>();
-let state: PlutoState;
-
-function set(partial: Partial<PlutoState> | ((s: PlutoState) => Partial<PlutoState>)) {
-  const p = typeof partial === 'function' ? partial(state) : partial;
-  state = { ...state, ...p };
-  persist();
-  listeners.forEach((l) => l());
-}
-
-function get(): PlutoState {
-  return state;
-}
-
-let persistTimer: number | null = null;
-function persist() {
-  if (persistTimer) return;
-  persistTimer = window.setTimeout(() => {
-    persistTimer = null;
-    try {
-      const { users, session, devices, agents, tags, events, settings } = state;
-      localStorage.setItem(LS_KEY, JSON.stringify({ users, session, devices, agents, tags, events, settings }));
-    } catch {
-      /* переполнение — игнорируем */
-    }
-  }, 300);
-}
-
-// ─── Начальное состояние + все действия ─────────────────────────────────────
 
 /** Подпись ядра, вшитая в index.html при отдаче страницы сервером PLUTO Core. */
 const INJECTED_CORE: string | null =
@@ -184,11 +101,9 @@ const INJECTED_CORE: string | null =
     ? (((window as unknown as { __PLUTO_CORE__?: { v?: string } }).__PLUTO_CORE__?.v as string) ?? null)
     : null;
 
-function initialState(): PlutoState {
-  const srv = () => get().apiMode === 'server';
-  const sync = () => void syncAll();
-  const toast = (k: Toast['kind'], t: string) => useToasts.push(k, t);
+const LS_KEY = 'pluto_state_v1';
 
+function initialState(): PlutoState {
   const s: PlutoState = {
     users: [seedAdmin()],
     session: null,
@@ -201,414 +116,439 @@ function initialState(): PlutoState {
     routeParam: '',
     apiMode: INJECTED_CORE ? 'server' : 'embedded',
     coreVersion: INJECTED_CORE,
+  };
+  // восстановление встроенной базы (только для embedded)
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (raw && !INJECTED_CORE) {
+      const p = JSON.parse(raw) as Partial<PlutoState>;
+      return {
+        ...s,
+        ...p,
+        settings: { ...s.settings, ...(p.settings || {}), notifications: { ...s.settings.notifications, ...(p.settings?.notifications || {}) } },
+        devices: (p.devices || []).map((d) => ({ ...d, checking: false })),
+        agents: (p.agents || []).map((a) => ({ ...a, history: [] })),
+        route: 'dashboard',
+        routeParam: '',
+        apiMode: 'embedded',
+        coreVersion: null,
+      };
+    }
+  } catch {
+    /* повреждённая база — стартуем чистой */
+  }
+  return s;
+}
 
-    nav: (r, param = '') => set({ route: r, routeParam: param }),
+// ─── Ядро стора ─────────────────────────────────────────────────────────────
 
-    login: (l, p) => {
-      const st = get();
-      const u = st.users.find((x) => x.login === l.trim());
-      if (!u) return 'Пользователь не найден';
-      const stored = (u as User & { pass?: string }).pass;
-      if (u.builtIn) {
-        if (p !== 'pluto' && stored !== p) return 'Неверный пароль';
-      } else if (stored !== p) {
-        return 'Неверный пароль';
-      }
-      set({ session: { userId: u.id, at: Date.now() }, route: 'dashboard', routeParam: '' });
-      get().pushEvent('info', 'system', `Вход в систему: ${u.login}`);
-      return null;
-    },
+let state: PlutoState = initialState();
+const listeners = new Set<() => void>();
 
-    logout: () => {
-      const st = get();
-      const u = st.users.find((x) => x.id === st.session?.userId);
-      if (st.apiMode === 'server') {
-        setApiToken(null);
-        set({ session: null, apiMode: 'embedded', users: [seedAdmin()] });
-      } else {
-        set({ session: null });
-      }
-      if (u) get().pushEvent('info', 'system', `Выход из системы: ${u.login}`);
-    },
+function persist() {
+  if (state.apiMode !== 'embedded') return;
+  try {
+    localStorage.setItem(
+      LS_KEY,
+      JSON.stringify({
+        users: state.users,
+        session: state.session,
+        devices: state.devices,
+        agents: state.agents,
+        tags: state.tags,
+        events: state.events.slice(0, 100),
+        settings: state.settings,
+      }),
+    );
+  } catch {
+    /* переполнение хранилища — не критично */
+  }
+}
 
-    enterServer: (user) => {
+function emit() {
+  listeners.forEach((l) => l());
+}
+
+function set(patch: Partial<PlutoState>) {
+  state = { ...state, ...patch };
+  persist();
+  emit();
+}
+
+export function getState(): PlutoState {
+  return state;
+}
+
+export function subscribe(fn: () => void): () => void {
+  listeners.add(fn);
+  return () => {
+    listeners.delete(fn);
+  };
+}
+
+export function usePluto<T>(selector: (s: PlutoState) => T): T {
+  return useSyncExternalStore(subscribe, () => selector(getState()));
+}
+
+// ─── Видимость по ролям ─────────────────────────────────────────────────────
+
+export function visibleDevices(devices: Device[], user: User | null): Device[] {
+  if (!user) return [];
+  if (user.role === 'admin') return devices;
+  return devices.filter((d) => user.scope.includes(d.type));
+}
+
+export function visibleAgents(agents: Agent[], user: User | null): Agent[] {
+  if (!user) return [];
+  if (user.role === 'admin') return agents;
+  return user.scope.includes('agent') ? agents : [];
+}
+
+export function useCurrentUser(): User | null {
+  const users = usePluto((s) => s.users);
+  const session = usePluto((s) => s.session);
+  if (!session) return null;
+  return users.find((u) => u.id === session.userId) || null;
+}
+
+// ─── Действия ───────────────────────────────────────────────────────────────
+
+function pushEvent(sev: Severity, source: EventItem['source'], text: string) {
+  set({ events: [mkEvent(sev, source, text), ...state.events].slice(0, 300) });
+}
+
+function hashPass(p: string): string {
+  return 'h' + hashStr('pluto:' + p).toString(36);
+}
+
+export const store = {
+  nav(route: Route, param = '') {
+    set({ route, routeParam: param });
+  },
+
+  // ── вход (встроенный) ──
+  login(loginName: string, password: string): string | null {
+    const u = state.users.find((x) => x.name.toLowerCase() === loginName.trim().toLowerCase());
+    if (!u) return 'Пользователь не найден';
+    const stored = (u as unknown as { passHash?: string }).passHash || hashPass('pluto');
+    if (u.builtIn ? password !== 'pluto' && stored !== hashPass(password) : stored !== hashPass(password)) {
+      return 'Неверный пароль';
+    }
+    set({ session: { userId: u.id, at: Date.now() }, route: 'dashboard', routeParam: '' });
+    pushEvent('info', 'system', `Вход в систему: ${u.name}`);
+    return null;
+  },
+
+  // ── вход (серверный) ──
+  async loginServer(loginName: string, password: string): Promise<string | null> {
+    try {
+      const user = await apiLogin(loginName.trim(), password);
       set({
         apiMode: 'server',
         users: [user],
         session: { userId: user.id, at: Date.now() },
         route: 'dashboard',
         routeParam: '',
-        events: [mkEvent('info', 'system', 'Консоль подключена к серверному ядру — проверки и телеметрия реальные')],
       });
-    },
+      await syncAll();
+      return null;
+    } catch (e) {
+      return e instanceof Error ? e.message : 'Не удалось связаться с ядром';
+    }
+  },
 
-    loginServer: async (l, p) => {
-      try {
-        const user = await apiLogin(l.trim(), p);
-        get().enterServer(user);
-        sync();
-        return null;
-      } catch (e) {
-        return e instanceof Error ? e.message : 'Не удалось связаться с ядром';
-      }
-    },
+  enterServer(user: User) {
+    set({
+      apiMode: 'server',
+      users: [user],
+      session: { userId: user.id, at: Date.now() },
+      route: 'dashboard',
+      routeParam: '',
+    });
+  },
 
-    serverLogout: () => {
+  // ядро обнаружено, но сессии ещё нет — просто фиксируем режим и версию
+  setCoreVersion(v: string) {
+    set({ apiMode: 'server', coreVersion: v });
+  },
+
+  clearSession() {
+    set({ session: null });
+  },
+
+  logout() {
+    if (state.apiMode === 'server') {
       setApiToken(null);
-      // Если страницу отдало настоящее ядро (подпись в index.html), остаёмся
-      // в серверном режиме: вход выполнится через API, а не через эмуляцию.
       if (INJECTED_CORE) {
         set({ session: null, apiMode: 'server', coreVersion: INJECTED_CORE });
       } else {
         set({ apiMode: 'embedded', session: null, users: [seedAdmin()] });
       }
-    },
-
-    applyServerState: (st) => {
-      const cur = get();
-      const patch: Partial<PlutoState> = {
-        devices: st.devices,
-        agents: st.agents,
-        events: st.events,
-      };
-      // настройки и теги меняются редко (по действию админа): не заменяем
-      // объект, если содержимое то же — иначе каждый поллинг перерисовывает
-      // все подписанные компоненты и сбрасывает открытые формы
-      if (JSON.stringify(st.settings) !== JSON.stringify(cur.settings)) patch.settings = st.settings;
-      if (JSON.stringify(st.tags) !== JSON.stringify(cur.tags)) patch.tags = st.tags;
-      if (st.users && JSON.stringify(st.users) !== JSON.stringify(cur.users)) patch.users = st.users;
-      set(patch);
-    },
-
-    pushEvent: (sev, source, text) => {
-      const st = get();
-      set({ events: [mkEvent(sev, source, text), ...st.events].slice(0, 200) });
-    },
-
-    addDevice: (d) => {
-      if (srv()) {
-        api.addDevice({
-          name: d.name.trim() || d.address,
-          type: d.type,
-          address: d.address.trim(),
-          port: d.port ?? null,
-          path: d.path || '',
-          method: d.method ?? null,
-          body: d.body ?? null,
-          interval: clamp(Math.round(d.interval), 5, 86400),
-          tags: d.tags,
-        }).then(sync).catch((e) => toast('warn', (e as Error)?.message || 'Не удалось добавить устройство'));
-        return;
-      }
-      const st = get();
-      const seed = mulberry32(hashStr(d.type + ':' + d.address));
-      const dev: Device = {
-        id: uid('d'),
-        name: d.name.trim() || d.address,
-        type: d.type,
-        address: d.address.trim(),
-        port: d.port ?? null,
-        path: d.path || '',
-        method: d.method ?? null,
-        body: d.body ?? null,
-        interval: clamp(Math.round(d.interval), 5, 86400),
-        tags: d.tags,
-        favorite: false,
-        status: 'unknown',
-        latency: null,
-        baseline: null,
-        history: [],
-        fails: 0,
-        lastCheck: 0,
-        lastChange: Date.now(),
-        checking: false,
-        approx: true,
-        createdAt: Date.now(),
-        profile: profileFor(d.type, seed),
-        spikeUntil: 0,
-      };
-      set({ devices: [...st.devices, dev] });
-      st.pushEvent('info', 'device', `Добавлено устройство «${dev.name}» (${DEVICE_TYPE_META[dev.type].label} ${dev.address})`);
-    },
-
-    updateDevice: (id, patch) => {
-      if (srv()) {
-        const body: Record<string, unknown> = {};
-        for (const k of ['name', 'type', 'address', 'port', 'path', 'method', 'body', 'interval', 'tags', 'favorite'] as const) {
-          if (k in patch) body[k] = (patch as any)[k];
-        }
-        api.updateDevice(id, body).then(sync).catch((e) => toast('warn', (e as Error)?.message || 'Не удалось обновить'));
-        return;
-      }
-      const st = get();
-      const dev = st.devices.find((x) => x.id === id);
-      set({ devices: st.devices.map((x) => (x.id === id ? { ...x, ...patch } : x)) });
-      if (dev && (patch.name || patch.interval || patch.tags)) {
-        st.pushEvent('info', 'device', `Настройки устройства «${patch.name ?? dev.name}» обновлены`);
-      }
-    },
-
-    patchDevice: (id, patch) => {
-      if (srv()) return;
-      set((st) => ({ devices: st.devices.map((d) => (d.id === id ? { ...d, ...patch } : d)) }));
-    },
-
-    removeDevice: (id) => {
-      if (srv()) {
-        api.deleteDevice(id).then(sync).catch((e) => toast('warn', (e as Error)?.message || 'Не удалось удалить'));
-        return;
-      }
-      const st = get();
-      const dev = st.devices.find((x) => x.id === id);
-      set({ devices: st.devices.filter((x) => x.id !== id) });
-      if (dev) st.pushEvent('info', 'device', `Устройство «${dev.name}» удалено из мониторинга`);
-    },
-
-    toggleDeviceFav: (id) => {
-      const st = get();
-      const d = st.devices.find((x) => x.id === id);
-      if (!d) return;
-      const count = st.devices.filter((x) => x.favorite).length + st.agents.filter((x) => x.favorite).length;
-      if (!d.favorite && count >= FAVORITES_LIMIT) {
-        toast('warn', `В избранном не больше ${FAVORITES_LIMIT} элементов`);
-        return;
-      }
-      if (srv()) {
-        api.updateDevice(id, { favorite: !d.favorite }).then(sync).catch(() => {});
-        return;
-      }
-      set({ devices: st.devices.map((x) => (x.id === id ? { ...x, favorite: !x.favorite } : x)) });
-    },
-
-    addEmulatedAgent: () => {
-      const st = get();
-      if (srv()) {
-        api.createAgentToken('agent-' + uid('t').slice(-4))
-          .then((r) => { toast('ok', `Токен создан: ${r.token}`); sync(); })
-          .catch((e) => toast('warn', (e as Error)?.message || 'Не удалось создать токен'));
-        return null;
-      }
-      const n = st.agents.length + 1;
-      const rng = mulberry32(hashStr('agent' + n + Date.now()));
-      const disks = Array.from({ length: rndInt(1, 3) }, (_, i) => {
-        const total = (i === 0 ? rndInt(240, 520) : rndInt(900, 2000)) * 1024 ** 3;
-        return { id: uid('disk'), label: String.fromCharCode(67 + i) + ':', total, used: total * rnd(0.2, 0.75), temp: rnd(30, 44) };
-      });
-      const a: Agent = {
-        id: uid('a'),
-        name: 'WIN-AGENT-' + String(n).padStart(2, '0'),
-        hostname: 'WIN-AGENT-' + String(n).padStart(2, '0'),
-        token: genToken(),
-        ip: `192.168.1.${rndInt(20, 240)}`,
-        os: 'Windows 11 Pro',
-        version: '1.6.0',
-        online: true,
-        emulated: true,
-        cpuLoad: rnd(8, 45),
-        cpuCores: [4, 6, 8, 12][Math.floor(rng() * 4)],
-        cpuTemp: rnd(38, 55),
-        ramUsed: rnd(4, 9) * 1024 ** 3,
-        ramTotal: [8, 16, 32][Math.floor(rng() * 3)] * 1024 ** 3,
-        ramTemp: rnd(34, 45),
-        disks,
-        rxBytes: 0,
-        txBytes: 0,
-        rxRate: rnd(100, 900),
-        txRate: rnd(40, 300),
-        networks: [],
-        lastSeen: Date.now(),
-        lastMetrics: Date.now(),
-        lastScan: 0,
-        history: [],
-        favorite: false,
-        createdAt: Date.now(),
-      };
-      set({ agents: [...st.agents, a] });
-      st.pushEvent('ok', 'agent', `Агент ${a.hostname} (${a.ip}) подключился`);
-      return a;
-    },
-
-    patchAgent: (id, patch) => {
-      if (srv()) return;
-      set((st) => ({ agents: st.agents.map((a) => (a.id === id ? { ...a, ...patch } : a)) }));
-    },
-
-    removeAgent: (id) => {
-      if (srv()) {
-        api.deleteAgent(id).then(sync).catch((e) => toast('warn', (e as Error)?.message || 'Не удалось удалить агента'));
-        return;
-      }
-      const st = get();
-      const a = st.agents.find((x) => x.id === id);
-      set({ agents: st.agents.filter((x) => x.id !== id) });
-      if (a) st.pushEvent('info', 'agent', `Агент ${a.hostname} отключён и удалён из реестра`);
-    },
-
-    toggleAgentFav: (id) => {
-      const st = get();
-      const a = st.agents.find((x) => x.id === id);
-      if (!a) return;
-      const count = st.devices.filter((x) => x.favorite).length + st.agents.filter((x) => x.favorite).length;
-      if (!a.favorite && count >= FAVORITES_LIMIT) {
-        toast('warn', `В избранном не больше ${FAVORITES_LIMIT} элементов`);
-        return;
-      }
-      if (srv()) {
-        api.patchAgent(id, { favorite: !a.favorite }).then(sync).catch(() => {});
-        return;
-      }
-      set({ agents: st.agents.map((x) => (x.id === id ? { ...x, favorite: !x.favorite } : x)) });
-    },
-
-    addTag: (label, color) => {
-      const st = get();
-      const l = label.trim();
-      if (!l) return 'Укажите название тега';
-      if (srv()) {
-        api.addTag(l, color).then(sync).catch((e) => toast('warn', (e as Error)?.message || 'Не удалось создать тег'));
-        return null;
-      }
-      if (st.tags.some((t) => t.label.toLowerCase() === l.toLowerCase())) return 'Такой тег уже есть';
-      if (st.tags.length >= 30) return 'Не более 30 тегов';
-      set({ tags: [...st.tags, { id: uid('t'), label: l, color }] });
-      st.pushEvent('info', 'system', `Создан тег «${l}»`);
-      return null;
-    },
-
-    removeTag: (id) => {
-      if (srv()) {
-        api.deleteTag(id).then(sync).catch((e) => toast('warn', (e as Error)?.message || 'Не удалось удалить тег'));
-        return;
-      }
-      const st = get();
-      const t = st.tags.find((x) => x.id === id);
-      set({
-        tags: st.tags.filter((x) => x.id !== id),
-        devices: st.devices.map((d) => ({ ...d, tags: d.tags.filter((x) => x !== id) })),
-      });
-      if (t) st.pushEvent('info', 'system', `Тег «${t.label}» удалён`);
-    },
-
-    saveSettings: (settings) => {
-      if (srv()) {
-        api.saveSettings(settings).then(sync).catch((e) => toast('warn', (e as Error)?.message || 'Не удалось сохранить'));
-        return;
-      }
-      set({ settings });
-      get().pushEvent('info', 'system', 'Системные настройки сохранены');
-      toast('ok', 'Настройки сохранены');
-    },
-
-    setSettingsRaw: (settings) => set({ settings }),
-
-    addUser: (u) => {
-      const st = get();
-      if (!u.login.trim()) return 'Укажите логин';
-      if (st.users.some((x) => x.login === u.login.trim())) return 'Логин занят';
-      if (!u.pass || u.pass.length < 4) return 'Пароль минимум 4 символа';
-      const nu: User & { pass?: string } = {
-        id: uid('u'),
-        login: u.login.trim(),
-        name: u.name.trim() || u.login.trim(),
-        role: u.role,
-        scope: u.scope as User['scope'],
-        builtIn: false,
-        createdAt: Date.now(),
-        pass: u.pass,
-      };
-      set({ users: [...st.users, nu] });
-      st.pushEvent('info', 'system', `Создан пользователь ${nu.login} (${nu.role === 'admin' ? 'администратор' : 'наблюдатель'})`);
-      return null;
-    },
-
-    updateUser: (id, patch) => {
-      const st = get();
-      set({ users: st.users.map((u) => (u.id === id ? { ...u, ...patch } : u)) });
-      return null;
-    },
-
-    removeUser: (id) => {
-      const st = get();
-      const u = st.users.find((x) => x.id === id);
-      if (!u) return 'Пользователь не найден';
-      if (u.builtIn) return 'Нельзя удалить администратора по умолчанию';
-      set({ users: st.users.filter((x) => x.id !== id) });
-      st.pushEvent('info', 'system', `Пользователь ${u.login} удалён`);
-      return null;
-    },
-
-    resetBase: () => {
-      localStorage.removeItem(LS_KEY);
-      set({
-        devices: [],
-        agents: [],
-        tags: [],
-        events: [mkEvent('info', 'system', 'База очищена — система готова к первому запуску')],
-        settings: defaultSettings(),
-      });
-      toast('ok', 'База очищена');
-    },
-  };
-
-  return s;
-}
-
-state = initialState();
-
-// rehydrate из localStorage
-try {
-  const raw = localStorage.getItem(LS_KEY);
-  if (raw) {
-    const p = JSON.parse(raw);
-    state = {
-      ...state,
-      ...p,
-      settings: { ...state.settings, ...(p.settings ?? {}), notifications: { ...state.settings.notifications, ...(p.settings?.notifications ?? {}) } },
-      devices: (p.devices ?? []).map((d: Device) => ({ ...d, checking: false })),
-      agents: (p.agents ?? []).map((a: Agent) => ({ ...a, history: [] })),
-      route: 'dashboard',
-      routeParam: '',
-      apiMode: INJECTED_CORE ? 'server' : 'embedded',
-      coreVersion: INJECTED_CORE,
-    };
-  }
-} catch {
-  /* повреждённые данные — чистая база */
-}
-
-export const useStore = {
-  getState: get,
-  setState: set,
-  subscribe(l: () => void) {
-    listeners.add(l);
-    return () => listeners.delete(l);
+      return;
+    }
+    set({ session: null });
   },
+
+  applyServerState(st: ServerState) {
+    const cur = getState();
+    const patch: Partial<PlutoState> = {
+      devices: st.devices,
+      agents: st.agents,
+      events: st.events,
+    };
+    if (JSON.stringify(st.settings) !== JSON.stringify(cur.settings)) patch.settings = st.settings;
+    if (JSON.stringify(st.tags) !== JSON.stringify(cur.tags)) patch.tags = st.tags;
+    if (st.users && JSON.stringify(st.users) !== JSON.stringify(cur.users)) patch.users = st.users;
+    set(patch);
+  },
+
+  // ── устройства ──
+  addDevice(d: Omit<Device, 'id' | 'status' | 'latency' | 'baseline' | 'history' | 'fails' | 'lastCheck' | 'lastChange' | 'checking' | 'approx' | 'createdAt' | 'favorite'> & { favorite?: boolean }) {
+    if (state.apiMode === 'server') {
+      api
+        .addDevice({ name: d.name.trim() || d.address, type: d.type, address: d.address.trim(), port: d.port, path: d.path, method: d.method, body: d.body, interval: clamp(Math.round(d.interval), 5, 86400), tags: d.tags })
+        .then(() => syncAll())
+        .catch((e) => useToasts.push('warn', e?.message || 'Не удалось добавить устройство'));
+      return;
+    }
+    const seed = mulberry32(hashStr(d.type + ':' + d.address));
+    const dev: Device = {
+      ...d,
+      favorite: d.favorite ?? false,
+      id: uid('dev'),
+      status: 'unknown',
+      latency: null,
+      baseline: Math.round(10 + seed() * 40),
+      history: [],
+      fails: 0,
+      lastCheck: 0,
+      lastChange: Date.now(),
+      checking: false,
+      approx: true,
+      createdAt: Date.now(),
+    };
+    set({ devices: [...state.devices, dev] });
+    pushEvent('info', 'device', `Добавлено устройство ${dev.name} (${dev.type.toUpperCase()})`);
+  },
+
+  updateDevice(id: string, patch: Partial<Device>) {
+    if (state.apiMode === 'server') {
+      const editable = ['name', 'type', 'address', 'port', 'path', 'method', 'body', 'interval', 'tags', 'favorite'] as const;
+      const body: Record<string, unknown> = {};
+      for (const k of editable) if (k in patch) body[k] = (patch as Record<string, unknown>)[k];
+      api.updateDevice(id, body).then(() => syncAll()).catch((e) => useToasts.push('warn', e?.message || 'Не удалось обновить'));
+      return;
+    }
+    const dev = state.devices.find((d) => d.id === id);
+    set({ devices: state.devices.map((d) => (d.id === id ? { ...d, ...patch } : d)) });
+    if (dev && (patch.name || patch.interval || patch.tags)) pushEvent('info', 'device', `Настройки «${patch.name ?? dev.name}» обновлены`);
+  },
+
+  patchDevice(id: string, patch: Partial<Device>) {
+    if (state.apiMode === 'server') return;
+    set({ devices: state.devices.map((d) => (d.id === id ? { ...d, ...patch } : d)) });
+  },
+
+  removeDevice(id: string) {
+    if (state.apiMode === 'server') {
+      api.deleteDevice(id).then(() => syncAll()).catch((e) => useToasts.push('warn', e?.message || 'Не удалось удалить'));
+      return;
+    }
+    const dev = state.devices.find((d) => d.id === id);
+    set({ devices: state.devices.filter((d) => d.id !== id) });
+    if (dev) pushEvent('info', 'device', `Устройство «${dev.name}» удалено`);
+  },
+
+  toggleDeviceFav(id: string) {
+    const d = state.devices.find((x) => x.id === id);
+    if (!d) return;
+    store.updateDevice(id, { favorite: !d.favorite });
+  },
+
+  // ── агенты ──
+  async createAgentToken(name: string): Promise<{ token: string; agent: Agent } | null> {
+    if (state.apiMode === 'server') {
+      try {
+        const r = await api.createAgentToken(name);
+        await syncAll();
+        return { token: r.token, agent: r.agent };
+      } catch (e) {
+        useToasts.push('warn', e instanceof Error ? e.message : 'Не удалось создать токен');
+        return null;
+      }
+    }
+    const agent: Agent = {
+      id: uid('ag'),
+      name: name || 'agent-' + uid('x').slice(-4),
+      hostname: '',
+      token: genToken(),
+      ip: '',
+      os: '',
+      version: '',
+      online: false,
+      cpuLoad: 0,
+      cpuCores: 0,
+      cpuTemp: 0,
+      ramUsed: 0,
+      ramTotal: 0,
+      ramTemp: 0,
+      disks: [],
+      rxBytes: 0,
+      txBytes: 0,
+      rxRate: 0,
+      txRate: 0,
+      networks: [],
+      lastSeen: 0,
+      lastMetrics: 0,
+      lastScan: 0,
+      history: [],
+      favorite: false,
+      createdAt: Date.now(),
+    };
+    set({ agents: [...state.agents, agent] });
+    pushEvent('info', 'agent', `Создан токен для агента «${agent.name}»`);
+    return { token: agent.token, agent };
+  },
+
+  updateAgent(id: string, patch: Partial<Agent>) {
+    if (state.apiMode === 'server') {
+      const body: Record<string, unknown> = {};
+      for (const k of ['name', 'favorite'] as const) if (k in patch) body[k] = (patch as Record<string, unknown>)[k];
+      api.updateAgent(id, body).then(() => syncAll()).catch(() => {});
+      return;
+    }
+    set({ agents: state.agents.map((a) => (a.id === id ? { ...a, ...patch } : a)) });
+  },
+
+  patchAgent(id: string, patch: Partial<Agent>) {
+    if (state.apiMode === 'server') return;
+    set({ agents: state.agents.map((a) => (a.id === id ? { ...a, ...patch } : a)) });
+  },
+
+  removeAgent(id: string) {
+    if (state.apiMode === 'server') {
+      api.deleteAgent(id).then(() => syncAll()).catch((e) => useToasts.push('warn', e?.message || 'Не удалось удалить агента'));
+      return;
+    }
+    const a = state.agents.find((x) => x.id === id);
+    set({ agents: state.agents.filter((x) => x.id !== id) });
+    if (a) pushEvent('info', 'agent', `Агент «${a.name}» удалён`);
+  },
+
+  toggleAgentFav(id: string) {
+    const a = state.agents.find((x) => x.id === id);
+    if (!a) return;
+    store.updateAgent(id, { favorite: !a.favorite });
+  },
+
+  // ── теги ──
+  addTag(label: string, color: string): string | null {
+    const l = label.trim();
+    if (!l) return 'Укажите название тега';
+    if (state.apiMode === 'server') {
+      api.addTag(l, color).then(() => syncAll()).catch((e) => useToasts.push('warn', e?.message || 'Не удалось создать тег'));
+      return null;
+    }
+    if (state.tags.some((t) => t.label.toLowerCase() === l.toLowerCase())) return 'Такой тег уже есть';
+    set({ tags: [...state.tags, { id: uid('tag'), label: l, color }] });
+    return null;
+  },
+
+  removeTag(id: string) {
+    if (state.apiMode === 'server') {
+      api.deleteTag(id).then(() => syncAll()).catch((e) => useToasts.push('warn', e?.message || 'Не удалось удалить тег'));
+      return;
+    }
+    const t = state.tags.find((x) => x.id === id);
+    set({
+      tags: state.tags.filter((x) => x.id !== id),
+      devices: state.devices.map((d) => ({ ...d, tags: d.tags.filter((x) => x !== id) })),
+    });
+    if (t) pushEvent('info', 'system', `Тег «${t.label}» удалён`);
+  },
+
+  // ── настройки ──
+  saveSettings(settings: Settings) {
+    if (state.apiMode === 'server') {
+      api.saveSettings(settings).then(() => syncAll()).catch((e) => useToasts.push('warn', e?.message || 'Не удалось сохранить'));
+      return;
+    }
+    set({ settings });
+    pushEvent('info', 'system', 'Системные настройки сохранены');
+  },
+
+  setSettingsRaw(settings: Settings) {
+    set({ settings });
+  },
+
+  // ── пользователи ──
+  addUser(u: { name: string; password: string; role: Role; scope: string[] }): string | null {
+    if (state.apiMode === 'server') {
+      api.addUser(u).then(() => syncAll()).catch((e) => useToasts.push('warn', e?.message || 'Не удалось создать'));
+      return null;
+    }
+    if (state.users.some((x) => x.name.toLowerCase() === u.name.toLowerCase())) return 'Такой логин уже есть';
+    const user: User & { passHash: string } = {
+      id: uid('u'),
+      name: u.name,
+      role: u.role,
+      scope: u.scope,
+      builtIn: false,
+      createdAt: Date.now(),
+      passHash: hashPass(u.password),
+    };
+    set({ users: [...state.users, user] });
+    pushEvent('info', 'system', `Создан пользователь ${u.name}`);
+    return null;
+  },
+
+  updateUser(id: string, patch: Partial<User> & { password?: string }) {
+    if (state.apiMode === 'server') {
+      api.updateUser(id, patch as Record<string, unknown>).then(() => syncAll()).catch((e) => useToasts.push('warn', e?.message || 'Не удалось обновить'));
+      return;
+    }
+    set({
+      users: state.users.map((u) => {
+        if (u.id !== id) return u;
+        const nu: User & { passHash?: string } = { ...u, ...patch };
+        if (patch.password) nu.passHash = hashPass(patch.password);
+        return nu;
+      }),
+    });
+  },
+
+  removeUser(id: string): string | null {
+    const u = state.users.find((x) => x.id === id);
+    if (!u) return 'Пользователь не найден';
+    if (u.builtIn) return 'Нельзя удалить встроенного администратора';
+    if (state.apiMode === 'server') {
+      api.deleteUser(id).then(() => syncAll()).catch((e) => useToasts.push('warn', e?.message || 'Не удалось удалить'));
+      return null;
+    }
+    set({ users: state.users.filter((x) => x.id !== id) });
+    pushEvent('info', 'system', `Пользователь ${u.name} удалён`);
+    return null;
+  },
+
+  pushEvent,
 };
 
-/** Подписка с селектором */
-export function usePluto<T>(selector: (s: PlutoState) => T): T {
-  return useSyncExternalStore(
-    (cb) => {
-      listeners.add(cb);
-      return () => listeners.delete(cb);
-    },
-    () => selector(state),
-  );
+// ─── Синхронизация с ядром ──────────────────────────────────────────────────
+
+export async function syncAll(): Promise<void> {
+  if (getState().apiMode !== 'server' || !getApiToken()) return;
+  try {
+    const st = await apiState();
+    getState(); // no-op
+    store.applyServerState(st);
+  } catch (e) {
+    if (e instanceof Error && e.message.includes('Сессия истекла')) {
+      set({ session: null });
+    }
+  }
 }
 
-export function useCurrentUser(): User | null {
-  const session = usePluto((s) => s.session);
-  const users = usePluto((s) => s.users);
-  return users.find((u) => u.id === session?.userId) ?? null;
-}
-
-export function visibleDevices(devices: Device[], user: User | null): Device[] {
-  if (!user || user.role === 'admin') return devices;
-  return devices.filter((d) => user.scope.includes(d.type));
-}
-
-export function visibleAgents(agents: Agent[], user: User | null): Agent[] {
-  if (!user) return [];
-  if (user.role === 'admin' || (user.scope as string[]).includes('agent')) return agents;
-  return [];
-}
+// вспомогательные экспорты для движка
+export const FAVORITES_LIMIT = 15;
+export { rnd, rndInt, clamp, DEVICE_TYPES };
+export type { DeviceType };

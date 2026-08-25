@@ -7,28 +7,34 @@ export const DATA_DIR = process.env.DATA_DIR || './data';
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
 export const DEFAULT_SETTINGS = {
-  ping: 30, http: 60, api: 120, rtsp: 60, sip: 120,
-  metrics: 3, lanScan: 300, timeoutMs: 3000,
-  failThreshold: 3, degradeFactor: 10, degradeMinMs: 250,
+  intervals: { ping: 60, http: 60, api: 180, rtsp: 120, sip: 120 },
+  heartbeat: 10,
+  metrics: 15,
+  lanScan: 300,
+  failThreshold: 3,
+  degradeFactor: 10,
+  degradeMinMs: 250,
+  timeoutMs: 3000,
   notifications: {
     telegram: { enabled: false, botToken: '', chatId: '' },
-    email: { enabled: false, smtpHost: '', smtpPort: 587, from: '', to: '' },
+    email: { enabled: false, smtp: '', port: 587, from: '', to: '' },
     push: { enabled: false },
     on: { down: true, degraded: true, recover: true, agentOff: true, agentOn: false },
   },
 };
 
 const DEFAULT_DB = () => ({
-  users: [], sessions: [], devices: [], agents: [], tags: [], events: [],
+  users: [],
+  sessions: [],
+  devices: [],
+  agents: [],
+  tags: [],
+  events: [],
   settings: DEFAULT_SETTINGS,
 });
 
 let db = null;
 let saveTimer = null;
-
-export function uid() {
-  return crypto.randomBytes(6).toString('hex');
-}
 
 export function loadDb() {
   if (db) return db;
@@ -39,17 +45,27 @@ export function loadDb() {
     console.error('[pluto] повреждён db.json, создаём новую базу:', e.message);
   }
   db = { ...DEFAULT_DB(), ...(data || {}) };
-  db.settings = { ...DEFAULT_SETTINGS, ...db.settings, notifications: { ...DEFAULT_SETTINGS.notifications, ...(db.settings?.notifications || {}) } };
+  db.settings = {
+    ...DEFAULT_SETTINGS,
+    ...db.settings,
+    intervals: { ...DEFAULT_SETTINGS.intervals, ...(db.settings?.intervals || {}) },
+    notifications: { ...DEFAULT_SETTINGS.notifications, ...(db.settings?.notifications || {}) },
+  };
   if (db.users.length === 0) {
     db.users.push({
-      id: uid(), name: 'admin', role: 'admin', scope: [],
+      id: uid(),
+      name: 'admin',
+      role: 'admin',
+      scope: [],
       passHash: hashPass(process.env.ADMIN_PASSWORD || 'pluto'),
+      builtIn: true,
       createdAt: Date.now(),
     });
     pushEvent('info', 'system', 'Первый запуск ядра: создан администратор admin');
     saveDb();
   }
   db.devices.forEach((d) => (d.checking = false));
+  db.agents.forEach((a) => (a.online = false));
   return db;
 }
 
@@ -68,13 +84,17 @@ export function saveDb() {
   }, 250);
 }
 
+export function uid() {
+  return crypto.randomBytes(6).toString('hex');
+}
+
 export function pushEvent(sev, source, text) {
   db.events.unshift({ id: uid(), ts: Date.now(), sev, source, text });
   if (db.events.length > 300) db.events.length = 300;
   saveDb();
 }
 
-// ─── Авторизация (scrypt + сессии) ──────────────────────────────────────────
+// ─── Авторизация (scrypt + сессии-токены) ───────────────────────────────────
 
 export function hashPass(password) {
   const salt = crypto.randomBytes(16);
@@ -121,7 +141,9 @@ export function attachWs(httpServer, onConnection) {
     }
     const accept = crypto.createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
     socket.write(
-      'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ' + accept + '\r\n\r\n',
+      'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ' +
+        accept +
+        '\r\n\r\n',
     );
     onConnection(wrapSocket(socket), url, socket.remoteAddress);
   });
@@ -138,17 +160,22 @@ function wrapSocket(socket) {
       if (closed) return;
       const payload = Buffer.from(text, 'utf8');
       let header;
-      if (payload.length < 126) header = Buffer.from([0x81, payload.length]);
-      else if (payload.length < 65536) {
+      if (payload.length < 126) {
+        header = Buffer.from([0x81, payload.length]);
+      } else if (payload.length < 65536) {
         header = Buffer.alloc(4);
-        header[0] = 0x81; header[1] = 126;
+        header[0] = 0x81;
+        header[1] = 126;
         header.writeUInt16BE(payload.length, 2);
       } else {
         header = Buffer.alloc(10);
-        header[0] = 0x81; header[1] = 127;
+        header[0] = 0x81;
+        header[1] = 127;
         header.writeBigUInt64BE(BigInt(payload.length), 2);
       }
-      try { socket.write(Buffer.concat([header, payload])); } catch { /* закрыт */ }
+      try {
+        socket.write(Buffer.concat([header, payload]));
+      } catch { /* сокет уже закрыт */ }
     },
     close() {
       closed = true;
@@ -175,14 +202,19 @@ function wrapSocket(socket) {
       let off = 2;
       if (len === 126) {
         if (buf.length < 4) return;
-        len = buf.readUInt16BE(2); off = 4;
+        len = buf.readUInt16BE(2);
+        off = 4;
       } else if (len === 127) {
         if (buf.length < 10) return;
-        len = Number(buf.readBigUInt64BE(2)); off = 10;
+        len = Number(buf.readBigUInt64BE(2));
+        off = 10;
       }
       if (buf.length < off + (masked ? 4 : 0) + len) return;
       let mask = null;
-      if (masked) { mask = buf.subarray(off, off + 4); off += 4; }
+      if (masked) {
+        mask = buf.subarray(off, off + 4);
+        off += 4;
+      }
       const payload = Buffer.from(buf.subarray(off, off + len));
       if (mask) for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i & 3];
       buf = buf.subarray(off + len);

@@ -1,7 +1,7 @@
 // ─── PLUTO: утилиты ─────────────────────────────────────────────────────────
 
 /** Версия консоли (запекается в сборку). Должна совпадать с VERSION в корне. */
-export const CONSOLE_VERSION = '1.7.6';
+export const CONSOLE_VERSION = '1.8.1';
 
 export function hashStr(s: string): number {
   let h = 2166136261;
@@ -12,7 +12,6 @@ export function hashStr(s: string): number {
   return h >>> 0;
 }
 
-/** Детерминированный ГПСЧ (mulberry32) — только для эмуляционного профиля */
 export function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
@@ -39,9 +38,7 @@ export function clamp(v: number, min: number, max: number): number {
 let counter = 0;
 export function uid(prefix: string): string {
   counter = (counter + 1) % 1296;
-  return `${prefix}-${Date.now().toString(36)}${counter.toString(36).padStart(2, '0')}${Math.floor(
-    Math.random() * 1296,
-  )
+  return `${prefix}-${Date.now().toString(36)}${counter.toString(36).padStart(2, '0')}${Math.floor(Math.random() * 1296)
     .toString(36)
     .padStart(2, '0')}`;
 }
@@ -98,16 +95,8 @@ export function pct(used: number, total: number): number {
 // ─── Палитра тегов (10 цветов) ───────────────────────────────────────────────
 
 export const TAG_COLORS = [
-  '#9a8cfa', // фиолетовый
-  '#7ba4e6', // синий
-  '#5fc6d8', // циан
-  '#55c795', // мятный
-  '#8bc46a', // зелёный
-  '#e0b65e', // янтарный
-  '#e0945e', // оранжевый
-  '#e07a80', // коралловый
-  '#d98bb0', // розовый
-  '#98a4c8', // стальной
+  '#9a8cfa', '#7ba4e6', '#5fc6d8', '#55c795', '#8bc46a',
+  '#e0b65e', '#e0945e', '#e07a80', '#d98bb0', '#98a4c8',
 ];
 
 export function macFrom(seedStr: string): string {

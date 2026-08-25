@@ -1,32 +1,27 @@
-# ─── PLUTO: серверная часть (Ubuntu / Docker Compose) ────────────────────────
-# Установка (из клонированного репозитория):
-#   cp .env.example .env
-#   docker compose up -d --build
-#
-# Консоль: http://<хост>:8080 · вход admin / $ADMIN_PASSWORD
-# Шлюз агентов: ws://<хост>:8443/ws (для wss поставьте перед ним Caddy/nginx с TLS)
-
 services:
   core:
     build:
       context: .
       dockerfile: server/Dockerfile
-    image: pluto/core:1.7.6
+    image: pluto/core:1.8.1
+    container_name: pluto-core
     restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATA_DIR=/data
+      - HTTP_PORT=8080
+      - AGENT_PORT=8443
+    ports:
+      - "8080:8080"   # веб-консоль + REST API
+      - "8443:8443"   # шлюз агентов (WebSocket)
+    volumes:
+      - pluto-data:/data
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/health"]
       interval: 15s
       timeout: 4s
       retries: 3
-      start_period: 10s
-    ports:
-      - "8080:8080"   # веб-консоль + REST API
-      - "8443:8443"   # WebSocket-шлюз агентов
-    environment:
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-pluto}   # смените после первого входа
-      DATA_DIR: /data
-    volumes:
-      - pluto-data:/data   # база (db.json), переживает пересоздание контейнера
 
 volumes:
   pluto-data:
