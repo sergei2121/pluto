@@ -228,6 +228,15 @@ class Worker
 
     public void Run()
     {
+        // Служба запущена без аргументов (binPath без -server/-token) — частый сбой установки.
+        // Не спамим попытками: пишем диагноз и ждём переустановки.
+        if (string.IsNullOrEmpty(_token))
+        {
+            Log("ОШИБКА: агент запущен БЕЗ ТОКЕНА (сервер: " + _server + ").");
+            Log("Служба pluto-agent создана без аргументов. Переустановите агента: удалите службу (sc.exe delete pluto-agent) и запустите install.ps1 с параметром -Token ещё раз.");
+            while (!_stop.WaitOne(0)) _stop.WaitOne(60000);
+            return;
+        }
         while (!_stop.WaitOne(0))
         {
             // ВАЖНО: Loop() возвращает Task и дожидается — иначе ошибки подключения
@@ -247,13 +256,13 @@ class Worker
         using (var ws = new ClientWebSocket())
         {
             string url = _server + (_server.Contains("?") ? "&" : "?") + "token=" + Uri.EscapeDataString(_token);
-            Log("подключаюсь к " + url.Replace(_token, "***"));
+            Log("подключаюсь к " + _server + " (токен скрыт)");
             var cts = new CancellationTokenSource(15000); // не висеть вечно, если порт закрыт
             await ws.ConnectAsync(new Uri(url), cts.Token);
             Log("подключено к " + _server);
 
             string hello = "{\"type\":\"hello\",\"hostname\":\"" + Json.Esc(Environment.MachineName) +
-                           "\",\"os\":\"Windows\",\"version\":\"1.7.2-cs\"}";
+                           "\",\"os\":\"Windows\",\"version\":\"1.7.3-cs\"}";
             await Send(ws, hello);
 
             var recv = ReceiveLoop(ws); // читаем ответы сервера (config, ошибки, закрытие)
@@ -363,7 +372,7 @@ static class Program
                 Console.WriteLine("пример: pluto-agent.exe -server ws://192.168.31.219:8443/ws -token ТОКЕН");
                 return;
             }
-            Console.WriteLine("[pluto-agent] версия 1.7.2-cs · запуск в консольном режиме (Ctrl+C — выход)");
+            Console.WriteLine("[pluto-agent] версия 1.7.3-cs · запуск в консольном режиме (Ctrl+C — выход)");
             new Worker(o.Server, o.Token, o.Metrics, o.Lan).Run();
         }
         else
