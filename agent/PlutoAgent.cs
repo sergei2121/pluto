@@ -263,7 +263,7 @@ class Worker
             Log("подключено к " + _server);
 
             string hello = "{\"type\":\"hello\",\"hostname\":\"" + Json.Esc(Environment.MachineName) +
-                           "\",\"os\":\"Windows\",\"version\":\"1.7.5-cs\"}";
+                           "\",\"os\":\"Windows\",\"version\":\"1.7.6-cs\"}";
             await Send(ws, hello);
 
             var recv = ReceiveLoop(ws); // читаем ответы сервера (config, ошибки, закрытие)
@@ -310,14 +310,21 @@ class Worker
         await ws.SendAsync(buf, WebSocketMessageType.Text, true, CancellationToken.None);
     }
 
-    static void Log(string s)
+    static void Log(string s) { AgentLog.Write(s); }
+}
+
+/// <summary>Общий журнал (консоль + файл) — доступен и Worker, и службе.</summary>
+static class AgentLog
+{
+    static readonly object Lk = new object();
+    public static void Write(string s)
     {
         try { Console.WriteLine("[pluto-agent] " + s); } catch { }
         try
         {
             string dir = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData) + "\\pluto";
             if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
-            File.AppendAllText(dir + "\\agent.log", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " " + s + "\r\n");
+            lock (Lk) File.AppendAllText(dir + "\\agent.log", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " " + s + "\r\n");
         }
         catch { }
     }
@@ -330,15 +337,16 @@ class PlutoService : ServiceBase
 
     protected override void OnStart(string[] args)
     {
-        // ВАЖНО: аргументы из ImagePath службы в параметр OnStart НЕ передаются
-        // (особенность .NET-служб) — служба стартовала бы со значениями по умолчанию
-        // (127.0.0.1 и пустым токеном). Читаем настоящую командную строку процесса.
-        var cmdline = RealCommandLine.Args();
-        Log("командная строка службы: " + string.Join(" ", cmdline));
-        var o = Options.From(cmdline.Length > 1 ? cmdline.Skip(1).ToArray() : args);
+        // Механизм 1.7.6: служба запускает exe БЕЗ аргументов — сервер и токен
+        // агент берёт из agent.conf (его пишет установщик). Аргументы из ImagePath
+        // в OnStart всё равно не передаются, а конфиг не зависит от экранирования,
+        // кавычек и кодировок — ломаться там больше нечему.
+        AgentLog.Write("служба запускается (PID " + Process.GetCurrentProcess().Id + ")");
+        var o = Options.From(RealCommandLine.Args());
+        AgentLog.Write("режим: сервер " + o.Server + ", токен " + (string.IsNullOrEmpty(o.Token) ? "ОТСУТСТВУЕТ" : "загружен"));
         if (string.IsNullOrEmpty(o.Token))
         {
-            Log("ОШИБКА: токен не получен. Удалите службу (sc.exe delete pluto-agent) и переустановите агент.");
+            AgentLog.Write("ОШИБКА: токен не найден ни в agent.conf, ни в аргументах. Переустановите агент.");
             return;
         }
         _w = new Worker(o.Server, o.Token, o.Metrics, o.Lan);
@@ -387,6 +395,9 @@ class Options
     public static Options From(string[] args)
     {
         var o = new Options();
+        // 1) конфигурационный файл — его пишет установщик, через него работает служба
+        LoadConf(o);
+        // 2) аргументы командной строки имеют приоритет (ручной запуск из консоли)
         for (int i = 0; i < args.Length - 1; i++)
         {
             string k = args[i].TrimStart('-');
@@ -397,6 +408,37 @@ class Options
             else if (k == "lan") int.TryParse(v, out o.Lan);
         }
         return o;
+    }
+
+    static void LoadConf(Options o)
+    {
+        string[] paths = {
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "agent.conf"),
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData) + "\\pluto\\agent.conf"
+        };
+        foreach (var p in paths)
+        {
+            if (!File.Exists(p)) continue;
+            try
+            {
+                foreach (var raw in File.ReadAllLines(p))
+                {
+                    var line = raw.Trim();
+                    if (line.Length == 0 || line.StartsWith("#")) continue;
+                    int eq = line.IndexOf('=');
+                    if (eq <= 0) continue;
+                    string k = line.Substring(0, eq).Trim().ToLowerInvariant();
+                    string v = line.Substring(eq + 1).Trim();
+                    if (k == "server" && v.Length > 0) o.Server = v;
+                    else if (k == "token" && v.Length > 0) o.Token = v;
+                    else if (k == "metrics") { int x; if (int.TryParse(v, out x) && x > 0) o.Metrics = x; }
+                    else if (k == "lan") { int x; if (int.TryParse(v, out x) && x > 0) o.Lan = x; }
+                }
+                AgentLog.Write("конфигурация загружена: " + p);
+            }
+            catch (Exception e) { AgentLog.Write("не удалось прочитать " + p + ": " + e.Message); }
+            break;
+        }
     }
 }
 
@@ -409,11 +451,11 @@ static class Program
             var o = Options.From(args);
             if (string.IsNullOrEmpty(o.Token))
             {
-                Console.WriteLine("укажите -token ТОКЕН (создаётся в консоли: Агенты → Создать токен агента)");
+                Console.WriteLine("укажите -token ТОКЕН (или положите agent.conf рядом с exe — его создаёт установщик)");
                 Console.WriteLine("пример: pluto-agent.exe -server ws://192.168.31.219:8443/ws -token ТОКЕН");
                 return;
             }
-            Console.WriteLine("[pluto-agent] версия 1.7.5-cs · запуск в консольном режиме (Ctrl+C — выход)");
+            Console.WriteLine("[pluto-agent] версия 1.7.6-cs · запуск в консольном режиме (Ctrl+C — выход)");
             new Worker(o.Server, o.Token, o.Metrics, o.Lan).Run();
         }
         else

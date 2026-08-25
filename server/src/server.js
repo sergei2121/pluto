@@ -12,7 +12,7 @@ import {
   issueSession, attachWs, DEFAULT_SETTINGS,
 } from './lib.js';
 
-const VERSION = '1.7.5';
+const VERSION = '1.7.6';
 const db = loadDb();
 const HTTP_PORT = Number(process.env.HTTP_PORT || 8080);
 const AGENT_PORT = Number(process.env.AGENT_PORT || 8443);
@@ -47,8 +47,14 @@ $exe  = "$dir\\pluto-agent.exe"
 if (-not $Token) { $Token = Read-Host "Введите токен агента (консоль: Агенты -> Создать токен)" }
 if (-not $Token) { Write-Host "Токен обязателен." -ForegroundColor Red; exit 1 }
 
-Write-Host "[pluto] каталог: $dir"
+Write-Host "[pluto] установщик 1.7.6 · каталог: $dir"
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
+
+# Механизм 1.7.6: служба запускает exe БЕЗ аргументов — сервер и токен агент
+# читает из agent.conf. Файл нечувствителен к кавычкам, кодировкам и экранированию.
+$conf = "$dir\\agent.conf"
+Set-Content -Path $conf -Encoding ASCII -Value @("server=$Server", "token=$Token", "metrics=3", "lan=300")
+Write-Host "[pluto] конфигурация записана: $conf"
 
 Write-Host "[pluto] скачиваю исходник агента с ядра..."
 Invoke-WebRequest -UseBasicParsing -Uri "$base/agent/PlutoAgent.cs" -OutFile $src
@@ -84,27 +90,43 @@ Write-Host "[pluto] компилирую агент под вашу Windows ($($
 if ($LASTEXITCODE -ne 0) { throw "компиляция не удалась (код $LASTEXITCODE). Полный вывод выше." }
 Write-Host "[pluto] скомпилировано: $exe"
 
-# Путь установки (C:\\ProgramData\\pluto) не содержит пробелов, поэтому кавычки
-# в binPath НЕ НУЖНЫ: sc.exe через PowerShell ломает экранирование кавычек, и
-# служба создаётся без аргументов (агент стучится на 127.0.0.1 без токена).
-$binPath = "$exe -server $Server -token $Token"
+# Служба запускает exe БЕЗ аргументов: сервер и токен агент берёт из agent.conf.
+# Аргументы в binPath были источником всех прошлых поломок (кавычки, кодировки,
+# особенности передачи аргументов .NET-службам) — теперь их там нет вообще.
+$binPath = $exe
 
 Write-Host "[pluto] создаю службу Windows '$Name'..."
 try { New-Service -Name $Name -BinaryPathName $binPath -DisplayName "PLUTO Agent" -StartupType Automatic -ErrorAction Stop | Out-Null }
 catch { throw "не удалось создать службу: $($_.Exception.Message). Запустите PowerShell от имени администратора." }
 
-# Контроль: аргументы действительно записаны в службу
-# Get-CimInstance вместо Get-WmiObject — работает и в Windows PowerShell 5.1, и в PowerShell 7
+# Контроль: служба существует, а в конфиге есть токен
 $svc = Get-CimInstance Win32_Service -Filter "Name='$Name'"
 Write-Host "[pluto] путь службы: $($svc.PathName)"
-if ($svc.PathName -notlike "*-token*") { throw "служба создана БЕЗ аргументов — установка некорректна, повторите от имени администратора." }
+if (-not (Select-String -Path $conf -Pattern '^token=' -Quiet)) { throw "конфигурация агента не записана — повторите установку." }
 
 Write-Host "[pluto] запускаю службу..."
+if (Test-Path "$dir\\agent.log") { Move-Item "$dir\\agent.log" "$dir\\agent.old.log" -Force -ErrorAction SilentlyContinue }
 Start-Service $Name
 
+Write-Host "[pluto] жду подключения агента к ядру (до 12 с)..."
+$ok = $false
+for ($i = 0; $i -lt 12; $i++) {
+  Start-Sleep -Seconds 1
+  if (Test-Path "$dir\\agent.log") {
+    $tail = Get-Content "$dir\\agent.log" -Tail 25 -Encoding UTF8 -ErrorAction SilentlyContinue
+    if ($tail -match "подключено к") { $ok = $true; break }
+  }
+}
 Write-Host ""
-Write-Host "[pluto] ГОТОВО. Агент появится в консоли PLUTO в течение нескольких секунд." -ForegroundColor Green
+if ($ok) {
+  Write-Host "[pluto] АГЕНТ В СЕТИ — метрики уже поступают в консоль PLUTO." -ForegroundColor Green
+} else {
+  Write-Host "[pluto] Агент пока не подключился. Последние строки лога:" -ForegroundColor Yellow
+  if (Test-Path "$dir\\agent.log") { Get-Content "$dir\\agent.log" -Tail 6 -Encoding UTF8 -ErrorAction SilentlyContinue }
+  Write-Host "[pluto] Проверьте: Test-NetConnection <IP-сервера> -Port 8443; токен создан в консоли PLUTO." -ForegroundColor Yellow
+}
 Write-Host "[pluto] сервер : $Server"
+Write-Host "[pluto] конфиг : $conf"
 Write-Host "[pluto] лог    : $dir\\agent.log"
 `;
 
