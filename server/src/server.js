@@ -12,7 +12,7 @@ import {
   issueSession, attachWs, DEFAULT_SETTINGS,
 } from './lib.js';
 
-const VERSION = '1.7.3';
+const VERSION = '1.7.4';
 const db = loadDb();
 const HTTP_PORT = Number(process.env.HTTP_PORT || 8080);
 const AGENT_PORT = Number(process.env.AGENT_PORT || 8443);
@@ -94,7 +94,8 @@ try { New-Service -Name $Name -BinaryPathName $binPath -DisplayName "PLUTO Agent
 catch { throw "не удалось создать службу: $($_.Exception.Message). Запустите PowerShell от имени администратора." }
 
 # Контроль: аргументы действительно записаны в службу
-$svc = Get-WmiObject Win32_Service -Filter "Name='$Name'"
+# Get-CimInstance вместо Get-WmiObject — работает и в Windows PowerShell 5.1, и в PowerShell 7
+$svc = Get-CimInstance Win32_Service -Filter "Name='$Name'"
 Write-Host "[pluto] путь службы: $($svc.PathName)"
 if ($svc.PathName -notlike "*-token*") { throw "служба создана БЕЗ аргументов — установка некорректна, повторите от имени администратора." }
 

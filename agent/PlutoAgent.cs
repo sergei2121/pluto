@@ -262,7 +262,7 @@ class Worker
             Log("подключено к " + _server);
 
             string hello = "{\"type\":\"hello\",\"hostname\":\"" + Json.Esc(Environment.MachineName) +
-                           "\",\"os\":\"Windows\",\"version\":\"1.7.3-cs\"}";
+                           "\",\"os\":\"Windows\",\"version\":\"1.7.4-cs\"}";
             await Send(ws, hello);
 
             var recv = ReceiveLoop(ws); // читаем ответы сервера (config, ошибки, закрытие)
@@ -372,7 +372,7 @@ static class Program
                 Console.WriteLine("пример: pluto-agent.exe -server ws://192.168.31.219:8443/ws -token ТОКЕН");
                 return;
             }
-            Console.WriteLine("[pluto-agent] версия 1.7.3-cs · запуск в консольном режиме (Ctrl+C — выход)");
+            Console.WriteLine("[pluto-agent] версия 1.7.4-cs · запуск в консольном режиме (Ctrl+C — выход)");
             new Worker(o.Server, o.Token, o.Metrics, o.Lan).Run();
         }
         else
