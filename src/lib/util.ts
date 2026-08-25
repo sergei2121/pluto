@@ -1,7 +1,7 @@
 // ─── PLUTO: утилиты ─────────────────────────────────────────────────────────
 
 /** Версия консоли (запекается в сборку). Должна совпадать с VERSION в корне. */
-export const CONSOLE_VERSION = '1.7.7';
+export const CONSOLE_VERSION = '1.7.8';
 
 export function hashStr(s: string): number {
   let h = 2166136261;

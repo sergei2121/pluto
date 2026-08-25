@@ -11,7 +11,7 @@ import {
   issueSession, attachWs, DEFAULT_SETTINGS,
 } from './lib.js';
 
-const VERSION = '1.7.7';
+const VERSION = '1.7.8';
 const db = loadDb();
 const HTTP_PORT = Number(process.env.HTTP_PORT || 8080);
 const AGENT_PORT = Number(process.env.AGENT_PORT || 8443);
@@ -92,8 +92,7 @@ $w = 0
 while ((Get-Service $Name -ErrorAction SilentlyContinue) -and $w -lt 15) { Start-Sleep -Seconds 1; $w++ }
 
 Write-Host "[pluto] компилирую агент под вашу Windows ($($csc.FullName))..."
-& $csc.FullName /nologo /target:exe /out:$exe `
-    /reference:System.Management.dll /reference:System.ServiceProcess.dll /reference:System.Net.Http.dll $src
+& $csc.FullName /nologo /target:exe /out:$exe /reference:System.Management.dll /reference:System.ServiceProcess.dll /reference:System.Net.Http.dll $src
 if ($LASTEXITCODE -ne 0) { throw "компиляция не удалась (код $LASTEXITCODE). Полный вывод выше." }
 Write-Host "[pluto] скомпилировано: $exe"
 
