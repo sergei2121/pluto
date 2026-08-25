@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { usePluto, useCurrentUser, getState, store, syncAll } from './lib/store';
 import { startEngine, stopEngine } from './lib/engine';
-import { detectApi, getApiToken, setApiToken } from './lib/api';
+import { detectApi, getApiToken, setApiToken, apiMe } from './lib/api';
 import { Shell } from './components/layout';
 import { Orbit } from 'lucide-react';
 import Login from './pages/Login';
@@ -27,17 +27,21 @@ export default function App() {
       if (!alive) return;
       if (ver) {
         store.setCoreVersion(ver);
-        // если остался токен прошлой сессии — пробуем восстановить её
+        // если остался токен прошлой сессии — восстанавливаем её через ядро
         if (getApiToken()) {
           try {
-            await syncAll();
+            const me = await apiMe();
+            if (alive) {
+              store.enterServer(me);
+              await syncAll();
+            }
           } catch {
             setApiToken(null); // токен протух — покажем экран входа
             store.clearSession();
           }
         }
       }
-      setBooting(false);
+      if (alive) setBooting(false);
     })();
     return () => {
       alive = false;

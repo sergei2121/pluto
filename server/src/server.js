@@ -363,6 +363,13 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { token: issueSession(user.id), user: publicUser(user) });
     }
 
+    // восстановление сессии по токену (консоль при загрузке страницы)
+    if (p === '/api/auth/me' && method === 'GET') {
+      const u = authUser(req);
+      if (!u) return json(res, 401, { error: 'Сессия истекла' });
+      return json(res, 200, publicUser(u));
+    }
+
     // неизвестные /agent/* — не отдаём HTML консоли
     if (method === 'GET' && p.startsWith('/agent/')) return text(res, 404, 'not found', 'text/plain');
 
