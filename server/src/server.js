@@ -11,7 +11,7 @@ import {
   issueSession, attachWs, DEFAULT_SETTINGS,
 } from './lib.js';
 
-const VERSION = '1.7.6';
+const VERSION = '1.7.7';
 const db = loadDb();
 const HTTP_PORT = Number(process.env.HTTP_PORT || 8080);
 const AGENT_PORT = Number(process.env.AGENT_PORT || 8443);
@@ -361,6 +361,13 @@ const server = http.createServer(async (req, res) => {
       if (!user || !verifyPass(password || '', user.passHash)) return json(res, 401, { error: 'Неверный логин или пароль' });
       pushEvent('info', 'system', `Вход в систему: ${user.name}`);
       return json(res, 200, { token: issueSession(user.id), user: publicUser(user) });
+    }
+
+    // восстановление сессии по токену (консоль вызывает при каждой загрузке страницы)
+    if (p === '/api/auth/me' && method === 'GET') {
+      const u = authUser(req);
+      if (!u) return json(res, 401, { error: 'Сессия истекла' });
+      return json(res, 200, publicUser(u));
     }
 
     // неизвестные /agent/* — не отдаём HTML консоли
