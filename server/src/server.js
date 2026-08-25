@@ -11,7 +11,7 @@ import {
   issueSession, attachWs, DEFAULT_SETTINGS,
 } from './lib.js';
 
-const VERSION = '1.8.0';
+const VERSION = '1.8.1';
 const db = loadDb();
 const HTTP_PORT = Number(process.env.HTTP_PORT || 8080);
 const AGENT_PORT = Number(process.env.AGENT_PORT || 8443);
@@ -101,6 +101,10 @@ $binPath = $exe
 Write-Host "[pluto] создаю службу Windows '$Name'..."
 try { New-Service -Name $Name -BinaryPathName $binPath -DisplayName "PLUTO Agent" -StartupType Automatic -ErrorAction Stop | Out-Null }
 catch { throw "не удалось создать службу: $($_.Exception.Message). Запустите PowerShell от имени администратора." }
+
+# Самовосстановление: если процесс агента упадёт, Windows перезапустит его
+# автоматически (через 5 с, затем 15 с, затем 60 с; счётчик сбрасывается раз в сутки)
+sc.exe failure $Name reset= 86400 actions= restart/5000/restart/15000/restart/60000 | Out-Null
 
 $svc = Get-CimInstance Win32_Service -Filter "Name='$Name'"
 Write-Host "[pluto] путь службы: $($svc.PathName)"

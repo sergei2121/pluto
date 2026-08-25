@@ -306,7 +306,7 @@ class Worker
             AgentLog.Write("подключено к " + _o.Server);
 
             string hello = "{\"type\":\"hello\",\"hostname\":\"" + Json.Esc(Environment.MachineName) +
-                           "\",\"os\":\"Windows\",\"version\":\"1.8.0-cs\"}";
+                           "\",\"os\":\"Windows\",\"version\":\"1.8.1-cs\"}";
             await Send(ws, hello);
 
             // Приём сообщений — наблюдаемая Task. Любая ошибка внутри НЕ убивает
@@ -315,13 +315,17 @@ class Worker
 
             int lanCounter = 0; // LAN-скан сразу при старте
             int sinceLog = 0;
+            bool firstLogged = false;
             while (ws.State == WebSocketState.Open && !_stop.WaitOne(0))
             {
-                // сбор метрик изолирован: неудачная WMI-выборка не роняет цикл
-                string mj;
-                try { mj = Collector.MetricsJson(); }
-                catch (Exception e) { AgentLog.Write("сбор метрик: " + e.Message); mj = "{}"; }
-                await Send(ws, "{\"type\":\"metrics\",\"data\":" + mj + "}");
+                // сбор метрик — на отдельном потоке с жёстким таймаутом:
+                // зависший WMI-запрос не заморозит агента и не оборвёт связь
+                string mj = CollectWithTimeout(10000);
+                if (mj != null)
+                {
+                    await Send(ws, "{\"type\":\"metrics\",\"data\":" + mj + "}");
+                    if (!firstLogged) { firstLogged = true; AgentLog.Write("первая метрика отправлена"); }
+                }
 
                 lanCounter += _o.Metrics;
                 if (lanCounter >= _o.Lan)
@@ -340,8 +344,28 @@ class Worker
                 if (_stop.WaitOne(_o.Metrics * 1000)) break;
             }
 
+            AgentLog.Write("цикл завершён (состояние сокета: " + ws.State + ")");
             try { await recv; } catch { } // наблюдаем задачу приёма
         }
+    }
+
+    /// <summary>Сбор метрик с таймаутом: если WMI завис, такт пропускается, а агент живёт.</summary>
+    static string CollectWithTimeout(int timeoutMs)
+    {
+        string result = null;
+        var th = new Thread(() =>
+        {
+            try { result = Collector.MetricsJson(); }
+            catch (Exception e) { AgentLog.Write("сбор метрик: " + e.GetBaseException().Message); result = "{}"; }
+        });
+        th.IsBackground = true;
+        th.Start();
+        if (!th.Join(timeoutMs))
+        {
+            AgentLog.Write("сбор метрик дольше " + timeoutMs + " мс — такт пропущен (проверьте службу Winmgmt)");
+            return null;
+        }
+        return result;
     }
 
     async Task ReceiveLoop(ClientWebSocket ws)
@@ -417,7 +441,8 @@ class Worker
     async Task Send(ClientWebSocket ws, string text)
     {
         var buf = new ArraySegment<byte>(Encoding.UTF8.GetBytes(text));
-        await ws.SendAsync(buf, WebSocketMessageType.Text, true, CancellationToken.None);
+        using (var cts = new CancellationTokenSource(10000))
+            await ws.SendAsync(buf, WebSocketMessageType.Text, true, cts.Token);
     }
 }
 
@@ -429,6 +454,7 @@ class PlutoService : ServiceBase
 
     protected override void OnStart(string[] args)
     {
+        AgentLog.Write("служба запускается (PID " + Process.GetCurrentProcess().Id + ", версия 1.8.1-cs)");
         var o = Options.Load(RealCommandLine.Args());
         AgentLog.Write("режим: сервер " + o.Server + ", токен " + (string.IsNullOrEmpty(o.Token) ? "ОТСУТСТВУЕТ" : "загружен"));
         if (string.IsNullOrEmpty(o.Token))
@@ -499,7 +525,7 @@ static class Program
                 Console.WriteLine("укажите токен: pluto-agent.exe -token ТОКЕН  (или создайте C:\\ProgramData\\pluto\\agent.conf)");
                 return;
             }
-            Console.WriteLine("[pluto-agent] версия 1.8.0-cs · консольный режим (Ctrl+C — выход)");
+            Console.WriteLine("[pluto-agent] версия 1.8.1-cs · консольный режим (Ctrl+C — выход)");
             new Worker(o).Run();
         }
         else

@@ -267,6 +267,15 @@ export const store = {
     });
   },
 
+  // ядро обнаружено, но сессии ещё нет — просто фиксируем режим и версию
+  setCoreVersion(v: string) {
+    set({ apiMode: 'server', coreVersion: v });
+  },
+
+  clearSession() {
+    set({ session: null });
+  },
+
   logout() {
     if (state.apiMode === 'server') {
       setApiToken(null);
