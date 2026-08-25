@@ -12,7 +12,7 @@ import {
   issueSession, attachWs, DEFAULT_SETTINGS,
 } from './lib.js';
 
-const VERSION = '1.7.2';
+const VERSION = '1.7.3';
 const db = loadDb();
 const HTTP_PORT = Number(process.env.HTTP_PORT || 8080);
 const AGENT_PORT = Number(process.env.AGENT_PORT || 8443);
@@ -69,23 +69,37 @@ $csc = Get-ChildItem "$env:WINDIR\\Microsoft.NET\\Framework64\\*\\csc.exe" -Erro
        Sort-Object FullName -Descending | Select-Object -First 1
 if (-not $csc) { throw "csc.exe не найден. Нужен .NET Framework 4.x (обычно уже установлен в Windows)." }
 
+# ВАЖНО: сначала остановить и удалить старую службу — она держит pluto-agent.exe
+# открытым, и компилятор не сможет перезаписать файл.
+Write-Host "[pluto] останавливаю и удаляю старую службу (если была)..."
+sc.exe stop $Name 2>$null | Out-Null
+sc.exe delete $Name 2>$null | Out-Null
+$w = 0
+while ((Get-Service $Name -ErrorAction SilentlyContinue) -and $w -lt 15) { Start-Sleep -Seconds 1; $w++ }
+if (Get-Service $Name -ErrorAction SilentlyContinue) { throw "старая служба не удалилась. Закройте оснастку «Службы»/Process Explorer и повторите, либо перезагрузите ПК." }
+
 Write-Host "[pluto] компилирую агент под вашу Windows ($($csc.FullName))..."
 & $csc.FullName /nologo /target:exe /out:$exe \`
     /reference:System.Management.dll /reference:System.ServiceProcess.dll /reference:System.Net.Http.dll $src
 if ($LASTEXITCODE -ne 0) { throw "компиляция не удалась (код $LASTEXITCODE). Полный вывод выше." }
 Write-Host "[pluto] скомпилировано: $exe"
 
-Write-Host "[pluto] останавливаю и удаляю старую службу (если была)..."
-sc.exe stop $Name 2>$null | Out-Null
-sc.exe delete $Name 2>$null | Out-Null
-Start-Sleep -Seconds 1
+# Путь установки (C:\\ProgramData\\pluto) не содержит пробелов, поэтому кавычки
+# в binPath НЕ НУЖНЫ: sc.exe через PowerShell ломает экранирование кавычек, и
+# служба создаётся без аргументов (агент стучится на 127.0.0.1 без токена).
+$binPath = "$exe -server $Server -token $Token"
 
 Write-Host "[pluto] создаю службу Windows '$Name'..."
-& sc.exe create $Name binPath= "\`"$exe\`" -server $Server -token $Token" start= auto DisplayName= "PLUTO Agent"
-if ($LASTEXITCODE -ne 0) { throw "не удалось создать службу. Убедитесь, что PowerShell запущен от имени администратора." }
+try { New-Service -Name $Name -BinaryPathName $binPath -DisplayName "PLUTO Agent" -StartupType Automatic -ErrorAction Stop | Out-Null }
+catch { throw "не удалось создать службу: $($_.Exception.Message). Запустите PowerShell от имени администратора." }
+
+# Контроль: аргументы действительно записаны в службу
+$svc = Get-WmiObject Win32_Service -Filter "Name='$Name'"
+Write-Host "[pluto] путь службы: $($svc.PathName)"
+if ($svc.PathName -notlike "*-token*") { throw "служба создана БЕЗ аргументов — установка некорректна, повторите от имени администратора." }
 
 Write-Host "[pluto] запускаю службу..."
-& sc.exe start $Name
+Start-Service $Name
 
 Write-Host ""
 Write-Host "[pluto] ГОТОВО. Агент появится в консоли PLUTO в течение нескольких секунд." -ForegroundColor Green
