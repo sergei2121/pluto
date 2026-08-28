@@ -123,6 +123,7 @@ export interface Agent {
   lastError: string | null;
   latest: AidaPoint | null; // последние показания AIDA64
   aida?: AidaPoint[]; // архив показаний (сервер отдаёт отдельным эндпоинтом)
+  latHist?: { t: number; ms: number | null }[]; // история задержки пинга (для графика)
   targets: AgentPingTarget[]; // результаты пингов устройств через relay
   favorite: boolean;
   createdAt: number;

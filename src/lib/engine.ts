@@ -121,7 +121,10 @@ function stepAgent(id: string, now: number) {
   const alive = Math.random() > 0.03;
   if (!alive) {
     if (a.online) setAgentOffline(id);
-    store.patchAgent(id, { online: false, latency: null, onlineSince: 0, lastPoll: now });
+    store.patchAgent(id, {
+      online: false, latency: null, onlineSince: 0, lastPoll: now,
+      latHist: [...(a.latHist || []), { t: now, ms: null }].slice(-480),
+    });
     return;
   }
   const wasOnline = a.online;
@@ -141,14 +144,16 @@ function stepAgent(id: string, now: number) {
     uptimeSec: (a.latest?.uptimeSec ?? 0) + 30,
   };
 
+  const ms = Math.round(rnd(1, 40));
   store.patchAgent(id, {
     online: true,
-    latency: Math.round(rnd(1, 40)),
+    latency: ms,
     onlineSince: a.onlineSince || now,
     lastSeen: now,
     lastPoll: now,
     latest: pt,
     aida: [...(a.aida || []), pt].slice(-300),
+    latHist: [...(a.latHist || []), { t: now, ms }].slice(-480),
     lastError: null,
   });
   if (!wasOnline) setAgentOnline(id);

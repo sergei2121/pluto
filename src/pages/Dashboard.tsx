@@ -74,8 +74,10 @@ const FavDeviceCard = memo(function FavDeviceCard({ id }: { id: string }) {
 const FavAgentCard = memo(function FavAgentCard({ id }: { id: string }) {
   const a = usePluto((s) => s.agents.find((x) => x.id === id));
   if (!a) return null;
+  const cpu = a.latest?.cpuUsage ?? null;
+  const ram = a.latest?.ram ?? null;
   return (
-    <div className="group cursor-pointer rounded-lg border border-line bg-raised/50 p-3.5 transition-all duration-200 hover:-translate-y-0.5 hover:border-vio/40 hover:bg-raised/80" onClick={() => store.nav('agents', a.hostname || a.name)}>
+    <div className="group cursor-pointer rounded-lg border border-line bg-raised/50 p-3.5 transition-all duration-200 hover:-translate-y-0.5 hover:border-vio/40 hover:bg-raised/80" onClick={() => store.nav('agents', a.ip || a.name)}>
       <div className="flex items-center gap-2">
         <StatusDot status={a.online ? 'up' : 'down'} />
         <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">{a.name}</span>
@@ -84,17 +86,17 @@ const FavAgentCard = memo(function FavAgentCard({ id }: { id: string }) {
         </button>
       </div>
       <div className="mt-2.5 flex items-center gap-3">
-        <Ring value={a.online ? a.cpuLoad : 0} size={52} label="ЦП" color={a.cpuLoad > 85 ? '#e07a80' : '#8f7df0'} />
+        <Ring value={a.latency != null ? Math.min(100, a.latency) : 0} size={52} label="мс" color={a.latency == null ? '#3a4162' : a.latency > 80 ? '#e07a80' : '#8f7df0'} />
         <div className="min-w-0 flex-1 space-y-2">
           <div>
             <div className="mb-1 flex justify-between font-mono text-[10px] text-dim">
-              <span>ОЗУ</span><span className="text-mut">{a.online ? `${pct(a.ramUsed, a.ramTotal)}%` : '—'}</span>
+              <span>ЦП (AIDA)</span><span className="text-mut">{cpu != null ? `${cpu}%` : '—'}</span>
             </div>
-            <Bar value={a.online ? pct(a.ramUsed, a.ramTotal) : 0} color="#7ba4e6" />
+            <Bar value={cpu ?? 0} color="#8f7df0" />
           </div>
           <div className="flex items-center gap-3 font-mono text-[10px] text-dim">
-            <span className="flex items-center gap-1 text-warn"><Activity className="h-3 w-3" />{a.online ? `${Math.round(a.cpuTemp)}°C` : '—'}</span>
-            <span className="flex items-center gap-1 text-blu"><Activity className="h-3 w-3" />{a.online ? `${Math.round(a.rxRate)} КБ/с` : '—'}</span>
+            <span className="flex items-center gap-1 text-warn"><Activity className="h-3 w-3" />{a.latest?.cpuTemp != null ? `${a.latest.cpuTemp}°C` : '—'}</span>
+            <span className="flex items-center gap-1 text-blu"><Activity className="h-3 w-3" />{ram != null ? `ОЗУ ${ram}%` : 'ОЗУ —'}</span>
           </div>
         </div>
       </div>
