@@ -92,6 +92,13 @@ export function fmtMs(n: number | null): string {
   return `${Math.round(n)} мс`;
 }
 
+export function fmtNet(kbs: number | null): string {
+  if (kbs == null) return '—';
+  if (kbs >= 1024 * 1024) return `${(kbs / 1024 / 1024).toFixed(2)} ГБ/с`;
+  if (kbs >= 1024) return `${(kbs / 1024).toFixed(1)} МБ/с`;
+  return `${Math.round(kbs)} КБ/с`;
+}
+
 export function pct(used: number, total: number): number {
   return total > 0 ? Math.round((used / total) * 100) : 0;
 }

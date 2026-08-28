@@ -68,12 +68,13 @@ export function PlanetMark({ className }: { className?: string }) {
 
 // ─── Боковое меню ────────────────────────────────────────────────────────────
 
-const NAV: { route: Route; label: string; icon: ReactNode; adminOnly?: boolean; needAgent?: boolean }[] = [
+const NAV: { route: Route; label: string; icon: ReactNode; adminOnly?: boolean; needAgent?: boolean; needGlances?: boolean }[] = [
   { route: 'dashboard', label: 'Главная', icon: <LayoutDashboard className="h-[17px] w-[17px]" /> },
   { route: 'devices', label: 'Устройства', icon: <Server className="h-[17px] w-[17px]" /> },
   { route: 'agents', label: 'Агенты', icon: <Monitor className="h-[17px] w-[17px]" />, needAgent: true },
   { route: 'deploy', label: 'Развёртывание', icon: <Rocket className="h-[17px] w-[17px]" /> },
   { route: 'telemetry', label: 'Журнал телеметрии', icon: <History className="h-[17px] w-[17px]" />, needAgent: true },
+  { route: 'bars', label: 'Журнал телеметрии Bars', icon: <BarChart3 className="h-[17px] w-[17px]" />, needGlances: true },
   { route: 'settings', label: 'Настройки системы', icon: <SettingsIcon className="h-[17px] w-[17px]" />, adminOnly: true },
 ];
 
@@ -90,6 +91,7 @@ export function Sidebar() {
     if (!user) return false;
     if (n.adminOnly && user.role !== 'admin') return false;
     if (n.needAgent && user.role !== 'admin' && !user.scope.includes('agent')) return false;
+    if (n.needGlances && user.role !== 'admin' && !user.scope.includes('glances')) return false;
     return true;
   });
 
@@ -163,6 +165,7 @@ const TITLES: Record<Route, string> = {
   devices: 'Устройства',
   agents: 'Агенты на Windows-машинах',
   telemetry: 'Журнал телеметрии AIDA64',
+  bars: 'Журнал телеметрии Bars · Glances',
   settings: 'Настройки системы',
   deploy: 'Развёртывание и документация',
 };
