@@ -1,5 +1,5 @@
 // ─── PLUTO: центральное хранилище (встроенный + серверный режимы) ───────────
-import { useSyncExternalStore } from 'react';
+import { useRef, useSyncExternalStore } from 'react';
 import type { Agent, Device, DeviceType, EventItem, Role, Route, Severity, Settings, Tag, User } from './types';
 import { DEVICE_TYPES } from './types';
 import { clamp, genToken, hashStr, mulberry32, rnd, rndInt, uid } from './util';
@@ -187,7 +187,18 @@ export function subscribe(fn: () => void): () => void {
 }
 
 export function usePluto<T>(selector: (s: PlutoState) => T): T {
-  return useSyncExternalStore(subscribe, () => selector(getState()));
+  // Кэш снапшота: getSnapshot обязан возвращать ту же ссылку, пока состояние
+  // не менялось, — иначе useSyncExternalStore входит в бесконечный цикл
+  // перерисовок. Селектор вызывается заново только при новом объекте state.
+  const cache = useRef<{ snap: PlutoState; value: T } | null>(null);
+  return useSyncExternalStore(subscribe, () => {
+    const snap = getState();
+    const c = cache.current;
+    if (c && c.snap === snap) return c.value;
+    const value = selector(snap);
+    cache.current = { snap, value };
+    return value;
+  });
 }
 
 // ─── Видимость по ролям ─────────────────────────────────────────────────────

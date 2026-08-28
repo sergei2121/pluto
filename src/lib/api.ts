@@ -1,10 +1,18 @@
 // ─── PLUTO: клиент REST API серверного ядра ─────────────────────────────────
 import type { Agent, Device, EventItem, Settings, Tag, User } from './types';
 
-let apiToken: string | null = localStorage.getItem('pluto_token');
+let apiToken: string | null | undefined;
 const BASE = ''; // same-origin: ядро отдаёт и консоль, и API
 
 export function getApiToken(): string | null {
+  // ленивое чтение: модуль можно безопасно импортировать в любом окружении
+  if (apiToken === undefined) {
+    try {
+      apiToken = typeof localStorage !== 'undefined' ? localStorage.getItem('pluto_token') : null;
+    } catch {
+      apiToken = null;
+    }
+  }
   return apiToken;
 }
 export function setApiToken(t: string | null): void {
