@@ -1,5 +1,5 @@
 // ─── PLUTO: клиент REST API серверного ядра ─────────────────────────────────
-import type { Agent, AidaPoint, Device, EventItem, Settings, Tag, User } from './types';
+import type { Agent, AidaPoint, Device, EventItem, GlancesDevice, GlancesPoint, GlancesRange, Settings, Tag, User } from './types';
 
 let apiToken: string | null | undefined;
 const BASE = ''; // same-origin: ядро отдаёт и консоль, и API
@@ -74,6 +74,7 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
 export interface ServerState {
   devices: Device[];
   agents: Agent[];
+  glances?: GlancesDevice[];
   tags: Tag[];
   events: EventItem[];
   settings: Settings;
@@ -105,6 +106,14 @@ export const api = {
   deleteAgent: (id: string) => req<{ ok: boolean }>('DELETE', `/api/agents/${id}`),
   retokenAgent: (id: string) => req<{ token: string }>('POST', `/api/agents/${id}/retoken`),
   agentAida: (id: string, range: string) => req<{ range: string; retentionDays: number; points: AidaPoint[] }>('GET', `/api/agents/${id}/aida?range=${encodeURIComponent(range)}`),
+
+  // Glances (Bars): ядро само опрашивает веб-страницы, агент не нужен
+  addGlances: (b: { name: string; url: string; serverLink: string }) => req<GlancesDevice>('POST', '/api/glances', b),
+  updateGlances: (id: string, b: Record<string, unknown>) => req<GlancesDevice>('PUT', `/api/glances/${id}`, b),
+  deleteGlances: (id: string) => req<{ ok: boolean }>('DELETE', `/api/glances/${id}`),
+  scrapeGlances: (id: string) => req<{ point: GlancesPoint | null; error: string | null }>('POST', `/api/glances/${id}/scrape`),
+  glancesHistory: (id: string, range: GlancesRange) =>
+    req<{ range: string; retentionDays: number; points: GlancesPoint[] }>('GET', `/api/glances/${id}/history?range=${range}`),
 
   addTag: (label: string, color: string) => req<Tag>('POST', '/api/tags', { label, color }),
   deleteTag: (id: string) => req<{ ok: boolean }>('DELETE', `/api/tags/${id}`),

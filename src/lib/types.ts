@@ -2,7 +2,7 @@
 
 export type DeviceType = 'ping' | 'http' | 'api' | 'rtsp' | 'sip';
 export type DeviceStatus = 'up' | 'down' | 'degraded' | 'unknown';
-export type Route = 'dashboard' | 'devices' | 'agents' | 'telemetry' | 'settings' | 'deploy';
+export type Route = 'dashboard' | 'devices' | 'agents' | 'telemetry' | 'bars' | 'settings' | 'deploy';
 export type Severity = 'ok' | 'warn' | 'crit' | 'info';
 export type Role = 'admin' | 'viewer';
 
@@ -64,6 +64,44 @@ export interface AidaPoint {
 
 export type AidaRange = '5m' | '30m' | '3h' | '24h' | '7d' | '30d' | '60d';
 
+// ─── Glances (Журнал телеметрии Bars) ────────────────────────────────────────
+// Ядро само опрашивает веб-страницу Glances (агент не нужен) и разбирает столбцы
+// CPU / MEM / Rx/s / Tx/s / Package. Хранение — 30 дней с автоочисткой.
+
+export interface GlancesPoint {
+  t: number;
+  cpu: number | null; // CPU, %
+  user: number | null;
+  system: number | null;
+  iowait: number | null;
+  idle: number | null;
+  irq: number | null;
+  nice: number | null;
+  steal: number | null;
+  mem: number | null; // MEM, %
+  memTotal: number | null; // ГБ
+  memUsed: number | null; // ГБ
+  memFree: number | null; // ГБ
+  rx: number | null; // КБ/с (Rx/s)
+  tx: number | null; // КБ/с (Tx/s)
+  pkg: number | null; // Package — температура ЦП, °C
+}
+
+export interface GlancesDevice {
+  id: string;
+  name: string; // имя сервера
+  url: string; // адрес мониторинга (веб-страница Glances, напр. http://10.0.0.5:61208)
+  serverLink: string; // ссылка на физ. сервер (кликабельная)
+  createdAt: number;
+  lastScrape: number;
+  lastError: string | null;
+  online: boolean;
+  latest: GlancesPoint | null;
+  history?: GlancesPoint[];
+}
+
+export type GlancesRange = '5m' | '30m' | '3h' | '24h' | '7d' | '30d';
+
 export interface Agent {
   id: string;
   name: string;
@@ -120,7 +158,7 @@ export interface User {
 }
 
 export interface Settings {
-  intervals: Record<DeviceType, number>;
+  intervals: Record<DeviceType | 'glances', number>;
   heartbeat: number;
   metrics: number;
   lanScan: number;

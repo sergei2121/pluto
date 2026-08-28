@@ -1,6 +1,6 @@
 // ─── PLUTO: центральное хранилище (встроенный + серверный режимы) ───────────
 import { useRef, useSyncExternalStore } from 'react';
-import type { Agent, Device, DeviceType, EventItem, Role, Route, Severity, Settings, Tag, User } from './types';
+import type { Agent, Device, DeviceType, EventItem, GlancesDevice, GlancesPoint, Role, Route, Severity, Settings, Tag, User } from './types';
 import { DEVICE_TYPES } from './types';
 import { clamp, genToken, hashStr, mulberry32, rnd, rndInt, uid } from './util';
 import { api, apiLogin, apiState, setApiToken, getApiToken, type ServerState } from './api';
@@ -17,6 +17,7 @@ export interface PlutoState {
   session: Session | null;
   devices: Device[];
   agents: Agent[];
+  glances: GlancesDevice[];
   tags: Tag[];
   events: EventItem[];
   settings: Settings;
@@ -70,7 +71,7 @@ export function useToastList(): Toast[] {
 
 export function defaultSettings(): Settings {
   return {
-    intervals: { ping: 60, http: 60, api: 180, rtsp: 120, sip: 120 },
+    intervals: { ping: 60, http: 60, api: 180, rtsp: 120, sip: 120, glances: 60 },
     heartbeat: 10,
     metrics: 15,
     lanScan: 300,
@@ -109,6 +110,7 @@ function initialState(): PlutoState {
     session: null,
     devices: [],
     agents: [],
+    glances: [],
     tags: [],
     events: [mkEvent('info', 'system', 'PLUTO инициализирован — база чистая, устройства не добавлены')],
     settings: defaultSettings(),
@@ -305,6 +307,7 @@ export const store = {
     const patch: Partial<PlutoState> = {
       devices: st.devices,
       agents: st.agents,
+      glances: st.glances ?? [],
       events: st.events,
     };
     if (JSON.stringify(st.settings) !== JSON.stringify(cur.settings)) patch.settings = st.settings;
@@ -450,6 +453,55 @@ export const store = {
     const a = state.agents.find((x) => x.id === id);
     if (!a) return;
     store.updateAgent(id, { favorite: !a.favorite });
+  },
+
+  // ── Glances (Bars) ──
+  addGlances(d: { name: string; url: string; serverLink: string }): string | null {
+    const name = d.name.trim();
+    const url = d.url.trim();
+    if (!name) return 'Укажите имя сервера';
+    if (!/^https?:\/\//i.test(url)) return 'Адрес мониторинга должен начинаться с http:// или https://';
+    const serverLink = d.serverLink.trim();
+    if (state.apiMode === 'server') {
+      api.addGlances({ name, url, serverLink }).then(() => syncAll()).catch((e) => useToasts.push('warn', e?.message || 'Не удалось добавить'));
+      return null;
+    }
+    set({
+      glances: [...state.glances, {
+        id: uid('g'), name, url, serverLink, createdAt: Date.now(),
+        lastScrape: 0, lastError: 'опрос страниц выполняет серверное ядро', online: false, latest: null,
+      }],
+    });
+    return null;
+  },
+
+  updateGlances(id: string, patch: Partial<GlancesDevice>) {
+    if (state.apiMode === 'server') {
+      const body: Record<string, unknown> = {};
+      for (const k of ['name', 'url', 'serverLink'] as const) if (k in patch) body[k] = (patch as Record<string, unknown>)[k];
+      api.updateGlances(id, body).then(() => syncAll()).catch(() => {});
+      return;
+    }
+    set({ glances: state.glances.map((g) => (g.id === id ? { ...g, ...patch } : g)) });
+  },
+
+  removeGlances(id: string) {
+    if (state.apiMode === 'server') {
+      api.deleteGlances(id).then(() => syncAll()).catch(() => {});
+      return;
+    }
+    set({ glances: state.glances.filter((g) => g.id !== id) });
+  },
+
+  async scrapeGlances(id: string): Promise<{ point: GlancesPoint | null; error: string | null } | null> {
+    if (state.apiMode !== 'server') return null;
+    try {
+      const r = await api.scrapeGlances(id);
+      void syncAll();
+      return r;
+    } catch (e) {
+      return { point: null, error: e instanceof Error ? e.message : 'ошибка опроса' };
+    }
   },
 
   // ── теги ──

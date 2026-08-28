@@ -1,5 +1,6 @@
 // ─── PLUTO Core: HTTP API, движок опроса, шлюз агентов, статика ─────────────
 import http from 'node:http';
+import https from 'node:https';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -249,6 +250,19 @@ setInterval(() => {
       saveDb();
     }
   }
+  // Glances: периодический опрос веб-страниц (интервал из настроек, по умолчанию 60 с)
+  const giv = Math.max(15, (db.settings.intervals && db.settings.intervals.glances) || 60) * 1000;
+  for (const g of db.glances || []) {
+    if (!g.scraping && now - (g.lastScrape || 0) >= giv) {
+      g.scraping = true;
+      scrapeGlances(g).finally(() => { g.scraping = false; });
+    }
+  }
+  // автоочистка архива Glances (старше 30 дней) — раз в час по расписанию
+  if (now - lastGlancesCleanup > 3600000) {
+    lastGlancesCleanup = now;
+    glancesCleanup(now);
+  }
 }, 1000);
 
 // ─── Шлюз агентов (WebSocket на :8443) ───────────────────────────────────────
@@ -385,6 +399,187 @@ function aidaAppend(agent, pt) {
   if (i > 0) arr.splice(0, i);
 }
 
+// ─── Glances (Bars): удалённый опрос веб-страниц, хранение 30 дней ──────────
+// Ядро само ходит по HTTP на страницу Glances (агент не нужен — удобно для
+// Rocky Linux и любых машин, где Glances запущен в веб-режиме, порт 61208).
+// Разбираются столбцы: CPU (+user/system/iowait/idle/irq/nice/steal),
+// MEM (%, total/used/free), Rx/s, Tx/s и строка Package (температура ЦП).
+
+const GLANCES_KEYS = ['cpu', 'user', 'system', 'iowait', 'idle', 'irq', 'nice', 'steal', 'mem', 'memTotal', 'memUsed', 'memFree', 'rx', 'tx', 'pkg'];
+const GLANCES_RETENTION_MS = 30 * 86400000; // 30 дней
+const GLANCES_MAX_POINTS = 20000;
+const GLANCES_RANGE_MS = {
+  '5m': 5 * 60000, '30m': 30 * 60000, '3h': 3 * 3600000, '24h': 24 * 3600000,
+  '7d': 7 * 86400000, '30d': 30 * 86400000,
+};
+let lastGlancesCleanup = 0;
+
+function fetchText(rawUrl, timeoutMs = 7000) {
+  return new Promise((resolve, reject) => {
+    let u;
+    try { u = new URL(rawUrl); } catch { return reject(new Error('некорректный адрес мониторинга')); }
+    const lib = u.protocol === 'https:' ? https : http;
+    const r = lib.get(u, { timeout: timeoutMs }, (res) => {
+      if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
+        res.resume();
+        return fetchText(new URL(res.headers.location, u).toString(), timeoutMs).then(resolve, reject);
+      }
+      if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)); }
+      let data = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => (data += c));
+      res.on('end', () => resolve(data));
+    });
+    r.on('timeout', () => r.destroy(new Error('таймаут запроса страницы')));
+    r.on('error', (e) => reject(e));
+  });
+}
+
+/** HTML → плоский текст (теги, &nbsp;, сущности убираются) */
+function htmlToText(html) {
+  return String(html)
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&deg;/gi, '°')
+    .replace(/&amp;/gi, '&')
+    .replace(/&#(\d+);/g, (_, c) => String.fromCharCode(+c))
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ');
+}
+
+function gSection(t, startRe, endRe) {
+  const s = t.search(startRe);
+  if (s < 0) return '';
+  const rest = t.slice(s);
+  const e = rest.slice(1).search(endRe);
+  return e < 0 ? rest : rest.slice(0, e + 1);
+}
+
+const gNum = (s, re) => { const m = s.match(re); return m ? parseFloat(m[1]) : null; };
+
+/** total/used/free: "15.5G" → ГБ */
+function gValGB(s, label) {
+  const m = s.match(new RegExp(label + ':?\\s*([0-9]+(?:\\.[0-9]+)?)\\s*([KMGT])?', 'i'));
+  if (!m) return null;
+  const v = parseFloat(m[1]);
+  const u = (m[2] || 'G').toUpperCase();
+  if (u === 'T') return Math.round(v * 1024 * 100) / 100;
+  if (u === 'G') return v;
+  if (u === 'M') return Math.round((v / 1024) * 100) / 100;
+  return Math.round((v / (1024 * 1024)) * 100) / 100;
+}
+
+/** Rx/s и Tx/s: сумма по всем интерфейсам; Glances отдаёт b/s с суффиксами K/M/G (SI) → КБ/с */
+function gNetKB(t, label) {
+  const re = new RegExp(label + '/s:?\\s*([0-9]+(?:\\.[0-9]+)?)\\s*([KMGT])?', 'gi');
+  let sum = 0, n = 0, m;
+  while ((m = re.exec(t))) {
+    const v = parseFloat(m[1]);
+    const u = (m[2] || '').toUpperCase();
+    const mult = u === 'T' ? 1e12 : u === 'G' ? 1e9 : u === 'M' ? 1e6 : u === 'K' ? 1e3 : 1;
+    sum += (v * mult) / 1024;
+    n++;
+  }
+  return n ? Math.round(sum * 10) / 10 : null;
+}
+
+function parseGlances(html) {
+  const t = htmlToText(html);
+  const cpuS = gSection(t, /\bCPU\b/i, /\b(MEM|LOAD|PERCPU|SWAP)\b/i);
+  const memS = gSection(t, /\bMEM\b/i, /\b(SWAP|LOAD|NETWORK|DISK|SENSORS|PROCESSES)\b/i);
+  const pt = {
+    cpu: gNum(cpuS, /\bCPU\s+([0-9]+(?:\.[0-9]+)?)\s*%/i),
+    user: gNum(cpuS, /user:?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i),
+    system: gNum(cpuS, /system:?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i),
+    iowait: gNum(cpuS, /iowait:?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i),
+    idle: gNum(cpuS, /idle:?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i),
+    irq: gNum(cpuS, /irq:?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i),
+    nice: gNum(cpuS, /nice:?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i),
+    steal: gNum(cpuS, /steal:?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i),
+    mem: gNum(memS, /\bMEM\s+([0-9]+(?:\.[0-9]+)?)\s*%/i),
+    memTotal: gValGB(memS, 'total'),
+    memUsed: gValGB(memS, 'used'),
+    memFree: gValGB(memS, 'free'),
+    rx: gNetKB(t, 'Rx'),
+    tx: gNetKB(t, 'Tx'),
+    pkg: gNum(t, /Package[^0-9°]{0,24}?([0-9]+(?:\.[0-9]+)?)\s*°?\s*C/i),
+  };
+  const found = GLANCES_KEYS.filter((k) => pt[k] != null);
+  return { pt, found };
+}
+
+function mergeGlancesPoints(dst, src) {
+  for (const k of GLANCES_KEYS) {
+    if (src[k] == null) continue;
+    dst[k] = dst[k] == null ? src[k] : Math.round(((dst[k] + src[k]) / 2) * 10) / 10;
+  }
+  dst.t = src.t;
+}
+
+function glancesAppend(dev, pt) {
+  if (!Array.isArray(dev.history)) dev.history = [];
+  const arr = dev.history;
+  const last = arr[arr.length - 1];
+  if (last) {
+    const age = pt.t - last.t;
+    const sameMin = Math.floor(last.t / 60000) === Math.floor(pt.t / 60000);
+    const sameHour = Math.floor(last.t / 3600000) === Math.floor(pt.t / 3600000);
+    // ярусное сжатие: > 7 дней — почасовые бакеты, > 1 суток — поминутные
+    if ((age > 7 * 86400000 && sameHour) || (age > 86400000 && sameMin)) mergeGlancesPoints(last, pt);
+    else arr.push(pt);
+  } else {
+    arr.push(pt);
+  }
+  if (arr.length > GLANCES_MAX_POINTS) arr.splice(0, arr.length - GLANCES_MAX_POINTS);
+}
+
+async function scrapeGlances(dev) {
+  const now = Date.now();
+  try {
+    const html = await fetchText(dev.url);
+    const { pt, found } = parseGlances(html);
+    pt.t = Date.now();
+    if (found.length === 0) {
+      dev.lastError = 'страница загружена, но показатели Glances не найдены — проверьте адрес мониторинга';
+      dev.online = false;
+      dev.lastScrape = now;
+      saveDb();
+      return { point: null, error: dev.lastError };
+    }
+    const missing = GLANCES_KEYS.filter((k) => pt[k] == null);
+    dev.lastError = missing.length ? `распознано ${found.length}/${GLANCES_KEYS.length} показателей (нет: ${missing.join(', ')})` : null;
+    dev.online = true;
+    dev.latest = pt;
+    dev.lastScrape = now;
+    glancesAppend(dev, pt);
+    saveDb();
+    return { point: pt, error: dev.lastError };
+  } catch (e) {
+    dev.lastError = e.message || 'ошибка запроса';
+    dev.online = false;
+    dev.lastScrape = now;
+    saveDb();
+    return { point: null, error: dev.lastError };
+  }
+}
+
+/** Плановая автоочистка: удаляет точки старше 30 дней (вызывается каждый час) */
+function glancesCleanup(now) {
+  const cutoff = now - GLANCES_RETENTION_MS;
+  let changed = false;
+  for (const g of db.glances || []) {
+    if (Array.isArray(g.history) && g.history.length && g.history[0].t < cutoff) {
+      let i = 0;
+      while (i < g.history.length && g.history[i].t < cutoff) i++;
+      g.history.splice(0, i);
+      changed = true;
+    }
+  }
+  if (changed) saveDb();
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   const p = url.pathname;
@@ -466,9 +661,13 @@ const server = http.createServer(async (req, res) => {
       const agentsRaw = isAdmin || user.scope.includes('agent') ? db.agents : [];
       // 60-дневная история AIDA64 отдаётся только отдельным эндпоинтом — не грузим её в каждый поллинг
       const agents = agentsRaw.map((a) => ({ ...a, aida: undefined }));
+      // Glances: список отдаём без тяжёлой истории (она — в /api/glances/:id/history)
+      const glancesVisible = isAdmin || user.scope.includes('glances') ? db.glances : [];
+      const glances = glancesVisible.map((g) => ({ ...g, history: undefined, scraping: undefined }));
       return json(res, 200, {
         devices: visible,
         agents,
+        glances,
         tags: db.tags,
         events: db.events,
         settings: db.settings,
@@ -583,6 +782,75 @@ const server = http.createServer(async (req, res) => {
       pushEvent('info', 'agent', `Токен агента «${a.name}» перевыпущен`);
       saveDb();
       return json(res, 200, { token: a.token });
+    }
+
+    // ── Glances (Bars): веб-страницы серверов, агент не нужен ──
+    const canGlances = isAdmin || user.scope.includes('glances');
+    if (p === '/api/glances' && method === 'GET' && canGlances) {
+      return json(res, 200, { devices: db.glances.map((g) => ({ ...g, history: undefined, scraping: undefined })) });
+    }
+    if (p === '/api/glances' && method === 'POST' && isAdmin) {
+      const b = await readBody(req);
+      const name = String(b.name || '').trim();
+      const url = String(b.url || '').trim();
+      if (!name) return json(res, 400, { error: 'укажите имя сервера' });
+      if (!/^https?:\/\//i.test(url)) return json(res, 400, { error: 'адрес мониторинга должен начинаться с http:// или https://' });
+      const g = {
+        id: uid(), name, url, serverLink: String(b.serverLink || '').trim(),
+        createdAt: Date.now(), lastScrape: 0, lastError: null, online: false, latest: null, history: [],
+      };
+      db.glances.push(g);
+      pushEvent('info', 'system', `Добавлен сервер Glances «${name}» (${url})`);
+      saveDb();
+      scrapeGlances(g); // первый опрос — сразу, чтобы данные появились без ожидания интервала
+      return json(res, 200, g);
+    }
+    m = p.match(/^\/api\/glances\/([^/]+)$/);
+    if (m && isAdmin) {
+      const g = db.glances.find((x) => x.id === m[1]);
+      if (!g) return json(res, 404, { error: 'сервер Glances не найден' });
+      if (method === 'PUT' || method === 'PATCH') {
+        const b = await readBody(req);
+        for (const k of ['name', 'url', 'serverLink']) if (k in b) g[k] = String(b[k] ?? '').trim();
+        pushEvent('info', 'system', `Настройки Glances «${g.name}» обновлены`);
+        saveDb();
+        return json(res, 200, g);
+      }
+      if (method === 'DELETE') {
+        db.glances = db.glances.filter((x) => x.id !== g.id);
+        pushEvent('info', 'system', `Сервер Glances «${g.name}» удалён (архив очищен)`);
+        saveDb();
+        return json(res, 200, { ok: true });
+      }
+    }
+    m = p.match(/^\/api\/glances\/([^/]+)\/scrape$/);
+    if (m && method === 'POST' && isAdmin) {
+      const g = db.glances.find((x) => x.id === m[1]);
+      if (!g) return json(res, 404, { error: 'сервер Glances не найден' });
+      const r = await scrapeGlances(g);
+      return json(res, 200, r);
+    }
+    m = p.match(/^\/api\/glances\/([^/]+)\/history$/);
+    if (m && method === 'GET' && canGlances) {
+      const g = db.glances.find((x) => x.id === m[1]);
+      if (!g) return json(res, 404, { error: 'сервер Glances не найден' });
+      const rq = url.searchParams.get('range');
+      const range = GLANCES_RANGE_MS[rq] ? rq : '5m';
+      const cutoff = Date.now() - GLANCES_RANGE_MS[range];
+      let pts = (g.history || []).filter((x) => x.t >= cutoff);
+      if (pts.length > 1500) { // прореживание для графика
+        const bw = GLANCES_RANGE_MS[range] / 1500;
+        const out = [];
+        let cur = null, bi = -1;
+        for (const pt of pts) {
+          const idx = Math.floor((pt.t - cutoff) / bw);
+          if (idx !== bi) { if (cur) out.push(cur); cur = { ...pt }; bi = idx; }
+          else mergeGlancesPoints(cur, pt);
+        }
+        if (cur) out.push(cur);
+        pts = out;
+      }
+      return json(res, 200, { range, retentionDays: 30, points: pts });
     }
 
     // ── теги ──
