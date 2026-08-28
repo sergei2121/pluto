@@ -9,6 +9,10 @@ dist/
 agent/pluto-agent.exe
 agent/agent
 
+# aida-monitor: артефакты сборки
+aida-monitor/aida-monitor
+aida-monitor/aida-monitor.exe
+
 # системные файлы
 .DS_Store
 *.log
