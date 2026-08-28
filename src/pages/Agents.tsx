@@ -3,8 +3,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { Plus, Star, Trash2, Monitor, Cpu, HardDrive, Network, KeyRound, Pencil, Terminal, Thermometer } from 'lucide-react';
 import { AreaChart, Bar, CopyBlock, Drawer, EmptyState, Modal, Panel, Ring, StatusDot, TimeAgo, Field } from '../components/ui';
 import { usePluto, useCurrentUser, visibleAgents, store, useToasts } from '../lib/store';
+import { api } from '../lib/api';
 import { cls, fmtBytes, fmtGb, pct } from '../lib/util';
-import type { Agent } from '../lib/types';
+import type { Agent, AidaPoint, AidaRange } from '../lib/types';
 
 function hostIp(): string {
   return window.location.hostname || '127.0.0.1';
@@ -158,6 +159,169 @@ function AgentCard({ a, onOpen }: { a: Agent; onOpen: () => void }) {
   );
 }
 
+// ─── Телеметрия AIDA64 ──────────────────────────────────────────────────────
+
+const AIDA_RANGES: { v: AidaRange; label: string }[] = [
+  { v: '5m', label: '5 минут' },
+  { v: '30m', label: '30 минут' },
+  { v: '3h', label: '3 часа' },
+  { v: '24h', label: '24 часа' },
+  { v: '7d', label: '7 дней' },
+  { v: '30d', label: '30 дней' },
+  { v: '60d', label: '60 дней' },
+];
+
+const AIDA_METRICS: { key: keyof AidaPoint; label: string; unit: string; color: string; fmt?: (v: number) => string }[] = [
+  { key: 'cpuUsage', label: 'cpu usage', unit: '%', color: '#8f7df0' },
+  { key: 'cpuTemp', label: 'cpu temp', unit: '°C', color: '#e0945e' },
+  { key: 'ram', label: 'RAM', unit: '%', color: '#7ba4e6' },
+  { key: 'ssdTemp', label: 'ssd temp', unit: '°C', color: '#dfa65e' },
+  { key: 'diskC', label: 'DiskC', unit: '%', color: '#5fc6d8' },
+  { key: 'tx', label: 'TX', unit: 'КБ/с', color: '#55c795' },
+  { key: 'rx', label: 'RX', unit: 'КБ/с', color: '#8bc46a' },
+  { key: 'uptimeSec', label: 'UpTime', unit: '', color: '#98a4c8', fmt: fmtUptime },
+];
+
+function fmtUptime(s: number): string {
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = Math.floor(s % 60);
+  if (d > 0) return `${d}д ${h}ч ${m}м`;
+  if (h > 0) return `${h}ч ${m}м`;
+  if (m > 0) return `${m}м ${sec}с`;
+  return `${sec}с`;
+}
+
+/** Мини-график AIDA64: ось X — время, Y — значение; пропуски (null) обрывают линию. */
+function AidaChart({ points, metric }: { points: AidaPoint[]; metric: (typeof AIDA_METRICS)[number] }) {
+  const data = points.filter((p) => typeof p[metric.key] === 'number');
+  const h = 56, w = 240;
+  if (data.length < 2) {
+    return <div className="flex h-[56px] items-center justify-center rounded-md border border-dashed border-line/70 bg-raised/20 font-mono text-[10px] text-dim/70">нет данных</div>;
+  }
+  const vals = data.map((p) => p[metric.key] as number);
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const span = max - min || 1;
+  const t0 = data[0].t, t1 = data[data.length - 1].t, tspan = t1 - t0 || 1;
+  const px = (t: number) => ((t - t0) / tspan) * (w - 4) + 2;
+  const py = (v: number) => h - 6 - ((v - min) / span) * (h - 12);
+  const line = data.map((p) => `${px(p.t).toFixed(1)},${py(p[metric.key] as number).toFixed(1)}`).join(' ');
+  const area = `2,${h - 2} ${line} ${(w - 2).toFixed(1)},${h - 2}`;
+  const gid = `aida-${metric.key}`;
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="h-[56px] w-full" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor={metric.color} stopOpacity="0.32" />
+          <stop offset="1" stopColor={metric.color} stopOpacity="0.02" />
+        </linearGradient>
+      </defs>
+      <polygon points={area} fill={`url(#${gid})`} />
+      <polyline points={line} fill="none" stroke={metric.color} strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function AidaMetricTile({ points, metric, latest }: { points: AidaPoint[]; metric: (typeof AIDA_METRICS)[number]; latest: number | null }) {
+  const val = latest != null ? (metric.fmt ? metric.fmt(latest) : `${Math.round(latest * 10) / 10}`) : '—';
+  return (
+    <div className="rounded-lg border border-line bg-raised/40 p-2.5">
+      <div className="flex items-baseline justify-between">
+        <span className="font-mono text-[10px] font-bold uppercase tracking-wider" style={{ color: metric.color }}>{metric.label}</span>
+        <span className="font-mono text-[13px] font-bold text-ink">
+          {val}<span className="ml-0.5 text-[9px] font-normal text-dim">{metric.unit}</span>
+        </span>
+      </div>
+      <div className="mt-1.5"><AidaChart points={points} metric={metric} /></div>
+    </div>
+  );
+}
+
+function AidaPanel({ a }: { a: Agent }) {
+  const apiMode = usePluto((s) => s.apiMode);
+  const [range, setRange] = useState<AidaRange>('5m');
+  const [points, setPoints] = useState<AidaPoint[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (apiMode !== 'server') return;
+    let alive = true;
+    const load = () => {
+      setLoading(true);
+      api.agentAida(a.id, range)
+        .then((r) => { if (alive) setPoints(r.points || []); })
+        .catch(() => { if (alive) setPoints([]); })
+        .finally(() => { if (alive) setLoading(false); });
+    };
+    load();
+    // короткие диапазоны обновляем чаще, длинные — реже
+    const every = range === '5m' ? 10000 : range === '30m' ? 20000 : 60000;
+    const t = window.setInterval(load, every);
+    return () => { alive = false; window.clearInterval(t); };
+  }, [a.id, range, apiMode]);
+
+  if (apiMode !== 'server') {
+    return (
+      <div>
+        <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-dim">Телеметрия AIDA64</div>
+        <p className="rounded-lg border border-dashed border-line bg-raised/40 px-3 py-3 text-center font-mono text-[11px] text-dim">
+          данные AIDA64 приходят от реальных агентов через серверное ядро
+        </p>
+      </div>
+    );
+  }
+
+  const last = points.length ? points[points.length - 1] : null;
+  const latestOf = (k: keyof AidaPoint): number | null => {
+    if (last && typeof last[k] === 'number') return last[k] as number;
+    if (a.aidaLatest && typeof a.aidaLatest[k] === 'number') return a.aidaLatest[k] as number;
+    return null;
+  };
+
+  return (
+    <div>
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-dim">Телеметрия AIDA64</span>
+        <span className="font-mono text-[9.5px] text-dim/70">хранение 60 дней</span>
+        <div className="ml-auto flex items-center gap-1.5">
+          <button
+            onClick={() => setRange('5m')}
+            className={cls('rounded-md border px-2 py-1 font-mono text-[10.5px] font-semibold transition-all',
+              range === '5m' ? 'border-vio/60 bg-vio/20 text-ink' : 'border-line bg-raised/40 text-dim hover:text-mut')}
+          >
+            5 мин
+          </button>
+          <select
+            value={range === '5m' ? '' : range}
+            onChange={(e) => { if (e.target.value) setRange(e.target.value as AidaRange); }}
+            className="rounded-md border border-line bg-raised/60 px-2 py-1 font-mono text-[10.5px] text-ink outline-none focus:border-vio/60"
+          >
+            <option value="" disabled>глубже…</option>
+            {AIDA_RANGES.filter((r) => r.v !== '5m').map((r) => (
+              <option key={r.v} value={r.v}>{r.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {loading && points.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-line bg-raised/40 px-3 py-4 text-center font-mono text-[11px] text-dim">загрузка…</p>
+      ) : points.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-line bg-raised/40 px-3 py-4 text-center font-mono text-[11px] text-dim">
+          нет данных AIDA64 за период — убедитесь, что AIDA64 отдаёт сенсорную страницу (по умолчанию http://127.0.0.1:8090/)
+        </p>
+      ) : (
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+          {AIDA_METRICS.map((m) => (
+            <AidaMetricTile key={m.key} points={points} metric={m} latest={latestOf(m.key)} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Детали агента ──────────────────────────────────────────────────────────
 
 function AgentDetails({ a, isAdmin, onEdit, onDelete }: { a: Agent; isAdmin: boolean; onEdit: () => void; onDelete: () => void }) {
@@ -181,6 +345,8 @@ function AgentDetails({ a, isAdmin, onEdit, onDelete }: { a: Agent; isAdmin: boo
           <div className="font-mono text-[10px] text-dim">RX · TX {Math.round(a.txRate)} КБ/с</div>
         </div>
       </div>
+
+      <AidaPanel a={a} />
 
       <div>
         <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-dim">Загрузка ЦП</div>
@@ -304,20 +470,29 @@ function TokenModal({ info, onClose }: { info: { name: string; token: string } |
 
 function EditAgentModal({ agent, onClose }: { agent: Agent | null; onClose: () => void }) {
   const [name, setName] = useState('');
+  const [aida64Url, setAida64Url] = useState('');
   useEffect(() => {
-    if (agent) setName(agent.name);
+    if (agent) {
+      setName(agent.name);
+      setAida64Url(agent.aida64Url || '');
+    }
   }, [agent]);
   return (
     <Modal open={!!agent} onClose={onClose} title="Изменить агента" width="max-w-md">
-      <Field label="Название агента">
-        <input className="inp" value={name} onChange={(e) => setName(e.target.value)} />
-      </Field>
+      <div className="space-y-4">
+        <Field label="Название агента">
+          <input className="inp" value={name} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <Field label="AIDA64 — сенсорная веб-страница" hint="Адрес, по которому AIDA64 отдаёт показания (RemoteSensor). По умолчанию http://127.0.0.1:8090/">
+          <input className="inp font-mono" value={aida64Url} onChange={(e) => setAida64Url(e.target.value)} />
+        </Field>
+      </div>
       <div className="mt-5 flex justify-end gap-2">
         <button className="btn-ghost" onClick={onClose}>Отмена</button>
         <button className="btn-acc" onClick={() => {
           if (agent && name.trim()) {
-            store.updateAgent(agent.id, { name: name.trim() });
-            useToasts.push('ok', 'Агент переименован');
+            store.updateAgent(agent.id, { name: name.trim(), aida64Url: aida64Url.trim() });
+            useToasts.push('ok', 'Настройки агента сохранены');
           }
           onClose();
         }}>Сохранить</button>
