@@ -1,7 +1,7 @@
 // ─── PLUTO: каркас интерфейса ────────────────────────────────────────────────
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  LayoutDashboard, Server, Monitor, Rocket, History, Settings as SettingsIcon, LogOut, Search, X, AlertTriangle, Bell, Check, Globe,
+  LayoutDashboard, Server, Monitor, Rocket, History, BarChart3, Settings as SettingsIcon, LogOut, Search, X, AlertTriangle, Bell, Check, Globe,
 } from 'lucide-react';
 import { cls, fmtClock, CONSOLE_VERSION } from '../lib/util';
 import { usePluto, useCurrentUser, useToastList, useToasts, visibleDevices, visibleAgents, store } from '../lib/store';
