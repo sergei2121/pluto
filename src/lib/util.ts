@@ -70,6 +70,10 @@ export function fmtClock(ts: number): string {
   return new Date(ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+export function fmtDate(ts: number): string {
+  return new Date(ts).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
 export function fmtBytes(n: number): string {
   if (n < 1024) return `${Math.round(n)} Б`;
   if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} КБ`;
