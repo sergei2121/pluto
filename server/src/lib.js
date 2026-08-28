@@ -65,9 +65,46 @@ export function loadDb() {
     pushEvent('info', 'system', 'Первый запуск ядра: создан администратор admin');
     saveDb();
   }
+  // Нормализация записей: db.json живёт между версиями ядра, и старые записи
+  // могут не иметь полей, появившихся позже (disks, networks, history, aida…).
+  // Гарантируем дефолты, чтобы ни один клиент не упал на undefined.
+  db.devices = (db.devices || []).map(normalizeDevice);
+  db.agents = (db.agents || []).map(normalizeAgent);
   db.devices.forEach((d) => (d.checking = false));
   db.agents.forEach((a) => (a.online = false));
   return db;
+}
+
+/** Дефолты для устройства (PING/HTTP/API/RTSP/SIP) */
+function normalizeDevice(d) {
+  return {
+    id: d.id, name: d.name || d.address || 'устройство', type: d.type || 'ping',
+    address: d.address || '', port: d.port ?? null, path: d.path || '', method: d.method || null,
+    body: d.body || null, interval: d.interval || 60, tags: Array.isArray(d.tags) ? d.tags : [],
+    favorite: !!d.favorite, status: d.status || 'unknown', latency: d.latency ?? null,
+    baseline: d.baseline ?? null, history: Array.isArray(d.history) ? d.history : [],
+    fails: d.fails || 0, lastCheck: d.lastCheck || 0, lastChange: d.lastChange || 0,
+    checking: false, approx: !!d.approx, createdAt: d.createdAt || Date.now(),
+  };
+}
+
+/** Дефолты для агента (старые записи без новых полей получат пустые массивы) */
+function normalizeAgent(a) {
+  return {
+    ...a,
+    name: a.name || a.hostname || 'агент', hostname: a.hostname || '', token: a.token || '',
+    ip: a.ip || '', os: a.os || '', version: a.version || '', online: false,
+    cpuLoad: a.cpuLoad || 0, cpuCores: a.cpuCores || 0, cpuTemp: a.cpuTemp || 0,
+    ramUsed: a.ramUsed || 0, ramTotal: a.ramTotal || 0, ramTemp: a.ramTemp || 0,
+    disks: Array.isArray(a.disks) ? a.disks : [],
+    networks: Array.isArray(a.networks) ? a.networks : [],
+    history: Array.isArray(a.history) ? a.history : [],
+    aida: Array.isArray(a.aida) ? a.aida : [], aidaLatest: a.aidaLatest || null,
+    aida64Url: a.aida64Url || 'http://127.0.0.1:8090/',
+    rxBytes: a.rxBytes || 0, txBytes: a.txBytes || 0, rxRate: a.rxRate || 0, txRate: a.txRate || 0,
+    lastSeen: a.lastSeen || 0, lastMetrics: a.lastMetrics || 0, lastScan: a.lastScan || 0,
+    favorite: !!a.favorite, createdAt: a.createdAt || Date.now(),
+  };
 }
 
 export function saveDb() {
