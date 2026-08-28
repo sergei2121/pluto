@@ -1,5 +1,16 @@
+# секреты — никогда не коммитить
+.env
+
+# node / сборка
 node_modules/
-.next/
 dist/
-build/
+
+# агенты: артефакты сборки
+agent/pluto-agent.exe
+agent/agent
+
+# системные файлы
+.DS_Store
 *.log
+.next/
+build/

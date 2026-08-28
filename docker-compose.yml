@@ -3,15 +3,16 @@ services:
     build:
       context: .
       dockerfile: server/Dockerfile
-    image: pluto/core:1.8.5
+    image: pluto/core:1.8.6
     container_name: pluto-core
     restart: unless-stopped
-    env_file:
-      - .env
+    # Файл .env НЕ обязателен: Docker Compose подхватит его автоматически, если
+    # он лежит рядом с этим файлом; без него действуют значения по умолчанию.
     environment:
       - DATA_DIR=/data
       - HTTP_PORT=8080
       - AGENT_PORT=8443
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-pluto}
     ports:
       # Хостовые порты настраиваются в .env (PLUTO_HTTP_PORT, PLUTO_AGENT_PORT),
       # чтобы не конфликтовать с другими сервисами (например, zabbix-web на 8080).
