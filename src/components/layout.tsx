@@ -1,7 +1,7 @@
 // ─── PLUTO: каркас интерфейса ────────────────────────────────────────────────
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  LayoutDashboard, Server, Monitor, Rocket, Settings as SettingsIcon, LogOut, Search, X, AlertTriangle, Bell, Check, Globe,
+  LayoutDashboard, Server, Monitor, Rocket, History, Settings as SettingsIcon, LogOut, Search, X, AlertTriangle, Bell, Check, Globe,
 } from 'lucide-react';
 import { cls, fmtClock, CONSOLE_VERSION } from '../lib/util';
 import { usePluto, useCurrentUser, useToastList, useToasts, visibleDevices, visibleAgents, store } from '../lib/store';
@@ -73,6 +73,7 @@ const NAV: { route: Route; label: string; icon: ReactNode; adminOnly?: boolean; 
   { route: 'devices', label: 'Устройства', icon: <Server className="h-[17px] w-[17px]" /> },
   { route: 'agents', label: 'Агенты', icon: <Monitor className="h-[17px] w-[17px]" />, needAgent: true },
   { route: 'deploy', label: 'Развёртывание', icon: <Rocket className="h-[17px] w-[17px]" /> },
+  { route: 'telemetry', label: 'Журнал телеметрии', icon: <History className="h-[17px] w-[17px]" />, needAgent: true },
   { route: 'settings', label: 'Настройки системы', icon: <SettingsIcon className="h-[17px] w-[17px]" />, adminOnly: true },
 ];
 
@@ -161,6 +162,7 @@ const TITLES: Record<Route, string> = {
   dashboard: 'Обзор инфраструктуры',
   devices: 'Устройства',
   agents: 'Агенты на Windows-машинах',
+  telemetry: 'Журнал телеметрии AIDA64',
   settings: 'Настройки системы',
   deploy: 'Развёртывание и документация',
 };

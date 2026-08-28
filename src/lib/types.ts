@@ -2,7 +2,7 @@
 
 export type DeviceType = 'ping' | 'http' | 'api' | 'rtsp' | 'sip';
 export type DeviceStatus = 'up' | 'down' | 'degraded' | 'unknown';
-export type Route = 'dashboard' | 'devices' | 'agents' | 'settings' | 'deploy';
+export type Route = 'dashboard' | 'devices' | 'agents' | 'telemetry' | 'settings' | 'deploy';
 export type Severity = 'ok' | 'warn' | 'crit' | 'info';
 export type Role = 'admin' | 'viewer';
 
@@ -75,6 +75,7 @@ export interface Agent {
   online: boolean;
   aida64Url?: string; // адрес сенсорной веб-страницы AIDA64
   aidaLatest?: AidaPoint | null;
+  aida?: AidaPoint[]; // архив показаний (сервер отдаёт отдельным эндпоинтом)
   cpuLoad: number;
   cpuCores: number;
   cpuTemp: number;

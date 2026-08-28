@@ -149,13 +149,13 @@ export function Drawer({ open, onClose, children, title }: { open: boolean; onCl
   );
 }
 
-export function EmptyState({ title, text, action }: { title: string; text?: string; action?: ReactNode }) {
+export function EmptyState({ title, text, action, icon }: { title: string; text?: string; action?: ReactNode; icon?: ReactNode }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
       <div className="relative">
         <div className="absolute inset-0 rounded-full bg-vio/10 blur-xl" />
         <div className="relative flex h-14 w-14 items-center justify-center rounded-full border border-line bg-raised text-dim">
-          <Inbox className="h-6 w-6" />
+          {icon ?? <Inbox className="h-6 w-6" />}
         </div>
       </div>
       <div>
