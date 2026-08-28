@@ -12,7 +12,7 @@ import {
   issueSession, attachWs, DEFAULT_SETTINGS,
 } from './lib.js';
 
-const VERSION = '1.8.7';
+const VERSION = '1.8.8';
 const db = loadDb();
 const HTTP_PORT = Number(process.env.HTTP_PORT || 8080);
 const AGENT_PORT = Number(process.env.AGENT_PORT || 8443);
@@ -318,6 +318,11 @@ attachWs(agentServer, (conn, url, remoteIp) => {
           agent.aidaLatest = pt;
           aidaAppend(agent, pt);
         }
+        // Fallback: нативный сборщик часто не отдаёт температуру ЦП (WMI
+        // MSAcpi_ThermalZoneTemperature доступен не на всех платах) и может
+        // вернуть 0 для загрузки. Дополняем карточку агента значениями AIDA64.
+        if ((!agent.cpuTemp || agent.cpuTemp <= 0) && pt.cpuTemp != null) agent.cpuTemp = pt.cpuTemp;
+        if ((!agent.cpuLoad || agent.cpuLoad <= 0) && pt.cpuUsage != null) agent.cpuLoad = pt.cpuUsage;
       }
     } else if (msg.type === 'lan') {
       agent.networks = msg.networks || [];
