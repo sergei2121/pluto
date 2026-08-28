@@ -187,11 +187,11 @@ export default function Bars() {
     let alive = true;
     setLoading(true);
     api.glancesHistory(sel.id, range)
-      .then((r) => { if (alive) setPoints(r.points); })
+      .then((r) => { if (alive) setPoints(r.points || []); })
       .catch(() => { if (alive) setPoints([]); })
       .finally(() => { if (alive) setLoading(false); });
     const t = setInterval(() => {
-      api.glancesHistory(sel.id, range).then((r) => { if (alive) setPoints(r.points); }).catch(() => {});
+      api.glancesHistory(sel.id, range).then((r) => { if (alive) setPoints(r.points || []); }).catch(() => {});
     }, range === '5m' || range === '30m' ? 10_000 : 60_000);
     return () => { alive = false; clearInterval(t); };
   }, [sel?.id, range]);

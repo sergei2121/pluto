@@ -1,7 +1,7 @@
 // ─── PLUTO: настройки системы ───────────────────────────────────────────────
 import { useMemo, useState } from 'react';
 import {
-  Bell, Mail, Plus, Save, Send, Shield, Tag as TagIcon, Trash2, UserPlus, Users, X,
+  BarChart3, Bell, Database, Mail, Monitor, Plus, Save, Send, Server, Shield, Tag as TagIcon, Trash2, UserPlus, Users, X,
 } from 'lucide-react';
 import { Panel, Field, Toggle, Modal } from '../components/ui';
 import { usePluto, store, useToasts } from '../lib/store';
@@ -9,7 +9,7 @@ import { sendTestNotification, requestPushPermission } from '../lib/engine';
 import { TAG_COLORS, CONSOLE_VERSION, cls } from '../lib/util';
 import { DEVICE_TYPES, DEVICE_TYPE_META, type Settings as TSettings, type User, type DeviceType } from '../lib/types';
 
-type Tab = 'polling' | 'tags' | 'notify' | 'users';
+type Tab = 'polling' | 'tags' | 'notify' | 'users' | 'database';
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>('polling');
@@ -18,6 +18,7 @@ export default function SettingsPage() {
     { id: 'tags', label: 'Теги', icon: <TagIcon className="h-3.5 w-3.5" /> },
     { id: 'notify', label: 'Уведомления', icon: <Bell className="h-3.5 w-3.5" /> },
     { id: 'users', label: 'Пользователи', icon: <Users className="h-3.5 w-3.5" /> },
+    { id: 'database', label: 'База данных', icon: <Database className="h-3.5 w-3.5" /> },
   ];
 
   return (
@@ -45,6 +46,7 @@ export default function SettingsPage() {
       {tab === 'tags' && <TagsTab />}
       {tab === 'notify' && <NotifyTab />}
       {tab === 'users' && <UsersTab />}
+      {tab === 'database' && <DatabaseTab />}
     </div>
   );
 }
@@ -379,5 +381,117 @@ function AddUserModal({ open, onClose }: { open: boolean; onClose: () => void })
         </div>
       </div>
     </Modal>
+  );
+}
+
+// ─── База данных (удаление устройств и агентов) ─────────────────────────────
+
+function DeleteBtn({ onDel, label }: { onDel: () => void; label: string }) {
+  const [arm, setArm] = useState(false);
+  return arm ? (
+    <button
+      onClick={() => { onDel(); setArm(false); }}
+      className="rounded-md border border-crit/50 bg-crit/15 px-2.5 py-1 text-[11px] font-bold text-crit transition-colors hover:bg-crit/25"
+    >
+      Точно?
+    </button>
+  ) : (
+    <button
+      onClick={() => setArm(true)}
+      title={label}
+      className="rounded-md p-1.5 text-dim transition-colors hover:bg-crit/10 hover:text-crit"
+    >
+      <Trash2 className="h-4 w-4" />
+    </button>
+  );
+}
+
+function RowItem({ icon, title, sub, badge, onDel, delLabel }: {
+  icon: React.ReactNode; title: string; sub: string; badge?: string; onDel: () => void; delLabel: string;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-line bg-raised/40 px-3.5 py-2.5 transition-colors hover:border-line/80">
+      <span className="text-dim">{icon}</span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="truncate text-[13px] font-semibold text-ink">{title}</span>
+          {badge && <span className="rounded border border-line bg-raised px-1.5 py-0.5 font-mono text-[9.5px] font-bold uppercase tracking-wider text-dim">{badge}</span>}
+        </div>
+        <div className="truncate font-mono text-[10.5px] text-dim">{sub}</div>
+      </div>
+      <DeleteBtn onDel={onDel} label={delLabel} />
+    </div>
+  );
+}
+
+function DatabaseTab() {
+  const devices = usePluto((s) => s.devices);
+  const agents = usePluto((s) => s.agents);
+  const glances = usePluto((s) => s.glances);
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
+      <Panel title={`Устройства · ${devices.length}`} icon={<Server className="h-4 w-4" />} delay={0}>
+        {devices.length === 0 ? (
+          <p className="py-6 text-center text-[12px] text-dim">Устройств в базе нет</p>
+        ) : (
+          <div className="space-y-2">
+            {devices.map((d) => (
+              <RowItem
+                key={d.id}
+                icon={<Server className="h-4 w-4" />}
+                title={d.name}
+                sub={d.address}
+                badge={DEVICE_TYPE_META[d.type]?.label ?? d.type}
+                onDel={() => store.removeDevice(d.id)}
+                delLabel={`Удалить устройство ${d.name}`}
+              />
+            ))}
+          </div>
+        )}
+      </Panel>
+
+      <div className="space-y-4">
+        <Panel title={`Агенты · ${agents.length}`} icon={<Monitor className="h-4 w-4" />} delay={60}>
+          {agents.length === 0 ? (
+            <p className="py-6 text-center text-[12px] text-dim">Агентов в базе нет</p>
+          ) : (
+            <div className="space-y-2">
+              {agents.map((a) => (
+                <RowItem
+                  key={a.id}
+                  icon={<Monitor className="h-4 w-4" />}
+                  title={a.name}
+                  sub={a.hostname || a.ip || '—'}
+                  badge={a.online ? 'в сети' : 'офлайн'}
+                  onDel={() => store.removeAgent(a.id)}
+                  delLabel={`Удалить агента ${a.name}`}
+                />
+              ))}
+            </div>
+          )}
+        </Panel>
+
+        <Panel title={`Серверы Glances · ${glances.length}`} icon={<BarChart3 className="h-4 w-4" />} delay={120}>
+          {glances.length === 0 ? (
+            <p className="py-6 text-center text-[12px] text-dim">Серверов Glances в базе нет</p>
+          ) : (
+            <div className="space-y-2">
+              {glances.map((g) => (
+                <RowItem
+                  key={g.id}
+                  icon={<BarChart3 className="h-4 w-4" />}
+                  title={g.name}
+                  sub={g.url}
+                  badge={g.online ? 'в сети' : 'офлайн'}
+                  onDel={() => store.removeGlances(g.id)}
+                  delLabel={`Удалить сервер Glances ${g.name}`}
+                />
+              ))}
+            </div>
+          )}
+        </Panel>
+      </div>
+    </div>
   );
 }

@@ -304,9 +304,24 @@ export const store = {
 
   applyServerState(st: ServerState) {
     const cur = getState();
+    // Защита: старые записи агентов/устройств могут не иметь новых полей
+    // (disks, networks, history, aida) — гарантируем массивы, чтобы рендер не падал.
+    const safeAgent = (a: Agent): Agent => ({
+      ...a,
+      disks: Array.isArray(a.disks) ? a.disks : [],
+      networks: Array.isArray(a.networks) ? a.networks : [],
+      history: Array.isArray(a.history) ? a.history : [],
+      aida: Array.isArray(a.aida) ? a.aida : [],
+      aidaLatest: a.aidaLatest ?? null,
+    });
+    const safeDevice = (d: Device): Device => ({
+      ...d,
+      tags: Array.isArray(d.tags) ? d.tags : [],
+      history: Array.isArray(d.history) ? d.history : [],
+    });
     const patch: Partial<PlutoState> = {
-      devices: st.devices,
-      agents: st.agents,
+      devices: (st.devices || []).map(safeDevice),
+      agents: (st.agents || []).map(safeAgent),
       glances: st.glances ?? [],
       events: st.events,
     };
