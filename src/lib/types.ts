@@ -30,26 +30,7 @@ export interface Device {
   createdAt: number;
 }
 
-export interface Disk {
-  label: string;
-  total: number;
-  used: number;
-  temp: number;
-}
-
-export interface LanHost {
-  ip: string;
-  mac?: string;
-  online: boolean;
-}
-
-export interface LanNetwork {
-  cidr: string;
-  iface: string;
-  hosts: LanHost[];
-}
-
-/** Точка телеметрии AIDA64 (сенсорная веб-страница). null = нет значения. */
+/** Точка телеметрии AIDA64 (листинг-страница). null = нет значения. */
 export interface AidaPoint {
   t: number; // unix ms
   cpuUsage: number | null; // %  — пункт AIDA64 «CPUu»
@@ -57,9 +38,24 @@ export interface AidaPoint {
   ram: number | null; // %  — пункт «RAM»
   ssdTemp: number | null; // °C — пункт «SSD»
   diskC: number | null; // %  — пункт «UseC»
+  usedSpaceC: number | null; // ГБ — пункт «UsedSpaceC»
   tx: number | null; // КБ/с — пункт «TX» (скорость загрузки адаптера)
   rx: number | null; // КБ/с — пункт «RX» (скорость отдачи адаптера)
   uptimeSec: number | null; // сек — пункт «Uptime»
+}
+
+/** Результат пинга одного IP (выполняется relay-сервисом внутри VLAN агента). */
+export interface AgentPingResult {
+  ip: string;
+  alive: boolean;
+  latency: number | null; // мс
+}
+
+/** Настроенная цель пинга (IP, диапазон «a-b» или подсеть «/24») и её результаты. */
+export interface AgentPingTarget {
+  target: string;
+  results: AgentPingResult[];
+  lastCheck: number;
 }
 
 export type AidaRange = '5m' | '30m' | '3h' | '24h' | '7d' | '30d' | '60d';
@@ -102,34 +98,32 @@ export interface GlancesDevice {
 
 export type GlancesRange = '5m' | '30m' | '3h' | '24h' | '7d' | '30d';
 
+/**
+ * Агент = ПК, до которого сервер может дотянуться по IP. Никаких токенов и
+ * установленной программы для метрик не нужно:
+ *  - `ip`       — сервер пингует его для статистики uptime / доступности;
+ *  - `aidaUrl`  — листинг-страница AIDA64, сервер сам её читает и разбирает строку
+ *                 «CPUu 3%, CPU 42°C, RAM 25%, …»;
+ *  - `relayUrl` — необязательный relay-сервис aida-monitor внутри VLAN агента.
+ *                 Через него сервер просит пропинговать `pingTargets` (IP/диапазоны),
+ *                 которые сам сервер не видит из-за разграничения VLAN.
+ */
 export interface Agent {
   id: string;
   name: string;
-  hostname: string;
-  token: string;
   ip: string;
-  os: string;
-  version: string;
-  online: boolean;
-  aida64Url?: string; // адрес сенсорной веб-страницы AIDA64
-  aidaLatest?: AidaPoint | null;
-  aida?: AidaPoint[]; // архив показаний (сервер отдаёт отдельным эндпоинтом)
-  cpuLoad: number;
-  cpuCores: number;
-  cpuTemp: number;
-  ramUsed: number;
-  ramTotal: number;
-  ramTemp: number;
-  disks: Disk[];
-  rxBytes: number;
-  txBytes: number;
-  rxRate: number;
-  txRate: number;
-  networks: LanNetwork[];
+  aidaUrl: string;
+  relayUrl: string; // '' = relay не настроен, пинги устройств не выполняются
+  pingTargets: string[];
+  online: boolean; // результат пинга до ip
+  latency: number | null; // мс до агента
+  onlineSince: number; // когда стал доступен (0 = офлайн) — для uptime-статистики
   lastSeen: number;
-  lastMetrics: number;
-  lastScan: number;
-  history: { t: number; cpu: number; ram: number }[];
+  lastPoll?: number; // последний опрос (планировщик)
+  lastError: string | null;
+  latest: AidaPoint | null; // последние показания AIDA64
+  aida?: AidaPoint[]; // архив показаний (сервер отдаёт отдельным эндпоинтом)
+  targets: AgentPingTarget[]; // результаты пингов устройств через relay
   favorite: boolean;
   createdAt: number;
 }
@@ -158,7 +152,7 @@ export interface User {
 }
 
 export interface Settings {
-  intervals: Record<DeviceType | 'glances', number>;
+  intervals: Record<DeviceType | 'glances' | 'agent', number>;
   heartbeat: number;
   metrics: number;
   lanScan: number;

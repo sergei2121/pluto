@@ -31,12 +31,10 @@ function tick() {
     if (now - d.lastCheck >= interval) void runCheck(d);
   }
 
+  const aiv = Math.max(10, s.settings.intervals.agent || 30) * 1000;
   for (const a of s.agents) {
-    if (a.online) {
-      if (now - a.lastMetrics >= s.settings.metrics * 1000) stepAgentMetrics(a.id, now);
-      if (now > a.lastScan + s.settings.lanScan * 1000) rescanLan(a.id, now);
-      if (Math.random() < 0.0004) setAgentOffline(a.id);
-    }
+    if (now - (a.lastPoll || 0) >= aiv) stepAgent(a.id, now);
+    if (a.online && Math.random() < 0.0004) setAgentOffline(a.id);
   }
 }
 
@@ -112,36 +110,48 @@ function applyResult(id: string, ok: boolean, latency: number) {
   store.patchDevice(id, { status, fails: 0, latency, baseline, lastCheck: now, lastChange: status === d.status ? d.lastChange : now, history, checking: false, approx: true });
 }
 
-// ─── Агенты (эмуляция телеметрии) ───────────────────────────────────────────
+// ─── Агенты (эмуляция: пинг + листинг AIDA64) ───────────────────────────────
 
-function stepAgentMetrics(id: string, now: number) {
+/** Эмуляция одного опроса агента: пинг до IP + случайные показания AIDA64. */
+function stepAgent(id: string, now: number) {
   const a = getState().agents.find((x) => x.id === id);
   if (!a) return;
-  const cpuLoad = clamp(a.cpuLoad + rnd(-7, 7), 2, 98);
-  const ramUsed = clamp(a.ramUsed + (a.ramTotal || 8e9) * rnd(-0.02, 0.022), 1e9, (a.ramTotal || 8e9) * 0.94);
-  const rxRate = clamp(a.rxRate * 0.6 + rnd(20, 900), 0, 12000);
-  const txRate = clamp(a.txRate * 0.6 + rnd(5, 400), 0, 8000);
+
+  // «пинг» до IP — изредкаagent уходит в офлайн
+  const alive = Math.random() > 0.03;
+  if (!alive) {
+    if (a.online) setAgentOffline(id);
+    store.patchAgent(id, { online: false, latency: null, onlineSince: 0, lastPoll: now });
+    return;
+  }
+  const wasOnline = a.online;
+
+  // случайные показания в формате листинга AIDA64
+  const cpuUsage = clamp((a.latest?.cpuUsage ?? 20) + rnd(-6, 6), 1, 99);
+  const pt = {
+    t: now,
+    cpuUsage: Math.round(cpuUsage),
+    cpuTemp: Math.round(clamp(36 + cpuUsage * 0.4 + rnd(-2, 2), 30, 90)),
+    ram: Math.round(clamp((a.latest?.ram ?? 40) + rnd(-3, 3), 5, 95)),
+    ssdTemp: Math.round(clamp(45 + rnd(-3, 3), 30, 70)),
+    diskC: Math.round(clamp((a.latest?.diskC ?? 50) + rnd(-1, 1), 1, 99)),
+    usedSpaceC: Math.round(clamp((a.latest?.usedSpaceC ?? 100) + rnd(-1, 2), 1, 2000)),
+    tx: Math.round(clamp(rnd(0, 900), 0, 10000) * 10) / 10,
+    rx: Math.round(clamp(rnd(0, 400), 0, 8000) * 10) / 10,
+    uptimeSec: (a.latest?.uptimeSec ?? 0) + 30,
+  };
+
   store.patchAgent(id, {
-    cpuLoad,
-    cpuTemp: clamp(36 + cpuLoad * 0.42 + rnd(-1.5, 1.5), 32, 95),
-    ramUsed,
-    ramTemp: clamp(34 + rnd(-1, 1), 30, 80),
-    rxRate,
-    txRate,
+    online: true,
+    latency: Math.round(rnd(1, 40)),
+    onlineSince: a.onlineSince || now,
     lastSeen: now,
-    lastMetrics: now,
-    history: [...a.history, { t: now, cpu: cpuLoad, ram: (ramUsed / (a.ramTotal || 1)) * 100 }].slice(-90),
+    lastPoll: now,
+    latest: pt,
+    aida: [...(a.aida || []), pt].slice(-300),
+    lastError: null,
   });
-}
-
-function rescanLan(id: string, now: number) {
-  const a = getState().agents.find((x) => x.id === id);
-  if (!a) return;
-  const networks = a.networks.map((n) => ({
-    ...n,
-    hosts: n.hosts.map((h) => (Math.random() < 0.15 ? { ...h, online: Math.random() > 0.4 } : h)),
-  }));
-  store.patchAgent(id, { networks, lastScan: now });
+  if (!wasOnline) setAgentOnline(id);
 }
 
 export function setAgentOffline(id: string) {
@@ -155,7 +165,7 @@ export function setAgentOffline(id: string) {
 export function setAgentOnline(id: string) {
   const a = getState().agents.find((x) => x.id === id);
   if (!a) return;
-  store.patchAgent(id, { online: true, lastSeen: Date.now(), lastMetrics: Date.now() });
+  store.patchAgent(id, { online: true, lastSeen: Date.now() });
   store.pushEvent('ok', 'agent', `Агент ${a.name} снова в сети`);
 }
 
