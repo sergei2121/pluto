@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: server/Dockerfile
-    image: pluto/core:1.8.4
+    image: pluto/core:1.8.5
     container_name: pluto-core
     restart: unless-stopped
     env_file:
@@ -13,8 +13,11 @@ services:
       - HTTP_PORT=8080
       - AGENT_PORT=8443
     ports:
-      - "8080:8080"   # веб-консоль + REST API
-      - "8443:8443"   # шлюз агентов (WebSocket)
+      # Хостовые порты настраиваются в .env (PLUTO_HTTP_PORT, PLUTO_AGENT_PORT),
+      # чтобы не конфликтовать с другими сервисами (например, zabbix-web на 8080).
+      # Внутри контейнера порты всегда 8080/8443.
+      - "${PLUTO_HTTP_PORT:-8080}:8080"   # веб-консоль + REST API
+      - "${PLUTO_AGENT_PORT:-8443}:8443"  # шлюз агентов (WebSocket)
     volumes:
       - pluto-data:/data
     healthcheck:

@@ -12,6 +12,7 @@ import Agents from './pages/Agents';
 import SettingsPage from './pages/Settings';
 import Deploy from './pages/Deploy';
 import Telemetry from './pages/Telemetry';
+import Bars from './pages/Bars';
 
 export default function App() {
   const hasSession = usePluto((s) => !!s.session);
@@ -83,6 +84,7 @@ export default function App() {
   if (user.role !== 'admin' && page === 'settings') page = 'dashboard';
   if (user.role !== 'admin' && page === 'agents' && !user.scope.includes('agent')) page = 'dashboard';
   if (user.role !== 'admin' && page === 'telemetry' && !user.scope.includes('agent')) page = 'dashboard';
+  if (user.role !== 'admin' && page === 'bars' && !user.scope.includes('glances')) page = 'dashboard';
 
   return (
     <Shell>
@@ -90,6 +92,7 @@ export default function App() {
       {page === 'devices' && <Devices key={`dev-${user.id}`} />}
       {page === 'agents' && <Agents key={`ag-${user.id}`} />}
       {page === 'telemetry' && <Telemetry key={`tel-${user.id}`} />}
+      {page === 'bars' && <Bars key={`bars-${user.id}`} />}
       {page === 'settings' && <SettingsPage />}
       {page === 'deploy' && <Deploy />}
     </Shell>

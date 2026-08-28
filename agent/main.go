@@ -272,7 +272,7 @@ func scanLAN() []Network {
 
 // ─── Установка службой Windows ──────────────────────────────────────────────
 
-const agentVersion = "1.8.4"
+const agentVersion = "1.8.5"
 
 func installService(server, token string) {
 	fmt.Println("[pluto-agent] версия", agentVersion)

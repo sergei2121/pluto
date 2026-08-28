@@ -70,7 +70,7 @@ function PollingTab() {
   const settings = usePluto((s) => s.settings);
   const [draft, setDraft] = useState<TSettings>({ ...settings, intervals: { ...settings.intervals }, notifications: settings.notifications });
   const set = (p: Partial<TSettings>) => setDraft((d) => ({ ...d, ...p }));
-  const setInt = (k: DeviceType, v: number) => setDraft((d) => ({ ...d, intervals: { ...d.intervals, [k]: v } }));
+  const setInt = (k: DeviceType | 'glances', v: number) => setDraft((d) => ({ ...d, intervals: { ...d.intervals, [k]: v } }));
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -79,6 +79,7 @@ function PollingTab() {
           {DEVICE_TYPES.map((t) => (
             <NumField key={t} label={`${DEVICE_TYPE_META[t].label} — интервал`} value={draft.intervals[t]} onChange={(v) => setInt(t, v)} min={5} suffix="сек" />
           ))}
+          <NumField label="Glances (Bars) — интервал" value={draft.intervals.glances ?? 60} onChange={(v) => setInt('glances', v)} min={15} suffix="сек" />
           <NumField label="Телеметрия агентов" value={draft.metrics} onChange={(v) => set({ metrics: v })} min={3} suffix="сек" />
           <NumField label="Скан локальных сетей" value={draft.lanScan} onChange={(v) => set({ lanScan: v })} min={30} suffix="сек" />
         </div>
@@ -362,6 +363,10 @@ function AddUserModal({ open, onClose }: { open: boolean; onClose: () => void })
               <button onClick={() => toggleScope('agent')}
                 className={cls('rounded-lg border px-3 py-1.5 font-mono text-[11px] font-semibold transition-all', scope.includes('agent') ? 'border-vio/50 bg-vio/15 text-ink' : 'border-line bg-raised/50 text-dim hover:text-mut')}>
                 АГЕНТЫ
+              </button>
+              <button onClick={() => toggleScope('glances')}
+                className={cls('rounded-lg border px-3 py-1.5 font-mono text-[11px] font-semibold transition-all', scope.includes('glances') ? 'border-vio/50 bg-vio/15 text-ink' : 'border-line bg-raised/50 text-dim hover:text-mut')}>
+                GLANCES
               </button>
             </div>
           </div>
