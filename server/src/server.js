@@ -12,7 +12,7 @@ import {
   issueSession, attachWs, DEFAULT_SETTINGS,
 } from './lib.js';
 
-const VERSION = '1.8.8';
+const VERSION = '1.9.0';
 const db = loadDb();
 const HTTP_PORT = Number(process.env.HTTP_PORT || 8080);
 const AGENT_PORT = Number(process.env.AGENT_PORT || 8443);
@@ -421,6 +421,10 @@ async function pollAgent(agent) {
   const wasOnline = agent.online;
   agent.online = ping.ok;
   agent.latency = ping.ok ? ping.latency : null;
+  agent.lastPoll = now;
+  if (!Array.isArray(agent.latHist)) agent.latHist = [];
+  agent.latHist.push({ t: now, ms: ping.ok ? ping.latency : null });
+  if (agent.latHist.length > 480) agent.latHist.splice(0, agent.latHist.length - 480);
   if (ping.ok) {
     agent.lastSeen = now;
     if (!agent.onlineSince) agent.onlineSince = now;

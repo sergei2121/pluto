@@ -197,7 +197,7 @@ function AgentPicker({ agents, value, onPick }: { agents: Agent[]; value: string
         <StatusDot status={cur?.online ? 'up' : 'down'} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[13px] font-semibold text-ink">{cur ? cur.name : '—'}</span>
-          <span className="block truncate font-mono text-[10px] text-dim">{cur ? cur.hostname || cur.ip : 'выберите агента'}</span>
+          <span className="block truncate font-mono text-[10px] text-dim">{cur ? cur.ip || 'выберите агента' : 'выберите агента'}</span>
         </span>
         <ChevronDown className={cls('h-4 w-4 text-dim transition-transform', open && 'rotate-180')} />
       </button>
@@ -216,9 +216,9 @@ function AgentPicker({ agents, value, onPick }: { agents: Agent[]; value: string
               <StatusDot status={a.online ? 'up' : 'down'} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[13px] font-semibold text-ink">{a.name}</span>
-                <span className="block truncate font-mono text-[10px] text-dim">{a.hostname || a.ip || 'нет данных'}</span>
+                <span className="block truncate font-mono text-[10px] text-dim">{a.ip || 'нет данных'}</span>
               </span>
-              <span className="font-mono text-[9.5px] uppercase text-dim">{(a.aida || []).length || (a.aidaLatest ? 1 : 0)} тчк</span>
+              <span className="font-mono text-[9.5px] uppercase text-dim">{(a.aida || []).length || (a.latest ? 1 : 0)} тчк</span>
             </button>
           ))}
         </div>
@@ -249,7 +249,7 @@ export default function Telemetry() {
   // выбор агента по умолчанию: с данными → в сети → первый
   useEffect(() => {
     if (agentId && agents.some((a) => a.id === agentId)) return;
-    const first = agents.find((a) => a.aidaLatest) || agents.find((a) => a.online) || agents[0];
+    const first = agents.find((a) => a.latest) || agents.find((a) => a.online) || agents[0];
     setAgentId(first ? first.id : null);
   }, [agents, agentId]);
 
@@ -295,7 +295,7 @@ export default function Telemetry() {
     const blob = new Blob(['\uFEFF' + [head, ...rows].join('\r\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `pluto-aida-${agent.hostname || agent.name}-${range}.csv`;
+    a.download = `pluto-aida-${agent.ip || agent.name}-${range}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
     useToasts.push('ok', `Экспортировано ${points.length} точек в CSV`);
@@ -386,7 +386,7 @@ export default function Telemetry() {
           { label: 'Точек в окне', value: String(points.length), sub: rangeMeta.label },
           { label: 'Начало окна', value: points.length ? fmtClock(points[0].t) : '—', sub: points.length ? fmtDate(points[0].t) : '' },
           { label: 'Конец окна', value: latest ? fmtClock(latest.t) : '—', sub: latest ? fmtDate(latest.t) : '' },
-          { label: 'Источник', value: agent?.aida64Url ? 'AIDA64' : 'не задан', sub: agent?.aida64Url || 'укажите адрес в карточке агента' },
+          { label: 'Источник', value: agent?.aidaUrl ? 'AIDA64' : 'не задан', sub: agent?.aidaUrl || 'укажите адрес в карточке агента' },
         ].map((s, i) => (
           <div key={s.label} className="rise rounded-xl border border-line bg-panel/90 p-3.5" style={{ animationDelay: `${40 + i * 40}ms` }}>
             <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-dim">{s.label}</div>
@@ -459,8 +459,8 @@ export default function Telemetry() {
             icon={<History className="h-6 w-6" />}
             title="Архив пуст для этого окна"
             text={
-              agent?.aida64Url
-                ? `Данных за последние ${rangeMeta.label.toLowerCase()} нет. Убедитесь, что AIDA64 отдаёт сенсорную страницу (${agent.aida64Url}) и агент в сети.`
+              agent?.aidaUrl
+                ? `Данных за последние ${rangeMeta.label.toLowerCase()} нет. Убедитесь, что AIDA64 отдаёт сенсорную страницу (${agent.aidaUrl}) и агент в сети.`
                 : 'У агента не задан адрес сенсорной страницы AIDA64. Откройте карточку агента → «Изменить» и укажите адрес (RemoteSensor, по умолчанию http://127.0.0.1:8090/).'
             }
           />

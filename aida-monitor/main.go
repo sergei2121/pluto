@@ -255,6 +255,30 @@ func main() {
 		c.JSON(200, out)
 	})
 
+	// Пинг произвольных адресов по запросу ядра PLUTO (обход VLAN:
+	// сервис стоит внутри сети агента и пингует локально).
+	// GET /ping?targets=10.0.0.5,10.0.0.6 → [{"ip":"10.0.0.5","alive":true,"latencyMs":2}, ...]
+	r.GET("/ping", func(c *gin.Context) {
+		raw := c.Query("targets")
+		var out []gin.H
+		for _, t := range strings.Split(raw, ",") {
+			t = strings.TrimSpace(t)
+			if t == "" {
+				continue
+			}
+			alive, ms := pingAddress(t)
+			item := gin.H{"ip": t, "alive": alive, "latencyMs": nil}
+			if alive {
+				item["latencyMs"] = ms
+			}
+			out = append(out, item)
+		}
+		if out == nil {
+			out = []gin.H{}
+		}
+		c.JSON(200, out)
+	})
+
 	// Health-check.
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"ok": true, "agents": len(agents)})

@@ -230,12 +230,45 @@ function DeviceModal({ edit, onClose }: { edit?: Device; onClose: () => void }) 
   const [selTags, setSelTags] = useState<string[]>(edit?.tags ?? []);
   const [err, setErr] = useState<string | null>(null);
 
+  // режим «Диапазон устройств»: стартовый и конечный IP, создаётся PING на каждый адрес
+  const [mode, setMode] = useState<'single' | 'range'>('single');
+  const [ipFrom, setIpFrom] = useState('');
+  const [ipTo, setIpTo] = useState('');
+
   // при смене типа подставляем его интервал по умолчанию (только для нового)
   useEffect(() => {
     if (!edit) setInterval(String(settings.intervals[type] ?? 60));
   }, [type, edit, settings]);
 
-  const save = () => {
+  const save = async () => {
+    if (mode === 'range' && !edit) {
+      const parse = (s: string) => {
+        const m = s.trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+        if (!m) return null;
+        const o = m.slice(1).map(Number);
+        return o.every((x) => x <= 255) ? o : null;
+      };
+      const from = parse(ipFrom), to = parse(ipTo);
+      if (!from || !to) { setErr('Укажите начальный и конечный IP в формате 192.168.1.10'); return; }
+      if (from.slice(0, 3).join('.') !== to.slice(0, 3).join('.')) { setErr('Начальный и конечный IP — в пределах одной подсети /24'); return; }
+      if (from[3] > to[3]) { setErr('Начальный IP больше конечного'); return; }
+      const count = to[3] - from[3] + 1;
+      if (count > 254) { setErr('В диапазоне не более 254 адресов'); return; }
+      const iv = Math.max(5, parseInt(interval, 10) || 60);
+      const prefix = from.slice(0, 3).join('.');
+      const base = name.trim();
+      for (let i = from[3]; i <= to[3]; i++) {
+        const ip = `${prefix}.${i}`;
+        await store.addDevice({
+          name: base ? `${base} · ${ip}` : ip,
+          type: 'ping', address: ip, port: null, path: '', method: null, body: null,
+          interval: iv, tags: selTags,
+        });
+      }
+      useToasts.push('ok', `Добавлено ${count} устройств (${prefix}.${from[3]}–${prefix}.${to[3]})`);
+      onClose();
+      return;
+    }
     if (!address.trim()) {
       setErr('Укажите адрес (IP, хост или ссылку)');
       return;
@@ -261,38 +294,80 @@ function DeviceModal({ edit, onClose }: { edit?: Device; onClose: () => void }) 
   return (
     <Modal open onClose={onClose} title={edit ? 'Изменить устройство' : 'Новое устройство'} width="max-w-xl">
       <div className="space-y-4">
-        <Field label="Тип проверки">
-          <div className="grid grid-cols-5 gap-1.5">
-            {DEVICE_TYPES.map((t) => (
-              <button key={t} onClick={() => setType(t)}
-                className={cls('rounded-lg border px-2 py-2 text-[11.5px] font-bold transition-all', type === t ? 'border-vio/60 bg-vio-deep/40 text-ink' : 'border-line bg-raised/50 text-dim hover:text-mut')}>
-                {DEVICE_TYPE_META[t].label}
-              </button>
-            ))}
-          </div>
-          <p className="mt-1.5 text-[11px] text-dim">{DEVICE_TYPE_META[type].desc}</p>
-        </Field>
-
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Название"><input className="inp" value={name} onChange={(e) => setName(e.target.value)} /></Field>
-          <Field label={type === 'rtsp' || type === 'sip' ? 'Ссылка / URI' : 'IP-адрес или хост'}>
-            <input className="inp font-mono" value={address} onChange={(e) => { setAddress(e.target.value); setErr(null); }} />
-          </Field>
-        </div>
-
-        {(type === 'http' || type === 'api') && (
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Порт"><input className="inp font-mono" value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ''))} /></Field>
-            <Field label="Путь"><input className="inp font-mono" value={pathVal} onChange={(e) => setPathVal(e.target.value)} /></Field>
+        {!edit && (
+          <div className="flex items-center justify-between gap-3">
+            <Field label="Режим добавления">
+              <Seg
+                options={[{ v: 'single' as const, label: 'Одно устройство' }, { v: 'range' as const, label: 'Диапазон устройств' }]}
+                value={mode}
+                onChange={(m) => { setMode(m); setErr(null); }}
+              />
+            </Field>
+            {mode === 'range' && (
+              <span className="mt-4 rounded-md border border-vio/30 bg-vio/10 px-2.5 py-1 font-mono text-[10.5px] font-bold text-vio">PING × N</span>
+            )}
           </div>
         )}
 
-        {type === 'api' && (
+        {mode === 'range' && !edit ? (
           <>
-            <Field label="Метод">
-              <Seg options={[{ v: 'GET' as const, label: 'GET' }, { v: 'POST' as const, label: 'POST' }]} value={method} onChange={setMethod} />
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Начальный IP">
+                <input className="inp font-mono" value={ipFrom} onChange={(e) => { setIpFrom(e.target.value); setErr(null); }} />
+              </Field>
+              <Field label="Конечный IP">
+                <input className="inp font-mono" value={ipTo} onChange={(e) => { setIpTo(e.target.value); setErr(null); }} />
+              </Field>
+            </div>
+            <div className="rounded-lg border border-line bg-raised/30 px-3 py-2.5 text-[11.5px] leading-relaxed text-dim">
+              На каждый адрес диапазона будет создано отдельное PING-устройство.
+              Диапазон — в пределах одной подсети /24, до 254 адресов.
+              {ipFrom && ipTo && (() => {
+                const f = ipFrom.trim().split('.').pop(), t = ipTo.trim().split('.').pop();
+                const n = f && t && /^\d+$/.test(f) && /^\d+$/.test(t) ? Number(t) - Number(f) + 1 : 0;
+                return n > 0 && n <= 254 ? <b className="ml-1 text-vio">Получится устройств: {n}</b> : null;
+              })()}
+            </div>
+            <Field label="Название (необязательно)" hint="Каждое устройство получит суффикс со своим IP.">
+              <input className="inp" value={name} onChange={(e) => setName(e.target.value)} />
             </Field>
-            <Field label="Тело запроса (JSON)"><textarea className="inp min-h-[74px] resize-y font-mono text-[12px]" value={body} onChange={(e) => setBody(e.target.value)} /></Field>
+          </>
+        ) : (
+          <>
+            <Field label="Тип проверки">
+              <div className="grid grid-cols-5 gap-1.5">
+                {DEVICE_TYPES.map((t) => (
+                  <button key={t} onClick={() => setType(t)}
+                    className={cls('rounded-lg border px-2 py-2 text-[11.5px] font-bold transition-all', type === t ? 'border-vio/60 bg-vio-deep/40 text-ink' : 'border-line bg-raised/50 text-dim hover:text-mut')}>
+                    {DEVICE_TYPE_META[t].label}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1.5 text-[11px] text-dim">{DEVICE_TYPE_META[type].desc}</p>
+            </Field>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Название"><input className="inp" value={name} onChange={(e) => setName(e.target.value)} /></Field>
+              <Field label={type === 'rtsp' || type === 'sip' ? 'Ссылка / URI' : 'IP-адрес или хост'}>
+                <input className="inp font-mono" value={address} onChange={(e) => { setAddress(e.target.value); setErr(null); }} />
+              </Field>
+            </div>
+
+            {(type === 'http' || type === 'api') && (
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Порт"><input className="inp font-mono" value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ''))} /></Field>
+                <Field label="Путь"><input className="inp font-mono" value={pathVal} onChange={(e) => setPathVal(e.target.value)} /></Field>
+              </div>
+            )}
+
+            {type === 'api' && (
+              <>
+                <Field label="Метод">
+                  <Seg options={[{ v: 'GET' as const, label: 'GET' }, { v: 'POST' as const, label: 'POST' }]} value={method} onChange={setMethod} />
+                </Field>
+                <Field label="Тело запроса (JSON)"><textarea className="inp min-h-[74px] resize-y font-mono text-[12px]" value={body} onChange={(e) => setBody(e.target.value)} /></Field>
+              </>
+            )}
           </>
         )}
 

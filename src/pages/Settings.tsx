@@ -72,7 +72,7 @@ function PollingTab() {
   const settings = usePluto((s) => s.settings);
   const [draft, setDraft] = useState<TSettings>({ ...settings, intervals: { ...settings.intervals }, notifications: settings.notifications });
   const set = (p: Partial<TSettings>) => setDraft((d) => ({ ...d, ...p }));
-  const setInt = (k: DeviceType | 'glances', v: number) => setDraft((d) => ({ ...d, intervals: { ...d.intervals, [k]: v } }));
+  const setInt = (k: DeviceType | 'glances' | 'agent', v: number) => setDraft((d) => ({ ...d, intervals: { ...d.intervals, [k]: v } }));
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -82,8 +82,7 @@ function PollingTab() {
             <NumField key={t} label={`${DEVICE_TYPE_META[t].label} — интервал`} value={draft.intervals[t]} onChange={(v) => setInt(t, v)} min={5} suffix="сек" />
           ))}
           <NumField label="Glances (Bars) — интервал" value={draft.intervals.glances ?? 60} onChange={(v) => setInt('glances', v)} min={15} suffix="сек" />
-          <NumField label="Телеметрия агентов" value={draft.metrics} onChange={(v) => set({ metrics: v })} min={3} suffix="сек" />
-          <NumField label="Скан локальных сетей" value={draft.lanScan} onChange={(v) => set({ lanScan: v })} min={30} suffix="сек" />
+          <NumField label="Агенты — интервал опроса" value={draft.intervals.agent ?? 30} onChange={(v) => setInt('agent', v)} min={10} suffix="сек" />
         </div>
       </Panel>
 
@@ -462,7 +461,7 @@ function DatabaseTab() {
                   key={a.id}
                   icon={<Monitor className="h-4 w-4" />}
                   title={a.name}
-                  sub={a.hostname || a.ip || '—'}
+                  sub={a.ip || '—'}
                   badge={a.online ? 'в сети' : 'офлайн'}
                   onDel={() => store.removeAgent(a.id)}
                   delLabel={`Удалить агента ${a.name}`}
