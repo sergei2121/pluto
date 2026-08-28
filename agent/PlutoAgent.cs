@@ -265,10 +265,27 @@ class Aida
     {
         return d.HasValue ? d.Value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) : "null";
     }
+
+    /// <summary>Человекочитаемая сводка распознанных полей (для лога).</summary>
+    public string Summary()
+    {
+        var parts = new List<string>();
+        if (CpuUsage.HasValue) parts.Add("CPUu=" + CpuUsage + "%");
+        if (CpuTemp.HasValue) parts.Add("CPU=" + CpuTemp + "°C");
+        if (Ram.HasValue) parts.Add("RAM=" + Ram + "%");
+        if (SsdTemp.HasValue) parts.Add("SSD=" + SsdTemp + "°C");
+        if (DiskC.HasValue) parts.Add("UseC=" + DiskC + "%");
+        if (Tx.HasValue) parts.Add("TX=" + Tx);
+        if (Rx.HasValue) parts.Add("RX=" + Rx);
+        if (Uptime.HasValue) parts.Add("Uptime=" + Uptime + "с");
+        return string.Join(", ", parts.ToArray());
+    }
 }
 
 static class AidaReader
 {
+    static bool _loggedOnce;
+
     /// <summary>Скачивает страницу AIDA64 и разбирает значения. null = данных нет.</summary>
     public static Aida Read(string url)
     {
@@ -288,25 +305,27 @@ static class AidaReader
             text = Regex.Replace(text, "&nbsp;|&#160;|&deg;C?;", " ");
 
             var a = new Aida();
-            a.CpuUsage = NumAfter(text, "CPUu");
-            a.CpuTemp = NumAfter(text, "CPU");
-            a.Ram = NumAfter(text, "RAM");
-            a.SsdTemp = NumAfter(text, "SSD");
-            a.DiskC = NumAfter(text, "UseC");
+            // Процентные пункты: ищем число, за которым сразу идёт «%».
+            a.CpuUsage = PctAfter(text, "CPUu");   // загрузка ЦП, %
+            a.Ram = PctAfter(text, "RAM");         // занято ОЗУ, %
+            a.DiskC = PctAfter(text, "UseC");      // занято диска C, %
+            // Температуры: число, за которым °C (или просто число).
+            a.CpuTemp = TempAfter(text, "CPU");    // «CPU», но не «CPUu»
+            a.SsdTemp = TempAfter(text, "SSD");
+            // Скорости сети: число с единицей КБ/с · МБ/с · ГБ/с (нормализуем к КБ/с).
             a.Tx = RateAfter(text, "TX");
             a.Rx = RateAfter(text, "RX");
+            // Аптайм: «2 д. 3:42:11» → секунды.
             a.Uptime = UptimeAfter(text, "Uptime");
+
+            if (!_loggedOnce && a.HasAny)
+            {
+                _loggedOnce = true;
+                AgentLog.Write("AIDA64 распознано: " + a.Summary());
+            }
             return a;
         }
         catch { return null; } // AIDA64 не отдаёт страницу — не ошибка, просто нет данных
-    }
-
-    static string Tail(string text, string label, int len)
-    {
-        var m = Regex.Match(text, @"\b" + label + @"\b", RegexOptions.IgnoreCase);
-        if (!m.Success) return null;
-        int start = m.Index + m.Length;
-        return text.Substring(start, Math.Min(len, text.Length - start));
     }
 
     static double? ParseNum(string s)
@@ -319,26 +338,59 @@ static class AidaReader
         return v;
     }
 
-    static double? NumAfter(string text, string label)
+    /// <summary>
+    /// Окно символов после ключевого слова. Для «CPU» исключаем «CPUu»,
+    /// чтобы температура не перепуталась с загрузкой.
+    /// </summary>
+    static string Window(string text, string label, int len)
     {
-        string tail = Tail(text, label, 40);
-        if (tail == null) return null;
-        var mv = Regex.Match(tail, @"(-?\d[\d\s]{0,10}(?:[.,]\d+)?)");
-        return mv.Success ? ParseNum(mv.Groups[1].Value) : (double?)null;
+        string pat = label == "CPU" ? @"\bCPU\b(?!u)" : @"\b" + label + @"\b";
+        var m = Regex.Match(text, pat, RegexOptions.IgnoreCase);
+        if (!m.Success) return null;
+        int start = m.Index + m.Length;
+        return text.Substring(start, Math.Min(len, text.Length - start));
     }
 
-    /// <summary>Скорость сети: нормализуем МБ/с и ГБ/с к КБ/с.</summary>
+    /// <summary>
+    /// Ищет числовое значение сразу после ключевого слова, за которым следует
+    /// заданная единица (например «%»). Если единицы нет — null (не угадываем).
+    /// </summary>
+    static double? ValueWithUnit(string text, string label, string unitRe)
+    {
+        string win = Window(text, label, 60);
+        if (win == null) return null;
+        var mv = Regex.Match(win, @"(-?\d+(?:[.,]\d+)?)\s*(?:" + unitRe + @")", RegexOptions.IgnoreCase);
+        if (!mv.Success) return null;
+        return ParseNum(mv.Groups[1].Value);
+    }
+
+    /// <summary>Процент: число, за которым «%» (CPUu, RAM, UseC).</summary>
+    static double? PctAfter(string text, string label)
+    {
+        return ValueWithUnit(text, label, "%");
+    }
+
+    /// <summary>Температура: число, за которым «°C»/«°»/«C» (CPU, SSD).</summary>
+    static double? TempAfter(string text, string label)
+    {
+        return ValueWithUnit(text, label, "°\\s*C|°|C");
+    }
+
+    /// <summary>Скорость сети: число с единицей, нормализуем к КБ/с (TX, RX).</summary>
     static double? RateAfter(string text, string label)
     {
-        string tail = Tail(text, label, 40);
-        if (tail == null) return null;
-        var mv = Regex.Match(tail, @"(-?\d[\d\s]{0,10}(?:[.,]\d+)?)");
+        string win = Window(text, label, 60);
+        if (win == null) return null;
+        var mv = Regex.Match(win,
+            @"(-?\d+(?:[.,]\d+)?)\s*(КБ/с|МБ/с|ГБ/с|KB/s|MB/s|GB/s|б/с|B/s)?",
+            RegexOptions.IgnoreCase);
         if (!mv.Success) return null;
         var v = ParseNum(mv.Groups[1].Value);
         if (!v.HasValue) return null;
-        string unitTail = tail.Substring(mv.Index + mv.Length);
-        if (Regex.IsMatch(unitTail, @"^\s*(?:МБ|MB)", RegexOptions.IgnoreCase)) v = v.Value * 1024;
-        else if (Regex.IsMatch(unitTail, @"^\s*(?:ГБ|GB)", RegexOptions.IgnoreCase)) v = v.Value * 1048576;
+        string u = mv.Groups[2].Value.ToUpperInvariant();
+        if (u.StartsWith("МБ") || u.StartsWith("MB")) v = v.Value * 1024;        // МБ/с → КБ/с
+        else if (u.StartsWith("ГБ") || u.StartsWith("GB")) v = v.Value * 1048576; // ГБ/с → КБ/с
+        else if (u.StartsWith("Б") || u == "B/S") v = v.Value / 1024;            // Б/с → КБ/с
         return Math.Round(v.Value, 1);
     }
 
@@ -457,8 +509,7 @@ class Worker
             AgentLog.Write("подключено к " + _o.Server);
 
             string hello = "{\"type\":\"hello\",\"hostname\":\"" + Json.Esc(Environment.MachineName) +
-                           "\",\"os\":\"Windows\",\"version\":\"1.8.4-cs\"}";
-            await Send(ws, hello);
+                            "\",\"os\":\"Windows\",\"version\":\"1.8.8-cs\"}";            await Send(ws, hello);
 
             // Приём сообщений — наблюдаемая Task. Любая ошибка внутри НЕ убивает
             // процесс (была async void → молчаливое падение), а только логируется.
