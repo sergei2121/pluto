@@ -101,10 +101,11 @@ export const api = {
   deleteDevice: (id: string) => req<{ ok: boolean }>('DELETE', `/api/devices/${id}`),
   checkDevice: (id: string) => req<{ result: { ok: boolean; latency: number } }>('POST', `/api/devices/${id}/check`),
 
-  createAgentToken: (name: string) => req<{ agent: Agent; token: string }>('POST', '/api/agents/token', { name }),
+  addAgent: (b: { name: string; ip: string; aidaUrl: string; relayUrl?: string; pingTargets?: string[] }) =>
+    req<Agent>('POST', '/api/agents', b),
   updateAgent: (id: string, b: Record<string, unknown>) => req<Agent>('PUT', `/api/agents/${id}`, b),
   deleteAgent: (id: string) => req<{ ok: boolean }>('DELETE', `/api/agents/${id}`),
-  retokenAgent: (id: string) => req<{ token: string }>('POST', `/api/agents/${id}/retoken`),
+  pollAgent: (id: string) => req<Agent>('POST', `/api/agents/${id}/poll`),
   agentAida: (id: string, range: string) => req<{ range: string; retentionDays: number; points: AidaPoint[] }>('GET', `/api/agents/${id}/aida?range=${encodeURIComponent(range)}`),
 
   // Glances (Bars): ядро само опрашивает веб-страницы, агент не нужен

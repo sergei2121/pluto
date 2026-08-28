@@ -242,12 +242,13 @@ setInterval(() => {
       runDeviceCheck(d).finally(() => { d.checking = false; });
     }
   }
-  const hb = Math.max(5, db.settings.heartbeat) * 1000;
+  // Агенты: сервер сам пингует IP (uptime), читает листинг AIDA64 и через relay
+  // пингует устройства внутри VLAN. Интервал — из настроек (по умолчанию 30 с).
+  const aiv = Math.max(10, (db.settings.intervals && db.settings.intervals.agent) || 30) * 1000;
   for (const a of db.agents) {
-    if (a.online && now - (a.lastSeen || 0) > hb * 3) {
-      a.online = false;
-      pushEvent('warn', 'agent', `Агент ${a.name || a.hostname} не выходит на связь`);
-      saveDb();
+    if (!a.polling && now - (a.lastPoll || 0) >= aiv) {
+      a.polling = true;
+      pollAgent(a).finally(() => { a.polling = false; a.lastPoll = Date.now(); });
     }
   }
   // Glances: периодический опрос веб-страниц (интервал из настроек, по умолчанию 60 с)
@@ -265,78 +266,10 @@ setInterval(() => {
   }
 }, 1000);
 
-// ─── Шлюз агентов (WebSocket на :8443) ───────────────────────────────────────
-
-const agentServer = http.createServer();
-agentServer.on('connection', (sock) => {
-  console.log(`[pluto] шлюз: TCP-соединение от ${sock.remoteAddress}`);
-});
-attachWs(agentServer, (conn, url, remoteIp) => {
-  const token = url.searchParams.get('token');
-  const agent = db.agents.find((a) => a.token === token);
-  if (!agent) {
-    console.log(`[pluto] шлюз: НЕВЕРНЫЙ ТОКЕН от ${remoteIp}`);
-    conn.send(JSON.stringify({ type: 'error', text: 'invalid token' }));
-    conn.close();
-    return;
-  }
-  const wasOffline = !agent.online;
-  agent.online = true;
-  agent.lastSeen = Date.now();
-  agent.ip = remoteIp || agent.ip;
-  if (wasOffline) pushEvent('ok', 'agent', `Агент ${agent.name || agent.hostname} подключился (${agent.ip})`);
-  conn.send(JSON.stringify({
-    type: 'config', metrics: db.settings.metrics, lanScan: db.settings.lanScan,
-    aida64: agent.aida64Url || null,
-  }));
-
-  conn.onMessage((raw) => {
-    let msg;
-    try { msg = JSON.parse(raw); } catch { return; }
-    agent.lastSeen = Date.now();
-    if (!agent.online) { agent.online = true; pushEvent('ok', 'agent', `Агент ${agent.name || agent.hostname} снова в сети`); }
-    if (msg.type === 'hello') {
-      Object.assign(agent, { hostname: msg.hostname, os: msg.os, version: msg.version });
-    } else if (msg.type === 'metrics' && msg.data) {
-      Object.assign(agent, msg.data);
-      agent.history = [...(agent.history || []), {
-        t: Date.now(),
-        cpu: msg.data.cpuLoad || 0,
-        ram: msg.data.ramTotal ? ((msg.data.ramUsed || 0) / msg.data.ramTotal) * 100 : 0,
-      }].slice(-120);
-      // данные с сенсорной веб-страницы AIDA64 (хранение — 60 дней)
-      if (msg.aida && typeof msg.aida === 'object') {
-        const now = Date.now();
-        const pt = {
-          t: now,
-          cpuUsage: numOrNull(msg.aida.cpuUsage), cpuTemp: numOrNull(msg.aida.cpuTemp),
-          ram: numOrNull(msg.aida.ram), ssdTemp: numOrNull(msg.aida.ssdTemp),
-          diskC: numOrNull(msg.aida.diskC), tx: numOrNull(msg.aida.tx),
-          rx: numOrNull(msg.aida.rx), uptimeSec: numOrNull(msg.aida.uptimeSec),
-        };
-        if (AIDA_KEYS.some((k) => pt[k] != null)) {
-          agent.aidaLatest = pt;
-          aidaAppend(agent, pt);
-        }
-        // Fallback: нативный сборщик часто не отдаёт температуру ЦП (WMI
-        // MSAcpi_ThermalZoneTemperature доступен не на всех платах) и может
-        // вернуть 0 для загрузки. Дополняем карточку агента значениями AIDA64.
-        if ((!agent.cpuTemp || agent.cpuTemp <= 0) && pt.cpuTemp != null) agent.cpuTemp = pt.cpuTemp;
-        if ((!agent.cpuLoad || agent.cpuLoad <= 0) && pt.cpuUsage != null) agent.cpuLoad = pt.cpuUsage;
-      }
-    } else if (msg.type === 'lan') {
-      agent.networks = msg.networks || [];
-      agent.lastScan = Date.now();
-    }
-    saveDb();
-  });
-  conn.onClose(() => {
-    agent.online = false;
-    pushEvent('warn', 'agent', `Агент ${agent.name || agent.hostname} отключился`);
-    saveDb();
-  });
-});
-agentServer.listen(AGENT_PORT, () => console.log(`[pluto] шлюз агентов: ws://0.0.0.0:${AGENT_PORT}/ws`));
+// ─── Агенты: модель без токенов ─────────────────────────────────────────────
+// WebSocket-шлюз удалён. Агент больше не устанавливается и не подключается сам:
+// сервер опрашивает его по HTTP (см. pollAgent выше) — пинг до IP, чтение
+// листинга AIDA64 и relay-пинги устройств внутри VLAN через aida-monitor.
 
 // ─── REST API + статика ──────────────────────────────────────────────────────
 
@@ -402,6 +335,131 @@ function aidaAppend(agent, pt) {
   let i = 0;
   while (i < arr.length && arr[i].t < cutoff) i++;
   if (i > 0) arr.splice(0, i);
+}
+
+// ─── Агенты: сервер опрашивает сам (без токенов и установленной программы) ──
+// Агент = IP + ссылка на листинг AIDA64. Сервер:
+//   1) пингует IP — доступность и статистика uptime;
+//   2) читает листинг AIDA64 и разбирает строку «CPUu 3%, CPU 42°C, RAM 25%, …»;
+//   3) через relay-сервис aida-monitor (внутри VLAN агента) пингует локальные
+//      устройства — обход разграничения VLAN.
+
+const AGENT_AIDA_KEYS = ['cpuUsage', 'cpuTemp', 'ram', 'ssdTemp', 'diskC', 'usedSpaceC', 'tx', 'rx', 'uptimeSec'];
+
+/** Разбор фиксированной строки листинга AIDA64. */
+function parseAidaLine(text) {
+  const s = String(text)
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;|&#160;|&deg;C?;/g, ' ')
+    .replace(/\s+/g, ' ');
+  const num = (label) => {
+    const re = new RegExp('\\b' + label + '\\s+(-?\\d+(?:[.,]\\d+)?)', 'i');
+    const m = s.match(re);
+    return m ? parseFloat(m[1].replace(',', '.')) : null;
+  };
+  let uptimeSec = null;
+  const um = s.match(/Uptime\s+((?:\d+\s*(?:д|d)\.?\s*)?\d{1,3}:\d{1,2}:\d{1,2})/i);
+  if (um) {
+    const dm = /(\d+)\s*(?:д|d)\.?/.exec(um[1]);
+    const hms = /(\d{1,3}):(\d{1,2}):(\d{1,2})/.exec(um[1]);
+    if (hms) {
+      uptimeSec = (dm ? parseInt(dm[1]) : 0) * 86400 +
+        parseInt(hms[1]) * 3600 + parseInt(hms[2]) * 60 + parseInt(hms[3]);
+    }
+  }
+  return {
+    cpuUsage: num('CPUu'), cpuTemp: num('CPU'), ram: num('RAM'), ssdTemp: num('SSD'),
+    diskC: num('UseC'), usedSpaceC: num('UsedSpaceC'), tx: num('TX'), rx: num('RX'), uptimeSec,
+  };
+}
+
+/** Разворачивает цель в список IP: «1.2.3.4», «1.2.3.10-20», «1.2.3.0/24». */
+function expandIps(target) {
+  const t = String(target).trim();
+  if (!t) return [];
+  const range = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.)(\d{1,3})\s*-\s*(\d{1,3})$/.exec(t);
+  if (range) {
+    const out = [];
+    const a = parseInt(range[2]), b = parseInt(range[3]);
+    for (let i = Math.min(a, b); i <= Math.max(a, b) && out.length < 256; i++) out.push(range[1] + i);
+    return out;
+  }
+  const cidr = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.)\d{1,3}\/(\d{1,2})$/.exec(t);
+  if (cidr) {
+    if (parseInt(cidr[2]) < 24) return []; // слишком большая сеть — не раскрываем
+    const out = [];
+    for (let i = 1; i < 255; i++) out.push(cidr[1] + i);
+    return out;
+  }
+  return /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(t) ? [t] : [];
+}
+
+/** Пинг списка IP через relay-сервис внутри VLAN агента. */
+async function relayPing(agent, ips) {
+  if (!agent.relayUrl || !ips.length) return [];
+  const base = String(agent.relayUrl).replace(/\/+$/, '');
+  const url = base + '/ping?targets=' + encodeURIComponent(ips.join(','));
+  try {
+    const txt = await fetchText(url, 15000);
+    const arr = JSON.parse(txt);
+    if (Array.isArray(arr)) {
+      return arr.map((r) => ({
+        ip: r.ip, alive: !!r.alive,
+        latency: r.latencyMs != null ? r.latencyMs : (r.latency != null ? r.latency : null),
+      }));
+    }
+  } catch { /* relay недоступен — вернём пустой результат */ }
+  return [];
+}
+
+/** Полный опрос агента: uptime-пинг + листинг AIDA64 + relay-пинги устройств. */
+async function pollAgent(agent) {
+  const now = Date.now();
+
+  // 1) пинг до IP агента — доступность / uptime
+  const ping = await checkPing(agent.ip, db.settings.timeoutMs || 3000);
+  const wasOnline = agent.online;
+  agent.online = ping.ok;
+  agent.latency = ping.ok ? ping.latency : null;
+  if (ping.ok) {
+    agent.lastSeen = now;
+    if (!agent.onlineSince) agent.onlineSince = now;
+  } else {
+    agent.onlineSince = 0;
+  }
+  if (ping.ok && !wasOnline) pushEvent('ok', 'agent', `Агент «${agent.name}» (${agent.ip}) в сети`);
+  if (!ping.ok && wasOnline) pushEvent('warn', 'agent', `Агент «${agent.name}» (${agent.ip}) недоступен`);
+
+  // 2) листинг AIDA64
+  if (agent.aidaUrl) {
+    try {
+      const html = await fetchText(agent.aidaUrl, 7000);
+      const pt = parseAidaLine(html);
+      pt.t = Date.now();
+      if (AGENT_AIDA_KEYS.some((k) => pt[k] != null)) {
+        agent.latest = pt;
+        aidaAppend(agent, pt);
+        agent.lastError = null;
+      } else {
+        agent.lastError = 'листинг AIDA64 загружен, но значения не распознаны';
+      }
+    } catch (e) {
+      agent.lastError = 'AIDA64: ' + (e.message || 'ошибка запроса');
+    }
+  }
+
+  // 3) пинги устройств через relay (внутри VLAN агента)
+  if (agent.relayUrl && (agent.pingTargets || []).length) {
+    const out = [];
+    for (const tgt of agent.pingTargets) {
+      const ips = expandIps(tgt);
+      const results = await relayPing(agent, ips);
+      out.push({ target: tgt, results, lastCheck: Date.now() });
+    }
+    agent.targets = out;
+  }
+
+  saveDb();
 }
 
 // ─── Glances (Bars): удалённый опрос веб-страниц, хранение 30 дней ──────────
@@ -722,21 +780,28 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { result: r });
     }
 
-    // ── агенты (токены, правка, удаление) ──
-    if (p === '/api/agents/token' && method === 'POST' && isAdmin) {
+    // ── агенты: IP + листинг AIDA64 + relay (без токенов) ──
+    if (p === '/api/agents' && method === 'POST' && isAdmin) {
       const b = await readBody(req);
+      const ip = String(b.ip || '').trim();
+      if (!ip) return json(res, 400, { error: 'укажите IP-адрес ПК' });
       const a = {
-        id: uid(), name: b.name || 'agent-' + uid().slice(0, 4), hostname: '', token: uid() + uid(),
-        ip: '', os: '', version: '', online: false,
-        aida64Url: 'http://127.0.0.1:8090/', aida: [], aidaLatest: null,
-        cpuLoad: 0, cpuCores: 0, cpuTemp: 0,
-        ramUsed: 0, ramTotal: 0, ramTemp: 0, disks: [], rxBytes: 0, txBytes: 0, rxRate: 0, txRate: 0,
-        networks: [], lastSeen: 0, lastMetrics: 0, lastScan: 0, history: [], favorite: false, createdAt: Date.now(),
+        id: uid(),
+        name: String(b.name || '').trim() || ('ПК ' + ip),
+        ip,
+        aidaUrl: String(b.aidaUrl || '').trim(),
+        relayUrl: String(b.relayUrl || '').trim(),
+        pingTargets: Array.isArray(b.pingTargets) ? b.pingTargets.map((x) => String(x).trim()).filter(Boolean) : [],
+        online: false, latency: null, onlineSince: 0,
+        lastSeen: 0, lastPoll: 0, lastError: null,
+        latest: null, aida: [], targets: [],
+        favorite: false, createdAt: Date.now(),
       };
       db.agents.push(a);
-      pushEvent('info', 'agent', `Создан токен для агента «${a.name}»`);
+      pushEvent('info', 'agent', `Добавлен агент «${a.name}» (${a.ip})`);
       saveDb();
-      return json(res, 200, { agent: a, token: a.token });
+      pollAgent(a); // первый опрос сразу
+      return json(res, 200, a);
     }
     m = p.match(/^\/api\/agents\/([^/]+)$/);
     if (m && isAdmin) {
@@ -744,7 +809,8 @@ const server = http.createServer(async (req, res) => {
       if (!a) return json(res, 404, { error: 'агент не найден' });
       if (method === 'PUT' || method === 'PATCH') {
         const b = await readBody(req);
-        for (const k of ['name', 'favorite', 'aida64Url']) if (k in b) a[k] = b[k];
+        for (const k of ['name', 'ip', 'aidaUrl', 'relayUrl', 'favorite']) if (k in b) a[k] = b[k];
+        if (Array.isArray(b.pingTargets)) a.pingTargets = b.pingTargets.map((x) => String(x).trim()).filter(Boolean);
         saveDb();
         return json(res, 200, a);
       }
@@ -754,6 +820,14 @@ const server = http.createServer(async (req, res) => {
         saveDb();
         return json(res, 200, { ok: true });
       }
+    }
+    // принудительный опрос агента
+    m = p.match(/^\/api\/agents\/([^/]+)\/poll$/);
+    if (m && method === 'POST' && isAdmin) {
+      const a = db.agents.find((x) => x.id === m[1]);
+      if (!a) return json(res, 404, { error: 'агент не найден' });
+      await pollAgent(a);
+      return json(res, 200, a);
     }
     // ── история AIDA64 за выбранный период (5м…60д), прореженная до ≤1500 точек ──
     m = p.match(/^\/api\/agents\/([^/]+)\/aida$/);

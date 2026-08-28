@@ -225,7 +225,7 @@ export function Topbar() {
     if (!query) return { devs: [], ags: [] };
     const tagIds = tags.filter((t) => t.label.toLowerCase().includes(query)).map((t) => t.id);
     const devs = devices.filter((d) => d.name.toLowerCase().includes(query) || d.address.toLowerCase().includes(query) || d.tags.some((t) => tagIds.includes(t))).slice(0, 6);
-    const ags = agents.filter((a) => a.name.toLowerCase().includes(query) || (a.hostname || '').toLowerCase().includes(query) || a.ip.includes(query)).slice(0, 4);
+    const ags = agents.filter((a) => a.name.toLowerCase().includes(query) || (a.ip || '').includes(query)).slice(0, 4);
     return { devs, ags };
   }, [q, devices, agents, tags]);
 
@@ -269,7 +269,7 @@ export function Topbar() {
               <div className="border-t border-line-soft">
                 <div className="px-3.5 pb-1 pt-2.5 text-[10px] font-bold uppercase tracking-[0.14em] text-dim">Агенты</div>
                 {results.ags.map((a) => (
-                  <button key={a.id} onClick={() => { store.nav('agents', a.hostname || a.name); setQ(''); setFocus(false); }}
+                  <button key={a.id} onClick={() => { store.nav('agents', a.ip || a.name); setQ(''); setFocus(false); }}
                     className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left transition-colors hover:bg-raised/70">
                     <StatusDot status={a.online ? 'up' : 'down'} />
                     <span className="min-w-0 flex-1 truncate text-[13px] text-ink">{a.name}</span>

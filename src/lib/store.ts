@@ -71,7 +71,7 @@ export function useToastList(): Toast[] {
 
 export function defaultSettings(): Settings {
   return {
-    intervals: { ping: 60, http: 60, api: 180, rtsp: 120, sip: 120, glances: 60 },
+    intervals: { ping: 60, http: 60, api: 180, rtsp: 120, sip: 120, glances: 60, agent: 30 },
     heartbeat: 10,
     metrics: 15,
     lanScan: 300,
@@ -308,11 +308,14 @@ export const store = {
     // (disks, networks, history, aida) — гарантируем массивы, чтобы рендер не падал.
     const safeAgent = (a: Agent): Agent => ({
       ...a,
-      disks: Array.isArray(a.disks) ? a.disks : [],
-      networks: Array.isArray(a.networks) ? a.networks : [],
-      history: Array.isArray(a.history) ? a.history : [],
+      pingTargets: Array.isArray(a.pingTargets) ? a.pingTargets : [],
+      targets: Array.isArray(a.targets) ? a.targets : [],
       aida: Array.isArray(a.aida) ? a.aida : [],
-      aidaLatest: a.aidaLatest ?? null,
+      latest: a.latest ?? null,
+      latency: a.latency ?? null,
+      lastError: a.lastError ?? null,
+      relayUrl: a.relayUrl ?? '',
+      aidaUrl: a.aidaUrl ?? '',
     });
     const safeDevice = (d: Device): Device => ({
       ...d,
@@ -394,55 +397,47 @@ export const store = {
     store.updateDevice(id, { favorite: !d.favorite });
   },
 
-  // ── агенты ──
-  async createAgentToken(name: string): Promise<{ token: string; agent: Agent } | null> {
+  // ── агенты (IP + листинг AIDA64 + relay, без токенов) ──
+  async addAgent(d: { name: string; ip: string; aidaUrl: string; relayUrl?: string; pingTargets?: string[] }): Promise<Agent | null> {
     if (state.apiMode === 'server') {
       try {
-        const r = await api.createAgentToken(name);
+        const a = await api.addAgent(d);
         await syncAll();
-        return { token: r.token, agent: r.agent };
+        return a;
       } catch (e) {
-        useToasts.push('warn', e instanceof Error ? e.message : 'Не удалось создать токен');
+        useToasts.push('warn', e instanceof Error ? e.message : 'Не удалось добавить агента');
         return null;
       }
     }
     const agent: Agent = {
       id: uid('ag'),
-      name: name || 'agent-' + uid('x').slice(-4),
-      hostname: '',
-      token: genToken(),
-      ip: '',
-      os: '',
-      version: '',
+      name: d.name || 'ПК ' + d.ip,
+      ip: d.ip,
+      aidaUrl: d.aidaUrl,
+      relayUrl: d.relayUrl || '',
+      pingTargets: d.pingTargets || [],
       online: false,
-      cpuLoad: 0,
-      cpuCores: 0,
-      cpuTemp: 0,
-      ramUsed: 0,
-      ramTotal: 0,
-      ramTemp: 0,
-      disks: [],
-      rxBytes: 0,
-      txBytes: 0,
-      rxRate: 0,
-      txRate: 0,
-      networks: [],
+      latency: null,
+      onlineSince: 0,
       lastSeen: 0,
-      lastMetrics: 0,
-      lastScan: 0,
-      history: [],
+      lastError: null,
+      latest: null,
+      aida: [],
+      targets: [],
       favorite: false,
       createdAt: Date.now(),
     };
     set({ agents: [...state.agents, agent] });
-    pushEvent('info', 'agent', `Создан токен для агента «${agent.name}»`);
-    return { token: agent.token, agent };
+    pushEvent('info', 'agent', `Добавлен агент «${agent.name}» (${agent.ip})`);
+    return agent;
   },
 
   updateAgent(id: string, patch: Partial<Agent>) {
     if (state.apiMode === 'server') {
       const body: Record<string, unknown> = {};
-      for (const k of ['name', 'favorite', 'aida64Url'] as const) if (k in patch) body[k] = (patch as Record<string, unknown>)[k];
+      for (const k of ['name', 'ip', 'aidaUrl', 'relayUrl', 'favorite', 'pingTargets'] as const) {
+        if (k in patch) body[k] = (patch as Record<string, unknown>)[k];
+      }
       api.updateAgent(id, body).then(() => syncAll()).catch(() => {});
       return;
     }
@@ -452,6 +447,17 @@ export const store = {
   patchAgent(id: string, patch: Partial<Agent>) {
     if (state.apiMode === 'server') return;
     set({ agents: state.agents.map((a) => (a.id === id ? { ...a, ...patch } : a)) });
+  },
+
+  async pollAgent(id: string): Promise<void> {
+    if (state.apiMode === 'server') {
+      try {
+        await api.pollAgent(id);
+        await syncAll();
+      } catch (e) {
+        useToasts.push('warn', e instanceof Error ? e.message : 'Не удалось опросить агента');
+      }
+    }
   },
 
   removeAgent(id: string) {
