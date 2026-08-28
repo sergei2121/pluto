@@ -49,6 +49,21 @@ export interface LanNetwork {
   hosts: LanHost[];
 }
 
+/** Точка телеметрии AIDA64 (сенсорная веб-страница). null = нет значения. */
+export interface AidaPoint {
+  t: number; // unix ms
+  cpuUsage: number | null; // %  — пункт AIDA64 «CPUu»
+  cpuTemp: number | null; // °C — пункт «CPU»
+  ram: number | null; // %  — пункт «RAM»
+  ssdTemp: number | null; // °C — пункт «SSD»
+  diskC: number | null; // %  — пункт «UseC»
+  tx: number | null; // КБ/с — пункт «TX» (скорость загрузки адаптера)
+  rx: number | null; // КБ/с — пункт «RX» (скорость отдачи адаптера)
+  uptimeSec: number | null; // сек — пункт «Uptime»
+}
+
+export type AidaRange = '5m' | '30m' | '3h' | '24h' | '7d' | '30d' | '60d';
+
 export interface Agent {
   id: string;
   name: string;
@@ -58,6 +73,8 @@ export interface Agent {
   os: string;
   version: string;
   online: boolean;
+  aida64Url?: string; // адрес сенсорной веб-страницы AIDA64
+  aidaLatest?: AidaPoint | null;
   cpuLoad: number;
   cpuCores: number;
   cpuTemp: number;

@@ -424,7 +424,7 @@ export const store = {
   updateAgent(id: string, patch: Partial<Agent>) {
     if (state.apiMode === 'server') {
       const body: Record<string, unknown> = {};
-      for (const k of ['name', 'favorite'] as const) if (k in patch) body[k] = (patch as Record<string, unknown>)[k];
+      for (const k of ['name', 'favorite', 'aida64Url'] as const) if (k in patch) body[k] = (patch as Record<string, unknown>)[k];
       api.updateAgent(id, body).then(() => syncAll()).catch(() => {});
       return;
     }

@@ -24,6 +24,7 @@ using System.Runtime.InteropServices;
 using System.Net.WebSockets;
 using System.ServiceProcess;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -229,6 +230,133 @@ static class Collector
     }
 }
 
+// ─── Телеметрия AIDA64 (сенсорная веб-страница) ─────────────────────────────
+// Читает HTML, который AIDA64 отдаёт по HTTP (RemoteSensor, по умолчанию порт
+// 8090), и извлекает значения пунктов: CPUu, CPU, RAM, SSD, UseC, TX, RX, Uptime.
+class Aida
+{
+    public double? CpuUsage; // CPUu — загрузка ЦП, %
+    public double? CpuTemp;  // CPU  — температура ЦП, °C
+    public double? Ram;      // RAM  — занято ОЗУ, %
+    public double? SsdTemp;  // SSD  — температура SSD, °C
+    public double? DiskC;    // UseC — занято диска C, %
+    public double? Tx;       // TX   — скорость загрузки адаптера, КБ/с
+    public double? Rx;       // RX   — скорость отдачи адаптера, КБ/с
+    public double? Uptime;   // Uptime — время онлайн, сек
+
+    public bool HasAny
+    {
+        get
+        {
+            return CpuUsage.HasValue || CpuTemp.HasValue || Ram.HasValue || SsdTemp.HasValue
+                || DiskC.HasValue || Tx.HasValue || Rx.HasValue || Uptime.HasValue;
+        }
+    }
+
+    public string ToJson()
+    {
+        return "{\"cpuUsage\":" + N(CpuUsage) + ",\"cpuTemp\":" + N(CpuTemp) +
+               ",\"ram\":" + N(Ram) + ",\"ssdTemp\":" + N(SsdTemp) +
+               ",\"diskC\":" + N(DiskC) + ",\"tx\":" + N(Tx) + ",\"rx\":" + N(Rx) +
+               ",\"uptimeSec\":" + N(Uptime) + "}";
+    }
+
+    static string N(double? d)
+    {
+        return d.HasValue ? d.Value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) : "null";
+    }
+}
+
+static class AidaReader
+{
+    /// <summary>Скачивает страницу AIDA64 и разбирает значения. null = данных нет.</summary>
+    public static Aida Read(string url)
+    {
+        if (string.IsNullOrEmpty(url)) return null;
+        try
+        {
+            var req = (HttpWebRequest)WebRequest.Create(url);
+            req.Timeout = 6000;
+            req.ReadWriteTimeout = 6000;
+            string html;
+            using (var resp = (HttpWebResponse)req.GetResponse())
+            using (var sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
+                html = sr.ReadToEnd();
+
+            // убираем теги и HTML-сущности — остаётся плоский текст «имя значение»
+            string text = Regex.Replace(html, "<[^>]+>", " ");
+            text = Regex.Replace(text, "&nbsp;|&#160;|&deg;C?;", " ");
+
+            var a = new Aida();
+            a.CpuUsage = NumAfter(text, "CPUu");
+            a.CpuTemp = NumAfter(text, "CPU");
+            a.Ram = NumAfter(text, "RAM");
+            a.SsdTemp = NumAfter(text, "SSD");
+            a.DiskC = NumAfter(text, "UseC");
+            a.Tx = RateAfter(text, "TX");
+            a.Rx = RateAfter(text, "RX");
+            a.Uptime = UptimeAfter(text, "Uptime");
+            return a;
+        }
+        catch { return null; } // AIDA64 не отдаёт страницу — не ошибка, просто нет данных
+    }
+
+    static string Tail(string text, string label, int len)
+    {
+        var m = Regex.Match(text, @"\b" + label + @"\b", RegexOptions.IgnoreCase);
+        if (!m.Success) return null;
+        int start = m.Index + m.Length;
+        return text.Substring(start, Math.Min(len, text.Length - start));
+    }
+
+    static double? ParseNum(string s)
+    {
+        double v;
+        if (!double.TryParse(s.Replace(" ", "").Replace(',', '.'),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out v))
+            return null;
+        return v;
+    }
+
+    static double? NumAfter(string text, string label)
+    {
+        string tail = Tail(text, label, 40);
+        if (tail == null) return null;
+        var mv = Regex.Match(tail, @"(-?\d[\d\s]{0,10}(?:[.,]\d+)?)");
+        return mv.Success ? ParseNum(mv.Groups[1].Value) : (double?)null;
+    }
+
+    /// <summary>Скорость сети: нормализуем МБ/с и ГБ/с к КБ/с.</summary>
+    static double? RateAfter(string text, string label)
+    {
+        string tail = Tail(text, label, 40);
+        if (tail == null) return null;
+        var mv = Regex.Match(tail, @"(-?\d[\d\s]{0,10}(?:[.,]\d+)?)");
+        if (!mv.Success) return null;
+        var v = ParseNum(mv.Groups[1].Value);
+        if (!v.HasValue) return null;
+        string unitTail = tail.Substring(mv.Index + mv.Length);
+        if (Regex.IsMatch(unitTail, @"^\s*(?:МБ|MB)", RegexOptions.IgnoreCase)) v = v.Value * 1024;
+        else if (Regex.IsMatch(unitTail, @"^\s*(?:ГБ|GB)", RegexOptions.IgnoreCase)) v = v.Value * 1048576;
+        return Math.Round(v.Value, 1);
+    }
+
+    /// <summary>Uptime: «2 д. 3:42:11» или «3:42:11» → секунды.</summary>
+    static double? UptimeAfter(string text, string label)
+    {
+        string tail = Tail(text, label, 50);
+        if (tail == null) return null;
+        var mt = Regex.Match(tail, @"(?:(\d+)\s*(?:д|d)\.?\s*)?(\d{1,3}):(\d{1,2}):(\d{1,2})", RegexOptions.IgnoreCase);
+        if (!mt.Success) return null;
+        double d = mt.Groups[1].Success ? double.Parse(mt.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) : 0;
+        double h = double.Parse(mt.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
+        double mi = double.Parse(mt.Groups[3].Value, System.Globalization.CultureInfo.InvariantCulture);
+        double s = double.Parse(mt.Groups[4].Value, System.Globalization.CultureInfo.InvariantCulture);
+        return d * 86400 + h * 3600 + mi * 60 + s;
+    }
+}
+
 // ─── Конфигурация (agent.conf + аргументы) ──────────────────────────────────
 class Options
 {
@@ -236,6 +364,7 @@ class Options
     public string Token = "";
     public int Metrics = 5;
     public int Lan = 300;
+    public string Aida64 = "http://127.0.0.1:8090/"; // сенсорная веб-страница AIDA64
 
     public static Options Load(string[] args)
     {
@@ -256,6 +385,7 @@ class Options
                     else if (k == "token") o.Token = v;
                     else if (k == "metrics") { int x; if (int.TryParse(v, out x) && x > 0) o.Metrics = x; }
                     else if (k == "lan") { int x; if (int.TryParse(v, out x) && x > 0) o.Lan = x; }
+                    else if (k == "aida64") o.Aida64 = v;
                 }
                 AgentLog.Write("конфигурация загружена: " + p);
             }
@@ -271,8 +401,29 @@ class Options
             else if (k == "token") o.Token = v;
             else if (k == "metrics") { int x; if (int.TryParse(v, out x) && x > 0) o.Metrics = x; }
             else if (k == "lan") { int x; if (int.TryParse(v, out x) && x > 0) o.Lan = x; }
+            else if (k == "aida64") o.Aida64 = v;
         }
         return o;
+    }
+
+    /// <summary>Обновляет строку aida64= в agent.conf (URL может прилететь из ядра).</summary>
+    public static void PersistAida64(string url)
+    {
+        try
+        {
+            string p = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData) + "\\pluto\\agent.conf";
+            var lines = File.Exists(p)
+                ? new List<string>(File.ReadAllLines(p))
+                : new List<string>();
+            bool found = false;
+            for (int i = 0; i < lines.Count; i++)
+            {
+                if (lines[i].TrimStart().StartsWith("aida64=")) { lines[i] = "aida64=" + url; found = true; }
+            }
+            if (!found) lines.Add("aida64=" + url);
+            File.WriteAllLines(p, lines);
+        }
+        catch { }
     }
 }
 
@@ -306,7 +457,7 @@ class Worker
             AgentLog.Write("подключено к " + _o.Server);
 
             string hello = "{\"type\":\"hello\",\"hostname\":\"" + Json.Esc(Environment.MachineName) +
-                           "\",\"os\":\"Windows\",\"version\":\"1.8.1-cs\"}";
+                           "\",\"os\":\"Windows\",\"version\":\"1.8.4-cs\"}";
             await Send(ws, hello);
 
             // Приём сообщений — наблюдаемая Task. Любая ошибка внутри НЕ убивает
@@ -323,8 +474,16 @@ class Worker
                 string mj = CollectWithTimeout(10000);
                 if (mj != null)
                 {
-                    await Send(ws, "{\"type\":\"metrics\",\"data\":" + mj + "}");
-                    if (!firstLogged) { firstLogged = true; AgentLog.Write("первая метрика отправлена"); }
+                    // данные с сенсорной веб-страницы AIDA64 (если отдаёт страницу)
+                    string aida = null;
+                    try
+                    {
+                        var av = AidaReader.Read(_o.Aida64);
+                        if (av != null && av.HasAny) aida = av.ToJson();
+                    }
+                    catch { }
+                    await Send(ws, "{\"type\":\"metrics\",\"data\":" + mj + (aida != null ? ",\"aida\":" + aida : "") + "}");
+                    if (!firstLogged) { firstLogged = true; AgentLog.Write("первая метрика отправлена" + (aida != null ? " (+ AIDA64)" : "")); }
                 }
 
                 lanCounter += _o.Metrics;
@@ -408,7 +567,14 @@ class Worker
                 int l = ExtractInt(msg, "lanScan");
                 if (m > 0) _o.Metrics = m;
                 if (l > 0) _o.Lan = l;
-                AgentLog.Write("конфиг от ядра: метрики " + _o.Metrics + " с, LAN " + _o.Lan + " с");
+                string aid = ExtractString(msg, "aida64");
+                if (!string.IsNullOrEmpty(aid) && aid != _o.Aida64)
+                {
+                    _o.Aida64 = aid;
+                    Options.PersistAida64(aid);
+                    AgentLog.Write("AIDA64 URL обновлён из ядра: " + aid);
+                }
+                AgentLog.Write("конфиг от ядра: метрики " + _o.Metrics + " с, LAN " + _o.Lan + " с, AIDA64: " + _o.Aida64);
             }
             else if (msg.Contains("\"error\""))
             {
@@ -420,6 +586,19 @@ class Worker
             }
         }
         catch (Exception e) { AgentLog.Write("разбор сообщения: " + e.Message); }
+    }
+
+    static string ExtractString(string json, string key)
+    {
+        int i = json.IndexOf("\"" + key + "\"");
+        if (i < 0) return null;
+        i = json.IndexOf(':', i);
+        if (i < 0) return null;
+        int q1 = json.IndexOf('"', i + 1);
+        if (q1 < 0) return null;
+        int q2 = json.IndexOf('"', q1 + 1);
+        if (q2 < 0) return null;
+        return json.Substring(q1 + 1, q2 - q1 - 1);
     }
 
     static int ExtractInt(string json, string key)

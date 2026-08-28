@@ -1,5 +1,5 @@
 // ─── PLUTO: клиент REST API серверного ядра ─────────────────────────────────
-import type { Agent, Device, EventItem, Settings, Tag, User } from './types';
+import type { Agent, AidaPoint, Device, EventItem, Settings, Tag, User } from './types';
 
 let apiToken: string | null | undefined;
 const BASE = ''; // same-origin: ядро отдаёт и консоль, и API
@@ -104,6 +104,7 @@ export const api = {
   updateAgent: (id: string, b: Record<string, unknown>) => req<Agent>('PUT', `/api/agents/${id}`, b),
   deleteAgent: (id: string) => req<{ ok: boolean }>('DELETE', `/api/agents/${id}`),
   retokenAgent: (id: string) => req<{ token: string }>('POST', `/api/agents/${id}/retoken`),
+  agentAida: (id: string, range: string) => req<{ range: string; retentionDays: number; points: AidaPoint[] }>('GET', `/api/agents/${id}/aida?range=${encodeURIComponent(range)}`),
 
   addTag: (label: string, color: string) => req<Tag>('POST', '/api/tags', { label, color }),
   deleteTag: (id: string) => req<{ ok: boolean }>('DELETE', `/api/tags/${id}`),

@@ -11,7 +11,7 @@ import {
   issueSession, attachWs, DEFAULT_SETTINGS,
 } from './lib.js';
 
-const VERSION = '1.8.3';
+const VERSION = '1.8.4';
 const db = loadDb();
 const HTTP_PORT = Number(process.env.HTTP_PORT || 8080);
 const AGENT_PORT = Number(process.env.AGENT_PORT || 8443);
@@ -62,6 +62,7 @@ server=$Server
 token=$Token
 metrics=15
 lan=300
+aida64=http://127.0.0.1:8090/
 "@ | Set-Content -Path $conf -Encoding ASCII
 Write-Host "[pluto] конфигурация записана: $conf"
 
@@ -270,7 +271,10 @@ attachWs(agentServer, (conn, url, remoteIp) => {
   agent.lastSeen = Date.now();
   agent.ip = remoteIp || agent.ip;
   if (wasOffline) pushEvent('ok', 'agent', `Агент ${agent.name || agent.hostname} подключился (${agent.ip})`);
-  conn.send(JSON.stringify({ type: 'config', metrics: db.settings.metrics, lanScan: db.settings.lanScan }));
+  conn.send(JSON.stringify({
+    type: 'config', metrics: db.settings.metrics, lanScan: db.settings.lanScan,
+    aida64: agent.aida64Url || null,
+  }));
 
   conn.onMessage((raw) => {
     let msg;
@@ -286,6 +290,21 @@ attachWs(agentServer, (conn, url, remoteIp) => {
         cpu: msg.data.cpuLoad || 0,
         ram: msg.data.ramTotal ? ((msg.data.ramUsed || 0) / msg.data.ramTotal) * 100 : 0,
       }].slice(-120);
+      // данные с сенсорной веб-страницы AIDA64 (хранение — 60 дней)
+      if (msg.aida && typeof msg.aida === 'object') {
+        const now = Date.now();
+        const pt = {
+          t: now,
+          cpuUsage: numOrNull(msg.aida.cpuUsage), cpuTemp: numOrNull(msg.aida.cpuTemp),
+          ram: numOrNull(msg.aida.ram), ssdTemp: numOrNull(msg.aida.ssdTemp),
+          diskC: numOrNull(msg.aida.diskC), tx: numOrNull(msg.aida.tx),
+          rx: numOrNull(msg.aida.rx), uptimeSec: numOrNull(msg.aida.uptimeSec),
+        };
+        if (AIDA_KEYS.some((k) => pt[k] != null)) {
+          agent.aidaLatest = pt;
+          aidaAppend(agent, pt);
+        }
+      }
     } else if (msg.type === 'lan') {
       agent.networks = msg.networks || [];
       agent.lastScan = Date.now();
@@ -320,6 +339,51 @@ function readBody(req) {
 }
 
 const publicUser = (u) => ({ id: u.id, name: u.name, role: u.role, scope: u.scope, builtIn: u.builtIn, createdAt: u.createdAt });
+
+// ─── Телеметрия AIDA64: хранение 60 дней с ярусным сжатием ──────────────────
+// < 24 ч — каждая точка; 24 ч–7 дн — укрупнение до минут; > 7 дн — до часов.
+// Бюджет ≈ 15 тыс. точек на агента при полном 60-дневном окне.
+
+const AIDA_RETENTION_MS = 60 * 86400000;
+const AIDA_MAX_POINTS = 20000;
+const AIDA_KEYS = ['cpuUsage', 'cpuTemp', 'ram', 'ssdTemp', 'diskC', 'tx', 'rx', 'uptimeSec'];
+const AIDA_RANGE_MS = {
+  '5m': 5 * 60000, '30m': 30 * 60000, '3h': 3 * 3600000, '24h': 24 * 3600000,
+  '7d': 7 * 86400000, '30d': 30 * 86400000, '60d': 60 * 86400000,
+};
+
+const numOrNull = (v) => (typeof v === 'number' && isFinite(v) ? v : null);
+
+function mergeAidaPoints(dst, src) {
+  for (const k of AIDA_KEYS) {
+    if (src[k] == null) continue;
+    dst[k] = dst[k] == null ? src[k] : Math.round(((dst[k] + src[k]) / 2) * 10) / 10;
+  }
+  dst.t = src.t;
+}
+
+function aidaAppend(agent, pt) {
+  if (!Array.isArray(agent.aida)) agent.aida = [];
+  const arr = agent.aida;
+  const last = arr[arr.length - 1];
+  if (last) {
+    const age = pt.t - last.t;
+    const sameMinute = Math.floor(last.t / 60000) === Math.floor(pt.t / 60000);
+    const sameHour = Math.floor(last.t / 3600000) === Math.floor(pt.t / 3600000);
+    if ((age > 7 * 86400000 && sameHour) || (age > 86400000 && sameMinute)) {
+      mergeAidaPoints(last, pt); // данные старше суток/недели уплотняем в бакеты
+    } else {
+      arr.push(pt);
+    }
+  } else {
+    arr.push(pt);
+  }
+  if (arr.length > AIDA_MAX_POINTS) arr.splice(0, arr.length - AIDA_MAX_POINTS);
+  const cutoff = pt.t - AIDA_RETENTION_MS; // хранение — 60 дней
+  let i = 0;
+  while (i < arr.length && arr[i].t < cutoff) i++;
+  if (i > 0) arr.splice(0, i);
+}
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -399,7 +463,9 @@ const server = http.createServer(async (req, res) => {
     // ── состояние (полное для админа, фильтрованное для наблюдателя) ──
     if (p === '/api/state' && method === 'GET') {
       const visible = isAdmin ? db.devices : db.devices.filter((d) => user.scope.includes(d.type));
-      const agents = isAdmin || user.scope.includes('agent') ? db.agents : [];
+      const agentsRaw = isAdmin || user.scope.includes('agent') ? db.agents : [];
+      // 60-дневная история AIDA64 отдаётся только отдельным эндпоинтом — не грузим её в каждый поллинг
+      const agents = agentsRaw.map((a) => ({ ...a, aida: undefined }));
       return json(res, 200, {
         devices: visible,
         agents,
@@ -457,7 +523,9 @@ const server = http.createServer(async (req, res) => {
       const b = await readBody(req);
       const a = {
         id: uid(), name: b.name || 'agent-' + uid().slice(0, 4), hostname: '', token: uid() + uid(),
-        ip: '', os: '', version: '', online: false, cpuLoad: 0, cpuCores: 0, cpuTemp: 0,
+        ip: '', os: '', version: '', online: false,
+        aida64Url: 'http://127.0.0.1:8090/', aida: [], aidaLatest: null,
+        cpuLoad: 0, cpuCores: 0, cpuTemp: 0,
         ramUsed: 0, ramTotal: 0, ramTemp: 0, disks: [], rxBytes: 0, txBytes: 0, rxRate: 0, txRate: 0,
         networks: [], lastSeen: 0, lastMetrics: 0, lastScan: 0, history: [], favorite: false, createdAt: Date.now(),
       };
@@ -472,7 +540,7 @@ const server = http.createServer(async (req, res) => {
       if (!a) return json(res, 404, { error: 'агент не найден' });
       if (method === 'PUT' || method === 'PATCH') {
         const b = await readBody(req);
-        for (const k of ['name', 'favorite']) if (k in b) a[k] = b[k];
+        for (const k of ['name', 'favorite', 'aida64Url']) if (k in b) a[k] = b[k];
         saveDb();
         return json(res, 200, a);
       }
@@ -482,6 +550,30 @@ const server = http.createServer(async (req, res) => {
         saveDb();
         return json(res, 200, { ok: true });
       }
+    }
+    // ── история AIDA64 за выбранный период (5м…60д), прореженная до ≤1500 точек ──
+    m = p.match(/^\/api\/agents\/([^/]+)\/aida$/);
+    if (m && method === 'GET') {
+      const a = db.agents.find((x) => x.id === m[1]);
+      if (!a) return json(res, 404, { error: 'агент не найден' });
+      if (!isAdmin && !user.scope.includes('agent')) return json(res, 403, { error: 'нет доступа к агентам' });
+      const rq = url.searchParams.get('range');
+      const range = AIDA_RANGE_MS[rq] ? rq : '5m';
+      const cutoff = Date.now() - AIDA_RANGE_MS[range];
+      let pts = (a.aida || []).filter((x) => x.t >= cutoff);
+      if (pts.length > 1500) {
+        const bw = AIDA_RANGE_MS[range] / 1500;
+        const out = [];
+        let cur = null, bi = -1;
+        for (const pt of pts) {
+          const idx = Math.floor((pt.t - cutoff) / bw);
+          if (idx !== bi) { if (cur) out.push(cur); cur = { ...pt }; bi = idx; }
+          else mergeAidaPoints(cur, pt);
+        }
+        if (cur) out.push(cur);
+        pts = out;
+      }
+      return json(res, 200, { range, retentionDays: 60, points: pts });
     }
     m = p.match(/^\/api\/agents\/([^/]+)\/retoken$/);
     if (m && method === 'POST' && isAdmin) {
