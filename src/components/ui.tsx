@@ -1,8 +1,28 @@
 // ─── PLUTO: UI-кит ───────────────────────────────────────────────────────────
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Check, AlertTriangle, Bell, Activity, X, Inbox, Copy } from 'lucide-react';
+import {
+  Check, AlertTriangle, Bell, Activity, X, Inbox, Copy,
+  Send, Tag, Users, Mail, Rocket, Monitor, Server, Star, Settings as SettingsIcon,
+} from 'lucide-react';
 import { cls, timeAgo } from '../lib/util';
 import type { DeviceStatus } from '../lib/types';
+
+/** Имена иконок, которые можно передавать в Panel строкой */
+const PANEL_ICONS: Record<string, ReactNode> = {
+  send: <Send className="h-4 w-4" />,
+  alert: <AlertTriangle className="h-4 w-4" />,
+  tag: <Tag className="h-4 w-4" />,
+  users: <Users className="h-4 w-4" />,
+  mail: <Mail className="h-4 w-4" />,
+  bell: <Bell className="h-4 w-4" />,
+  rocket: <Rocket className="h-4 w-4" />,
+  agents: <Monitor className="h-4 w-4" />,
+  server: <Server className="h-4 w-4" />,
+  activity: <Activity className="h-4 w-4" />,
+  star: <Star className="h-4 w-4" />,
+  settings: <SettingsIcon className="h-4 w-4" />,
+  inbox: <Inbox className="h-4 w-4" />,
+};
 
 export function Panel({
   title, icon, right, children, className, bodyClass, delay = 0,
@@ -10,6 +30,7 @@ export function Panel({
   title?: string; icon?: ReactNode; right?: ReactNode; children: ReactNode;
   className?: string; bodyClass?: string; delay?: number;
 }) {
+  const iconEl = typeof icon === 'string' ? PANEL_ICONS[icon] ?? null : icon;
   return (
     <section
       className={cls('rise rounded-xl border border-line bg-panel/90 shadow-[0_8px_30px_-12px_rgba(5,8,20,.8)]', className)}
@@ -17,7 +38,7 @@ export function Panel({
     >
       {title && (
         <header className="flex items-center gap-2.5 border-b border-line-soft px-4 py-3">
-          {icon && <span className="text-vio">{icon}</span>}
+          {iconEl && <span className="text-vio">{iconEl}</span>}
           <h2 className="font-display text-[11px] font-semibold uppercase tracking-[0.14em] text-mut">{title}</h2>
           <div className="ml-auto flex items-center gap-2">{right}</div>
         </header>
