@@ -12,7 +12,7 @@ import {
   issueSession, attachWs, DEFAULT_SETTINGS,
 } from './lib.js';
 
-const VERSION = '1.9.1';
+const VERSION = '1.9.2';
 const db = loadDb();
 const HTTP_PORT = Number(process.env.HTTP_PORT || 8080);
 const AGENT_PORT = Number(process.env.AGENT_PORT || 8443);
@@ -359,8 +359,9 @@ function parseAidaLine(text) {
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;|&#160;|&deg;C?;/g, ' ')
     .replace(/\s+/g, ' ');
+  // значение может идти сразу, через двоеточие или «=»: «CPUu 3%», «CPUu: 3 %», «CPUu = 3»
   const num = (label) => {
-    const re = new RegExp('\\b' + label + '\\s+(-?\\d+(?:[.,]\\d+)?)', 'i');
+    const re = new RegExp('\\b' + label + '\\b\\s*[:=]?\\s*(-?\\d+(?:[.,]\\d+)?)', 'i');
     const m = s.match(re);
     return m ? parseFloat(m[1].replace(',', '.')) : null;
   };
@@ -419,6 +420,59 @@ async function relayPing(agent, ips) {
   return [];
 }
 
+const isLoopbackUrl = (u) => /^https?:\/\/(127\.|localhost|0\.0\.0\.0|\[::1?\])/i.test(String(u || '').trim());
+
+/**
+ * Чтение листинга AIDA64 с выбором маршрута:
+ *  - если адрес локальный (127.0.0.1/localhost) и у агента настроен relay —
+ *    страницу открывает relay-сервис, стоящий на той же Windows-машине
+ *    (из контейнера сервера 127.0.0.1 недостижим — это самая частая причина
+ *    «данные не собираются»);
+ *  - иначе сервер открывает страницу напрямую.
+ * Возвращает { html, via, url } или бросает ошибку с человекочитаемой причиной.
+ */
+async function fetchAidaListing(agent) {
+  const url = String(agent.aidaUrl || '').trim();
+  if (!url) throw new Error('не задан адрес листинга AIDA64');
+
+  if (isLoopbackUrl(url) && agent.relayUrl) {
+    const base = String(agent.relayUrl).replace(/\/+$/, '');
+    try {
+      const html = await fetchText(base + '/fetch?url=' + encodeURIComponent(url), 15000);
+      return { html, via: 'relay', url };
+    } catch (e) {
+      throw new Error('loopback-адрес, relay не ответил: ' + (e.message || e));
+    }
+  }
+  if (isLoopbackUrl(url)) {
+    throw new Error('адрес ' + url + ' локальный — сервер не может его открыть из контейнера. Укажите IP Windows-машины (http://<IP>:8090/) или настройте relay');
+  }
+  const html = await fetchText(url, 7000);
+  return { html, via: 'direct', url };
+}
+
+/** Диагностика источника AIDA64 — то же, что делает опрос, но с подробным отчётом. */
+async function testAidaSource(agent) {
+  try {
+    const { html, via, url } = await fetchAidaListing(agent);
+    const parsed = parseAidaLine(html);
+    parsed.t = Date.now();
+    const recognized = AGENT_AIDA_KEYS.filter((k) => parsed[k] != null);
+    const plain = String(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    return {
+      ok: recognized.length > 0,
+      url, via,
+      bytes: html.length,
+      sample: plain.slice(0, 300),
+      parsed,
+      recognized,
+      missing: AGENT_AIDA_KEYS.filter((k) => parsed[k] == null),
+    };
+  } catch (e) {
+    return { ok: false, url: agent.aidaUrl || '', via: null, error: e.message || String(e) };
+  }
+}
+
 /** Полный опрос агента: uptime-пинг + листинг AIDA64 + relay-пинги устройств. */
 async function pollAgent(agent, forceAida) {
   const now = Date.now();
@@ -447,17 +501,17 @@ async function pollAgent(agent, forceAida) {
   if (agent.aidaUrl && (forceAida || now - (agent.lastAida || 0) >= aidaIv)) {
     agent.lastAida = now;
     try {
-      const html = await fetchText(agent.aidaUrl, 7000);
+      const { html, via } = await fetchAidaListing(agent);
       const pt = parseAidaLine(html);
       pt.t = Date.now();
       if (AGENT_AIDA_KEYS.some((k) => pt[k] != null)) {
         agent.latest = pt;
         aidaAppend(agent, pt);
         agent.lastError = null;
-        console.log(`[pluto] AIDA «${agent.name}»: CPU ${pt.cpuUsage ?? '—'}% · ${pt.cpuTemp ?? '—'}°C · RAM ${pt.ram ?? '—'}% · SSD ${pt.ssdTemp ?? '—'}°C`);
+        console.log(`[pluto] AIDA «${agent.name}» [${via}]: CPU ${pt.cpuUsage ?? '—'}% · ${pt.cpuTemp ?? '—'}°C · RAM ${pt.ram ?? '—'}% · SSD ${pt.ssdTemp ?? '—'}°C`);
       } else {
-        agent.lastError = 'листинг AIDA64 загружен, но значения не распознаны';
-        console.log(`[pluto] AIDA «${agent.name}»: страница получена (${html.length} байт), значения не распознаны`);
+        agent.lastError = 'листинг AIDA64 загружен, но значения не распознаны — нажмите «Проверить листинг» в карточке агента';
+        console.log(`[pluto] AIDA «${agent.name}» [${via}]: страница получена (${html.length} байт), значения не распознаны`);
       }
     } catch (e) {
       agent.lastError = 'AIDA64: ' + (e.message || 'ошибка запроса');
@@ -856,6 +910,14 @@ const server = http.createServer(async (req, res) => {
       if (!a) return json(res, 404, { error: 'агент не найден' });
       await pollAgent(a, true);
       return json(res, 200, a);
+    }
+    // диагностика источника AIDA64: что реально приходит со страницы
+    m = p.match(/^\/api\/agents\/([^/]+)\/test-aida$/);
+    if (m && method === 'GET') {
+      const a = db.agents.find((x) => x.id === m[1]);
+      if (!a) return json(res, 404, { error: 'агент не найден' });
+      if (!isAdmin && !user.scope.includes('agent')) return json(res, 403, { error: 'нет доступа к агентам' });
+      return json(res, 200, await testAidaSource(a));
     }
     // ── история AIDA64 за выбранный период (5м…60д), прореженная до ≤1500 точек ──
     m = p.match(/^\/api\/agents\/([^/]+)\/aida$/);

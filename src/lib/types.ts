@@ -44,6 +44,19 @@ export interface AidaPoint {
   uptimeSec: number | null; // сек — пункт «Uptime»
 }
 
+/** Отчёт диагностики источника AIDA64 (что реально приходит со страницы). */
+export interface AidaTestReport {
+  ok: boolean;
+  url: string;
+  via: 'direct' | 'relay' | null;
+  error?: string;
+  bytes?: number;
+  sample?: string; // первые 300 символов страницы без тегов
+  parsed?: AidaPoint;
+  recognized?: string[];
+  missing?: string[];
+}
+
 /** Результат пинга одного IP (выполняется relay-сервисом внутри VLAN агента). */
 export interface AgentPingResult {
   ip: string;

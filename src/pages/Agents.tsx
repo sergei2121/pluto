@@ -2,12 +2,70 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Plus, Star, Trash2, Pencil, Activity, Cpu, Thermometer, MemoryStick, HardDrive,
-  Network, RefreshCw, ExternalLink, ChevronDown, X, LineChart, Radar,
+  Network, RefreshCw, ExternalLink, ChevronDown, X, LineChart, Radar, Search, AlertTriangle,
 } from 'lucide-react';
 import { Drawer, EmptyState, Modal, Panel, StatusDot, TimeAgo, Field } from '../components/ui';
 import { usePluto, useCurrentUser, visibleAgents, store, useToasts } from '../lib/store';
+import { api } from '../lib/api';
 import { cls, fmtNet } from '../lib/util';
-import type { Agent } from '../lib/types';
+import type { Agent, AidaTestReport } from '../lib/types';
+
+const AIDA_FIELDS: { k: string; label: string }[] = [
+  { k: 'cpuUsage', label: 'CPUu' }, { k: 'cpuTemp', label: 'CPU' }, { k: 'ram', label: 'RAM' },
+  { k: 'ssdTemp', label: 'SSD' }, { k: 'diskC', label: 'UseC' }, { k: 'usedSpaceC', label: 'UsedSpaceC' },
+  { k: 'tx', label: 'TX' }, { k: 'rx', label: 'RX' }, { k: 'uptimeSec', label: 'Uptime' },
+];
+
+const isLoopback = (u: string) => /^https?:\/\/(127\.|localhost|0\.0\.0\.0|\[::1?\])/i.test((u || '').trim());
+
+/** Диагностика источника AIDA64: что реально приходит со страницы. */
+function TestAidaPanel({ agent }: { agent: Agent }) {
+  const [busy, setBusy] = useState(false);
+  const [rep, setRep] = useState<AidaTestReport | null>(null);
+
+  const run = async () => {
+    setBusy(true);
+    try { setRep(await api.testAgentAida(agent.id)); }
+    catch (e) { setRep({ ok: false, url: agent.aidaUrl || '', via: null, error: e instanceof Error ? e.message : String(e) }); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="space-y-2">
+      <button className="btn-ghost !py-1" onClick={run} disabled={busy || !agent.aidaUrl}>
+        <Search className={cls('h-3.5 w-3.5', busy && 'animate-pulse')} /> Проверить листинг
+      </button>
+
+      {rep && (
+        <div className={cls('rise rounded-lg border px-3 py-2.5', rep.ok ? 'border-ok/30 bg-ok/10' : 'border-crit/30 bg-crit/10')}>
+          <div className="flex items-center gap-1.5">
+            {rep.ok ? <Activity className="h-3.5 w-3.5 text-ok" /> : <AlertTriangle className="h-3.5 w-3.5 text-crit" />}
+            <span className={cls('text-[12px] font-bold', rep.ok ? 'text-ok' : 'text-crit')}>
+              {rep.ok ? `Распознано ${rep.recognized?.length ?? 0} из ${AIDA_FIELDS.length} полей · ${rep.via === 'relay' ? 'через relay' : 'напрямую'} · ${rep.bytes ?? 0} Б` : 'Источник недоступен'}
+            </span>
+          </div>
+
+          {!rep.ok && rep.error && <p className="mt-1.5 text-[11.5px] leading-snug text-crit/90">{rep.error}</p>}
+
+          {rep.ok && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {AIDA_FIELDS.map((f) => {
+                const on = rep.recognized?.includes(f.k);
+                return (
+                  <span key={f.k} className={cls('rounded border px-1.5 py-0.5 font-mono text-[9.5px] font-semibold', on ? 'border-ok/40 bg-ok/15 text-ok' : 'border-line bg-raised/40 text-dim')}>
+                    {f.label}{on && rep.parsed ? ` ${String((rep.parsed as unknown as Record<string, unknown>)[f.k])}` : ''}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+
+          {rep.sample && <pre className="mt-2 max-h-20 overflow-auto rounded bg-void/40 px-2 py-1.5 font-mono text-[10px] leading-snug text-mut">{rep.sample}</pre>}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const LINE_COLORS = ['#8f7df0', '#7ba4e6', '#5fc6d8', '#55c795', '#dfa65e', '#e07a80', '#d98bb0', '#98a4c8', '#8bc46a', '#e0945e'];
 
@@ -511,6 +569,13 @@ export default function Agents() {
               <p className="rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-[12px] font-semibold text-warn">{drawerAgent.lastError}</p>
             )}
 
+            {isLoopback(drawerAgent.aidaUrl) && !drawerAgent.relayUrl && (
+              <p className="flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-[11.5px] leading-snug text-warn">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                Адрес листинга {drawerAgent.aidaUrl} локальный — сервер не откроет его из контейнера. Укажите IP машины (http://&lt;IP&gt;:8090/) или настройте relay.
+              </p>
+            )}
+
             <div>
               <div className="mb-2 flex items-center justify-between">
                 <h4 className="text-[11px] font-bold uppercase tracking-[0.14em] text-dim">Показания AIDA64</h4>
@@ -541,6 +606,7 @@ export default function Agents() {
                   Показаний пока нет{drawerAgent.aidaUrl ? ' — листинг ещё не прочитан.' : ' — не указана ссылка на листинг AIDA64.'}
                 </p>
               )}
+              {isAdmin && <div className="mt-2"><TestAidaPanel agent={drawerAgent} /></div>}
             </div>
 
             <div>
