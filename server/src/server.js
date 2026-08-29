@@ -321,6 +321,50 @@ function mergeAidaPoints(dst, src) {
   dst.t = src.t;
 }
 
+/** Усреднение числовых полей двух точек ряда (t берётся из более свежей). */
+function mergeSeriesPoints(dst, src) {
+  for (const k of Object.keys(src)) {
+    if (k === 't') continue;
+    const v = src[k];
+    if (typeof v !== 'number' || !isFinite(v)) continue;
+    dst[k] = dst[k] == null ? v : Math.round(((dst[k] + v) / 2) * 10) / 10;
+  }
+  dst.t = src.t;
+}
+
+/**
+ * Сжатие длинного ряда для хранения 30–60 дней при ограниченном бюджете точек:
+ *   < 24 ч  — каждая точка как есть;
+ *   24 ч–7 дн — укрупнение до минутных бакетов;
+ *   > 7 дн  — до часовых.
+ * Вызывается, когда ряд превышает ~19 тыс. точек.
+ */
+function compactSeries(arr, now) {
+  const d1 = now - 86400000;
+  const d7 = now - 7 * 86400000;
+  const raw = [];
+  const byMin = new Map();
+  const byHour = new Map();
+  for (const pt of arr) {
+    if (pt.t >= d1) {
+      raw.push(pt);
+    } else if (pt.t >= d7) {
+      const k = Math.floor(pt.t / 60000);
+      const ex = byMin.get(k);
+      if (ex) mergeSeriesPoints(ex, pt);
+      else byMin.set(k, { ...pt });
+    } else {
+      const k = Math.floor(pt.t / 3600000);
+      const ex = byHour.get(k);
+      if (ex) mergeSeriesPoints(ex, pt);
+      else byHour.set(k, { ...pt });
+    }
+  }
+  const out = [...byHour.values(), ...byMin.values(), ...raw];
+  out.sort((a, b) => a.t - b.t);
+  return out;
+}
+
 function aidaAppend(agent, pt) {
   if (!Array.isArray(agent.aida)) agent.aida = [];
   const arr = agent.aida;
