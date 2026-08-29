@@ -12,7 +12,7 @@ import {
   issueSession, attachWs, DEFAULT_SETTINGS,
 } from './lib.js';
 
-const VERSION = '1.9.2';
+const VERSION = '1.9.3';
 const db = loadDb();
 const HTTP_PORT = Number(process.env.HTTP_PORT || 8080);
 const AGENT_PORT = Number(process.env.AGENT_PORT || 8443);
@@ -353,32 +353,82 @@ function aidaAppend(agent, pt) {
 
 const AGENT_AIDA_KEYS = ['cpuUsage', 'cpuTemp', 'ram', 'ssdTemp', 'diskC', 'usedSpaceC', 'tx', 'rx', 'uptimeSec'];
 
-/** Разбор фиксированной строки листинга AIDA64. */
-function parseAidaLine(text) {
-  const s = String(text)
+/** Очистка фрагмента RemoteSensor-страницы: сущности, теги, пробелы. */
+function cleanAidaText(t) {
+  return String(t)
     .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;|&#160;|&deg;C?;/g, ' ')
-    .replace(/\s+/g, ' ');
-  // значение может идти сразу, через двоеточие или «=»: «CPUu 3%», «CPUu: 3 %», «CPUu = 3»
+    .replace(/&nbsp;|&#160;/g, ' ')
+    .replace(/&deg;C?;/gi, '°')
+    .replace(/&amp;/g, '&')
+    .replace(/&#(\d+);/g, (_, c) => String.fromCharCode(+c))
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const AIDA_LABEL_MAP = {
+  cpuu: 'cpuUsage', cpu: 'cpuTemp', ram: 'ram', ssd: 'ssdTemp',
+  usec: 'diskC', usedspacec: 'usedSpaceC', tx: 'tx', rx: 'rx',
+};
+
+/** «01:01:48» / «2 д. 03:42:11» / «2d 03:42:11» → секунды. */
+function uptimeToSec(v) {
+  const s = String(v).trim();
+  const hms = /(\d{1,3}):(\d{1,2}):(\d{1,2})/.exec(s);
+  if (!hms) return null;
+  const dm = /(\d+)\s*(?:д|d)\.?/i.exec(s);
+  return (dm ? parseInt(dm[1], 10) : 0) * 86400 +
+    parseInt(hms[1], 10) * 3600 + parseInt(hms[2], 10) * 60 + parseInt(hms[3], 10);
+}
+
+/**
+ * Разбор страницы AIDA64 RemoteSensor.
+ * Штатная структура — спаны Simple1…SimpleN, внутри каждого «Метка Значение»:
+ *   <span id="Simple1">CPUu 5%</span>
+ *   <span id="Simple6">UsedSpaceC 101&nbsp;GB</span>
+ *   <span id="Simple9">Uptime 01:01:48</span>
+ * Сначала значения вынимаются из спанов (детерминированно); если спанов нет —
+ * запасной поиск меток по всему тексту страницы.
+ */
+function parseAidaLine(html) {
+  const out = { cpuUsage: null, cpuTemp: null, ram: null, ssdTemp: null, diskC: null, usedSpaceC: null, tx: null, rx: null, uptimeSec: null };
+
+  const spanRe = /<span[^>]*id="Simple\d+"[^>]*>([\s\S]*?)<\/span>/gi;
+  const items = [];
+  let m;
+  while ((m = spanRe.exec(html))) {
+    const t = cleanAidaText(m[1]);
+    if (t) items.push(t);
+  }
+
+  const setVal = (label, numStr) => {
+    const key = AIDA_LABEL_MAP[label.toLowerCase()];
+    if (!key) return;
+    const v = parseFloat(numStr.replace(',', '.'));
+    if (isFinite(v)) out[key] = v;
+  };
+
+  if (items.length) {
+    for (const it of items) {
+      const um = /^uptime\s+(.+)$/i.exec(it);
+      if (um) { out.uptimeSec = uptimeToSec(um[1]); continue; }
+      const pm = /^([A-Za-z]+)\s*[:=]?\s*(-?\d+(?:[.,]\d+)?)/.exec(it);
+      if (pm) setVal(pm[1], pm[2]);
+    }
+    return out;
+  }
+
+  // запасной вариант: поиск «Метка Значение» по очищенному тексту всей страницы
+  const s = cleanAidaText(html);
   const num = (label) => {
     const re = new RegExp('\\b' + label + '\\b\\s*[:=]?\\s*(-?\\d+(?:[.,]\\d+)?)', 'i');
-    const m = s.match(re);
-    return m ? parseFloat(m[1].replace(',', '.')) : null;
+    const mm = s.match(re);
+    return mm ? parseFloat(mm[1].replace(',', '.')) : null;
   };
-  let uptimeSec = null;
   const um = s.match(/Uptime\s+((?:\d+\s*(?:д|d)\.?\s*)?\d{1,3}:\d{1,2}:\d{1,2})/i);
-  if (um) {
-    const dm = /(\d+)\s*(?:д|d)\.?/.exec(um[1]);
-    const hms = /(\d{1,3}):(\d{1,2}):(\d{1,2})/.exec(um[1]);
-    if (hms) {
-      uptimeSec = (dm ? parseInt(dm[1]) : 0) * 86400 +
-        parseInt(hms[1]) * 3600 + parseInt(hms[2]) * 60 + parseInt(hms[3]);
-    }
-  }
-  return {
-    cpuUsage: num('CPUu'), cpuTemp: num('CPU'), ram: num('RAM'), ssdTemp: num('SSD'),
-    diskC: num('UseC'), usedSpaceC: num('UsedSpaceC'), tx: num('TX'), rx: num('RX'), uptimeSec,
-  };
+  out.cpuUsage = num('CPUu'); out.cpuTemp = num('CPU'); out.ram = num('RAM'); out.ssdTemp = num('SSD');
+  out.diskC = num('UseC'); out.usedSpaceC = num('UsedSpaceC'); out.tx = num('TX'); out.rx = num('RX');
+  out.uptimeSec = um ? uptimeToSec(um[1]) : null;
+  return out;
 }
 
 /** Разворачивает цель в список IP: «1.2.3.4», «1.2.3.10-20», «1.2.3.0/24». */
