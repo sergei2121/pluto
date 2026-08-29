@@ -279,6 +279,36 @@ func main() {
 		c.JSON(200, out)
 	})
 
+	// Чтение произвольной веб-страницы по запросу ядра PLUTO. Ключевой случай —
+	// сенсорная страница AIDA64 на http://127.0.0.1:8090/: из контейнера сервера
+	// loopback недостижим, а этот сервис стоит на той же машине и открывает её
+	// локально, отдавая содержимое ядру.
+	// GET /fetch?url=http://127.0.0.1:8090/ → тело страницы (text/plain)
+	r.GET("/fetch", func(c *gin.Context) {
+		target := c.Query("url")
+		if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+			c.JSON(400, gin.H{"error": "url must start with http:// or https://"})
+			return
+		}
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Get(target)
+		if err != nil {
+			c.JSON(502, gin.H{"error": err.Error()})
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			c.JSON(502, gin.H{"error": fmt.Sprintf("HTTP %d", resp.StatusCode)})
+			return
+		}
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024)) // не более 256 КБ
+		if err != nil {
+			c.JSON(502, gin.H{"error": err.Error()})
+			return
+		}
+		c.Data(200, "text/plain; charset=utf-8", body)
+	})
+
 	// Health-check.
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"ok": true, "agents": len(agents)})

@@ -1,5 +1,5 @@
 // ─── PLUTO: клиент REST API серверного ядра ─────────────────────────────────
-import type { Agent, AidaPoint, Device, EventItem, GlancesDevice, GlancesPoint, GlancesRange, Settings, Tag, User } from './types';
+import type { Agent, AidaPoint, AidaTestReport, Device, EventItem, GlancesDevice, GlancesPoint, GlancesRange, Settings, Tag, User } from './types';
 
 let apiToken: string | null | undefined;
 const BASE = ''; // same-origin: ядро отдаёт и консоль, и API
@@ -106,6 +106,7 @@ export const api = {
   updateAgent: (id: string, b: Record<string, unknown>) => req<Agent>('PUT', `/api/agents/${id}`, b),
   deleteAgent: (id: string) => req<{ ok: boolean }>('DELETE', `/api/agents/${id}`),
   pollAgent: (id: string) => req<Agent>('POST', `/api/agents/${id}/poll`),
+  testAgentAida: (id: string) => req<AidaTestReport>('GET', `/api/agents/${id}/test-aida`),
   agentAida: (id: string, range: string) => req<{ range: string; retentionDays: number; points: AidaPoint[] }>('GET', `/api/agents/${id}/aida?range=${encodeURIComponent(range)}`),
 
   // Glances (Bars): ядро само опрашивает веб-страницы, агент не нужен
