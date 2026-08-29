@@ -146,7 +146,7 @@ function stepAgent(id: string, now: number) {
 
   // листинг AIDA64 — отдельный интервал (по умолчанию раз в минуту)
   const s = getState();
-  const aidaIv = Math.max(15, s.settings.intervals.aida ?? 60) * 1000;
+  const aidaIv = Math.max(10, s.settings.intervals.aida ?? 10) * 1000;
   const dueAida = now - (a.lastAida || 0) >= aidaIv;
 
   const ms = Math.round(rnd(1, 40));

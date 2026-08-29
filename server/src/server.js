@@ -12,7 +12,7 @@ import {
   issueSession, attachWs, DEFAULT_SETTINGS,
 } from './lib.js';
 
-const VERSION = '1.9.3';
+const VERSION = '1.9.4';
 const db = loadDb();
 const HTTP_PORT = Number(process.env.HTTP_PORT || 8080);
 const AGENT_PORT = Number(process.env.AGENT_PORT || 8443);
@@ -547,7 +547,7 @@ async function pollAgent(agent, forceAida) {
 
   // 2) листинг AIDA64 — отдельный интервал (по умолчанию раз в минуту),
   //    чтобы частый пинг (uptime) не нагружал сенсорную страницу
-  const aidaIv = Math.max(15, (db.settings.intervals && db.settings.intervals.aida) || 60) * 1000;
+  const aidaIv = Math.max(10, (db.settings.intervals && db.settings.intervals.aida) || 10) * 1000;
   if (agent.aidaUrl && (forceAida || now - (agent.lastAida || 0) >= aidaIv)) {
     agent.lastAida = now;
     try {
