@@ -246,8 +246,15 @@ setInterval(() => {
   // пингует устройства внутри VLAN. Интервал — из настроек (по умолчанию 30 с).
   const aiv = Math.max(10, (db.settings.intervals && db.settings.intervals.agent) || 30) * 1000;
   for (const a of db.agents) {
+    // страховка: если опрос завис (флаг висит дольше 3 минут) — отпускаем его,
+    // иначе агент замёрз бы навсегда
+    if (a.polling && a.pollStarted && now - a.pollStarted > 180000) {
+      console.log(`[pluto] опрос «${a.name}» завис — флаг сброшен`);
+      a.polling = false;
+    }
     if (!a.polling && now - (a.lastPoll || 0) >= aiv) {
       a.polling = true;
+      a.pollStarted = now;
       pollAgent(a).finally(() => { a.polling = false; a.lastPoll = Date.now(); });
     }
   }
@@ -447,11 +454,14 @@ async function pollAgent(agent, forceAida) {
         agent.latest = pt;
         aidaAppend(agent, pt);
         agent.lastError = null;
+        console.log(`[pluto] AIDA «${agent.name}»: CPU ${pt.cpuUsage ?? '—'}% · ${pt.cpuTemp ?? '—'}°C · RAM ${pt.ram ?? '—'}% · SSD ${pt.ssdTemp ?? '—'}°C`);
       } else {
         agent.lastError = 'листинг AIDA64 загружен, но значения не распознаны';
+        console.log(`[pluto] AIDA «${agent.name}»: страница получена (${html.length} байт), значения не распознаны`);
       }
     } catch (e) {
       agent.lastError = 'AIDA64: ' + (e.message || 'ошибка запроса');
+      console.log(`[pluto] AIDA «${agent.name}»: ${agent.lastError}`);
     }
   }
 
@@ -489,19 +499,30 @@ function fetchText(rawUrl, timeoutMs = 7000) {
     let u;
     try { u = new URL(rawUrl); } catch { return reject(new Error('некорректный адрес мониторинга')); }
     const lib = u.protocol === 'https:' ? https : http;
-    const r = lib.get(u, { timeout: timeoutMs }, (res) => {
+    let done = false;
+    // Абсолютный таймер: сокетный timeout Node срабатывает только при отсутствии
+    // активности, а «тихое» открытое соединение (AIDA64 держит keep-alive) без
+    // него висело бы вечно и блокировало все дальнейшие опросы агента.
+    const kill = setTimeout(() => {
+      if (!done) r.destroy(new Error('таймаут запроса страницы (' + timeoutMs + ' мс)'));
+    }, timeoutMs);
+    const finish = (fn) => (v) => { if (done) return; done = true; clearTimeout(kill); fn(v); };
+    const r = lib.get(u, {
+      timeout: timeoutMs,
+      headers: { 'User-Agent': 'pluto-core', 'Accept': '*/*', 'Connection': 'close' },
+    }, (res) => {
       if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
         res.resume();
-        return fetchText(new URL(res.headers.location, u).toString(), timeoutMs).then(resolve, reject);
+        return fetchText(new URL(res.headers.location, u).toString(), timeoutMs).then(finish(resolve), finish(reject));
       }
-      if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)); }
+      if (res.statusCode !== 200) { res.resume(); return finish(reject)(new Error(`HTTP ${res.statusCode}`)); }
       let data = '';
       res.setEncoding('utf8');
       res.on('data', (c) => (data += c));
-      res.on('end', () => resolve(data));
+      res.on('end', () => finish(resolve)(data));
     });
-    r.on('timeout', () => r.destroy(new Error('таймаут запроса страницы')));
-    r.on('error', (e) => reject(e));
+    r.on('timeout', () => r.destroy(new Error('таймаут ожидания ответа')));
+    r.on('error', (e) => finish(reject)(e));
   });
 }
 
