@@ -5,7 +5,7 @@
 
 import { getState, store, useToasts } from './store';
 import { api } from './api';
-import type { Device } from './types';
+import type { Agent, Device } from './types';
 import { clamp, fmtMs, hashStr, mulberry32, rnd, rndInt } from './util';
 
 let timer: number | null = null;
@@ -144,6 +144,11 @@ function stepAgent(id: string, now: number) {
     uptimeSec: (a.latest?.uptimeSec ?? 0) + 30,
   };
 
+  // листинг AIDA64 — отдельный интервал (по умолчанию раз в минуту)
+  const s = getState();
+  const aidaIv = Math.max(15, s.settings.intervals.aida ?? 60) * 1000;
+  const dueAida = now - (a.lastAida || 0) >= aidaIv;
+
   const ms = Math.round(rnd(1, 40));
   store.patchAgent(id, {
     online: true,
@@ -151,11 +156,12 @@ function stepAgent(id: string, now: number) {
     onlineSince: a.onlineSince || now,
     lastSeen: now,
     lastPoll: now,
-    latest: pt,
-    aida: [...(a.aida || []), pt].slice(-300),
+    latest: dueAida ? pt : a.latest,
+    aida: dueAida ? [...(a.aida || []), pt].slice(-300) : a.aida,
     latHist: [...(a.latHist || []), { t: now, ms }].slice(-480),
     lastError: null,
-  });
+    ...(dueAida ? { lastAida: now } : {}),
+  } as Partial<Agent>);
   if (!wasOnline) setAgentOnline(id);
 }
 

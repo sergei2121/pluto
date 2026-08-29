@@ -120,6 +120,7 @@ export interface Agent {
   onlineSince: number; // когда стал доступен (0 = офлайн) — для uptime-статистики
   lastSeen: number;
   lastPoll?: number; // последний опрос (планировщик)
+  lastAida?: number; // последнее чтение листинга AIDA64 (отдельный интервал)
   lastError: string | null;
   latest: AidaPoint | null; // последние показания AIDA64
   aida?: AidaPoint[]; // архив показаний (сервер отдаёт отдельным эндпоинтом)
@@ -153,7 +154,7 @@ export interface User {
 }
 
 export interface Settings {
-  intervals: Record<DeviceType | 'glances' | 'agent', number>;
+  intervals: Record<DeviceType | 'glances' | 'agent' | 'aida', number>;
   heartbeat: number;
   metrics: number;
   lanScan: number;

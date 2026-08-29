@@ -71,7 +71,7 @@ export function useToastList(): Toast[] {
 
 export function defaultSettings(): Settings {
   return {
-    intervals: { ping: 60, http: 60, api: 180, rtsp: 120, sip: 120, glances: 60, agent: 30 },
+    intervals: { ping: 60, http: 60, api: 180, rtsp: 120, sip: 120, glances: 60, agent: 30, aida: 60 },
     heartbeat: 10,
     metrics: 15,
     lanScan: 300,

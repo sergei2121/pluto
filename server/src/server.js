@@ -12,7 +12,7 @@ import {
   issueSession, attachWs, DEFAULT_SETTINGS,
 } from './lib.js';
 
-const VERSION = '1.9.0';
+const VERSION = '1.9.1';
 const db = loadDb();
 const HTTP_PORT = Number(process.env.HTTP_PORT || 8080);
 const AGENT_PORT = Number(process.env.AGENT_PORT || 8443);
@@ -413,7 +413,7 @@ async function relayPing(agent, ips) {
 }
 
 /** Полный опрос агента: uptime-пинг + листинг AIDA64 + relay-пинги устройств. */
-async function pollAgent(agent) {
+async function pollAgent(agent, forceAida) {
   const now = Date.now();
 
   // 1) пинг до IP агента — доступность / uptime
@@ -434,8 +434,11 @@ async function pollAgent(agent) {
   if (ping.ok && !wasOnline) pushEvent('ok', 'agent', `Агент «${agent.name}» (${agent.ip}) в сети`);
   if (!ping.ok && wasOnline) pushEvent('warn', 'agent', `Агент «${agent.name}» (${agent.ip}) недоступен`);
 
-  // 2) листинг AIDA64
-  if (agent.aidaUrl) {
+  // 2) листинг AIDA64 — отдельный интервал (по умолчанию раз в минуту),
+  //    чтобы частый пинг (uptime) не нагружал сенсорную страницу
+  const aidaIv = Math.max(15, (db.settings.intervals && db.settings.intervals.aida) || 60) * 1000;
+  if (agent.aidaUrl && (forceAida || now - (agent.lastAida || 0) >= aidaIv)) {
+    agent.lastAida = now;
     try {
       const html = await fetchText(agent.aidaUrl, 7000);
       const pt = parseAidaLine(html);
@@ -825,12 +828,12 @@ const server = http.createServer(async (req, res) => {
         return json(res, 200, { ok: true });
       }
     }
-    // принудительный опрос агента
+    // принудительный опрос агента (forceAida — датчик обновляется сразу, вне интервала)
     m = p.match(/^\/api\/agents\/([^/]+)\/poll$/);
     if (m && method === 'POST' && isAdmin) {
       const a = db.agents.find((x) => x.id === m[1]);
       if (!a) return json(res, 404, { error: 'агент не найден' });
-      await pollAgent(a);
+      await pollAgent(a, true);
       return json(res, 200, a);
     }
     // ── история AIDA64 за выбранный период (5м…60д), прореженная до ≤1500 точек ──

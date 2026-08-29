@@ -72,7 +72,7 @@ function PollingTab() {
   const settings = usePluto((s) => s.settings);
   const [draft, setDraft] = useState<TSettings>({ ...settings, intervals: { ...settings.intervals }, notifications: settings.notifications });
   const set = (p: Partial<TSettings>) => setDraft((d) => ({ ...d, ...p }));
-  const setInt = (k: DeviceType | 'glances' | 'agent', v: number) => setDraft((d) => ({ ...d, intervals: { ...d.intervals, [k]: v } }));
+  const setInt = (k: DeviceType | 'glances' | 'agent' | 'aida', v: number) => setDraft((d) => ({ ...d, intervals: { ...d.intervals, [k]: v } }));
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -83,6 +83,7 @@ function PollingTab() {
           ))}
           <NumField label="Glances (Bars) — интервал" value={draft.intervals.glances ?? 60} onChange={(v) => setInt('glances', v)} min={15} suffix="сек" />
           <NumField label="Агенты — интервал опроса" value={draft.intervals.agent ?? 30} onChange={(v) => setInt('agent', v)} min={10} suffix="сек" />
+          <NumField label="Датчик AIDA64 — интервал" value={draft.intervals.aida ?? 60} onChange={(v) => setInt('aida', v)} min={15} suffix="сек" />
         </div>
       </Panel>
 
