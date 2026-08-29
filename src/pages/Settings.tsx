@@ -83,7 +83,7 @@ function PollingTab() {
           ))}
           <NumField label="Glances (Bars) — интервал" value={draft.intervals.glances ?? 60} onChange={(v) => setInt('glances', v)} min={15} suffix="сек" />
           <NumField label="Агенты — интервал опроса" value={draft.intervals.agent ?? 30} onChange={(v) => setInt('agent', v)} min={10} suffix="сек" />
-          <NumField label="Датчик AIDA64 — интервал" value={draft.intervals.aida ?? 60} onChange={(v) => setInt('aida', v)} min={15} suffix="сек" />
+          <NumField label="Датчик AIDA64 — интервал" value={draft.intervals.aida ?? 10} onChange={(v) => setInt('aida', v)} min={10} suffix="сек" />
         </div>
       </Panel>
 
