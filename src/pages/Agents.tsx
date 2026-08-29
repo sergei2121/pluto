@@ -174,6 +174,17 @@ function Stat({ icon, label, value, tone }: { icon?: React.ReactNode; label: str
 
 function AgentCard({ a, onOpen, onFav }: { a: Agent; onOpen: () => void; onFav: () => void }) {
   const l = a.latest;
+  const aidaIv = usePluto((s) => s.settings.intervals.aida ?? 60) * 1000;
+  const stale = a.lastAida ? Date.now() - a.lastAida : 0;
+  const sensorCls = !a.aidaUrl
+    ? 'text-dim'
+    : !a.lastAida
+      ? 'text-crit'
+      : stale < aidaIv * 2
+        ? 'text-ok'
+        : stale < aidaIv * 5
+          ? 'text-warn'
+          : 'text-crit';
   return (
     <div className="group cursor-pointer rounded-xl border border-line bg-panel/90 p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-vio/40 hover:shadow-[0_16px_40px_-16px_rgba(0,0,0,.7)]" onClick={onOpen}>
       <div className="flex items-center gap-2">
