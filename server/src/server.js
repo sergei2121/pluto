@@ -381,11 +381,13 @@ function aidaAppend(agent, pt) {
   } else {
     arr.push(pt);
   }
-  if (arr.length > AIDA_MAX_POINTS) arr.splice(0, arr.length - AIDA_MAX_POINTS);
   const cutoff = pt.t - AIDA_RETENTION_MS; // хранение — 60 дней
   let i = 0;
   while (i < arr.length && arr[i].t < cutoff) i++;
   if (i > 0) arr.splice(0, i);
+  // при переполнении бюджета — ярусное сжатие (а не обрезка старых данных),
+  // чтобы 60-дневное окно сохранялось даже при 10-секундном интервале
+  if (arr.length > AIDA_MAX_POINTS - 1000) agent.aida = compactSeries(arr, pt.t);
 }
 
 // ─── Агенты: сервер опрашивает сам (без токенов и установленной программы) ──
@@ -564,6 +566,157 @@ async function testAidaSource(agent) {
     };
   } catch (e) {
     return { ok: false, url: agent.aidaUrl || '', via: null, error: e.message || String(e) };
+  }
+}
+
+// ─── SSE-подписка на RemoteSensor (показания в реальном времени) ────────────
+// Сырой HTML страницы AIDA64 содержит значения, зафиксированные на момент
+// генерации; «живые» данные страница получает из потока /sse (Server-Sent
+// Events): кадры вида «data: Simple1|CPUu 5%{|}Simple2|CPU 41°C{|}». Сервер
+// держит постоянную подписку на этот поток (напрямую или через relay для
+// loopback-адресов) и пишет обновления в архив — так интервал 10 с даёт
+// действительно свежие показания.
+
+const sseConnections = new Map(); // agentId → { req, res, buf, acc, dead }
+const sseRetryAt = new Map();     // agentId → ближайшая попытка переподключения
+
+/** Применение одного SSE-кадра к агенту: частичные кадры накапливаются. */
+function applyAidaFrame(agent, data) {
+  const parts = String(data).split('{|}');
+  const patch = {};
+  let got = false;
+  for (const part of parts) {
+    const idx = part.indexOf('|');
+    if (idx < 0) continue;
+    const id = part.slice(0, idx).trim();
+    if (!/^Simple\d+$/.test(id)) continue; // ReLoad / Bar… / Gph… / Arc… — не данные
+    const t = cleanAidaText(part.slice(idx + 1));
+    if (!t) continue;
+    const um = /^uptime\s+(.+)$/i.exec(t);
+    if (um) { const s = uptimeToSec(um[1]); if (s != null) { patch.uptimeSec = s; got = true; } continue; }
+    const pm = /^([A-Za-z]+)\s*[:=]?\s*(-?\d+(?:[.,]\d+)?)/.exec(t);
+    if (pm) {
+      const key = AIDA_LABEL_MAP[pm[1].toLowerCase()];
+      if (key) { const v = parseFloat(pm[2].replace(',', '.')); if (isFinite(v)) { patch[key] = v; got = true; } }
+    }
+  }
+  if (!got) return;
+
+  const now = Date.now();
+  // база — последние полные показания (не старше 2 мин), иначе старт с чистого кадра
+  const base = agent.latest && now - (agent.latest.t || 0) < 120000 ? { ...agent.latest } : {};
+  const pt = { ...base, ...patch, t: now };
+  agent.latest = pt;
+  agent.lastAida = now;
+  agent.lastError = null;
+
+  // в архив пишем не чаще интервала AIDA64, либо сразу при изменении значений —
+  // иначе поток 1–2 кадра/сек переполнил бы хранилище
+  const iv = Math.max(10, (db.settings.intervals && db.settings.intervals.aida) || 10) * 1000;
+  const arr = Array.isArray(agent.aida) ? agent.aida : (agent.aida = []);
+  const last = arr[arr.length - 1];
+  const changed = !last || AGENT_AIDA_KEYS.some((k) => (last[k] ?? null) !== (pt[k] ?? null));
+  const due = !agent._lastAidaPoint || now - agent._lastAidaPoint >= iv;
+  if (changed || due) {
+    agent._lastAidaPoint = now;
+    aidaAppend(agent, pt);
+  }
+  if (!agent._sseLogged) {
+    agent._sseLogged = true;
+    console.log(`[pluto] AIDA «${agent.name}»: SSE-подписка установлена — показания в реальном времени`);
+  }
+}
+
+/** Разбор потока SSE: буферизация, кадры «data: …», пустая строка = событие. */
+function handleSseData(agentId, chunk) {
+  const st = sseConnections.get(agentId);
+  const agent = db.agents.find((x) => x.id === agentId);
+  if (!st || !agent) return;
+  st.buf += chunk;
+  let nl;
+  while ((nl = st.buf.indexOf('\n')) >= 0) {
+    const line = st.buf.slice(0, nl).replace(/\r$/, '');
+    st.buf = st.buf.slice(nl + 1);
+    if (line.startsWith('data:')) {
+      st.acc.push(line.slice(5).trim());
+    } else if (line === '' && st.acc.length) {
+      applyAidaFrame(agent, st.acc.join('\n'));
+      st.acc = [];
+    }
+  }
+  if (st.buf.length > 65536) st.buf = st.buf.slice(-8192); // защита от разрастания
+}
+
+function closeAidaSse(agentId) {
+  const st = sseConnections.get(agentId);
+  if (!st) return;
+  st.dead = true;
+  try { st.req.destroy(); } catch { /* уже закрыт */ }
+  if (st.res) try { st.res.destroy(); } catch { /* уже закрыт */ }
+  sseConnections.delete(agentId);
+  const a = db.agents.find((x) => x.id === agentId);
+  if (a) { a.sse = false; a._sseLogged = false; }
+}
+
+/** Открыть SSE-подписку для агента (напрямую или через relay для loopback). */
+function openAidaSse(agent) {
+  closeAidaSse(agent.id);
+  const url = String(agent.aidaUrl || '').trim();
+  if (!url) return;
+  let sseUrl;
+  try {
+    const u = new URL(url);
+    u.pathname = '/sse';
+    u.search = '';
+    sseUrl = u.toString();
+  } catch { return; }
+
+  const finalUrl = isLoopbackUrl(url)
+    ? (agent.relayUrl ? String(agent.relayUrl).replace(/\/+$/, '') + '/sse?url=' + encodeURIComponent(sseUrl) : null)
+    : sseUrl;
+  if (!finalUrl) return; // loopback без relay — опрос страницы сам покажет ошибку
+
+  let fu;
+  try { fu = new URL(finalUrl); } catch { return; }
+  const lib = fu.protocol === 'https:' ? https : http;
+  const st = { req: null, res: null, buf: '', acc: [], dead: false };
+  sseConnections.set(agent.id, st);
+
+  const finish = () => {
+    if (st.dead) return;
+    st.dead = true;
+    sseConnections.delete(agent.id);
+    sseRetryAt.set(agent.id, Date.now() + 15000); // повтор не чаще раза в 15 с
+    const a = db.agents.find((x) => x.id === agent.id);
+    if (a) { a.sse = false; a._sseLogged = false; }
+  };
+
+  const req = lib.get(fu, {
+    headers: { 'User-Agent': 'pluto-core', 'Accept': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'close' },
+  }, (res) => {
+    if (st.dead) { res.resume(); return; }
+    if (res.statusCode !== 200) { res.resume(); return finish(); }
+    st.res = res;
+    sseRetryAt.delete(agent.id);
+    agent.sse = true;
+    res.setEncoding('utf8');
+    res.on('data', (c) => handleSseData(agent.id, c));
+    res.on('end', finish);
+    res.on('error', finish);
+  });
+  req.on('error', finish);
+  st.req = req;
+  agent.sse = true;
+}
+
+/** Синхронизация подписок с конфигурацией агентов (вызывается каждую секунду). */
+function reconcileSse() {
+  const now = Date.now();
+  for (const a of db.agents) {
+    const want = !!String(a.aidaUrl || '').trim();
+    const has = sseConnections.has(a.id);
+    if (want && !has && now >= (sseRetryAt.get(a.id) || 0)) openAidaSse(a);
+    if (!want && has) closeAidaSse(a.id);
   }
 }
 
