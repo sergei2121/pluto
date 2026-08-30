@@ -1,5 +1,12 @@
 node_modules/
-.next/
 dist/
-build/
+data/
 *.log
+.env
+.env.local
+aida-monitor/aida-monitor
+aida-monitor/aida-monitor.exe
+server/data/
+.DS_Store
+.next/
+build/

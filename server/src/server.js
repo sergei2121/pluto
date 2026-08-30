@@ -1,0 +1,1098 @@
+// ─── PLUTO Core v1.10: REST API + движок опроса + шлюз агентов ──────────────
+import http from 'node:http';
+import https from 'node:https';
+import fs from 'node:fs';
+import path from 'node:path';
+import net from 'node:net';
+import dgram from 'node:dgram';
+import { fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
+import {
+  loadDb, saveDb, uid, pushEvent, hashPass, verifyPass, issueSession, authUser, attachWs,
+} from './lib.js';
+
+const VERSION = '1.10.0';
+const HTTP_PORT = parseInt(process.env.HTTP_PORT || '8080', 10);
+const AGENT_PORT = parseInt(process.env.AGENT_PORT || '8443', 10);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const WEB_DIR = path.join(__dirname, '..', 'web');
+
+const db = loadDb();
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8',
+};
+
+function json(res, code, data) {
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify(data));
+}
+function text(res, code, body, type = 'text/plain; charset=utf-8') {
+  res.writeHead(code, { 'Content-Type': type });
+  res.end(body);
+}
+function readBody(req) {
+  return new Promise((resolve) => {
+    let raw = '';
+    req.on('data', (c) => (raw += c));
+    req.on('end', () => {
+      try { resolve(JSON.parse(raw || '{}')); } catch { resolve({}); }
+    });
+  });
+}
+const publicUser = (u) => ({ id: u.id, name: u.name, login: u.login, role: u.role, scope: u.scope, builtIn: u.builtIn, createdAt: u.createdAt });
+
+// ─── HTTP-клиент с абсолютным таймаутом ─────────────────────────────────────
+
+function fetchText(rawUrl, timeoutMs = 7000) {
+  return new Promise((resolve, reject) => {
+    let u;
+    try { u = new URL(rawUrl); } catch { return reject(new Error('некорректный адрес')); }
+    const lib = u.protocol === 'https:' ? https : http;
+    let done = false;
+    const r = lib.get(u, {
+      timeout: timeoutMs,
+      headers: { 'User-Agent': 'pluto-core', 'Accept': '*/*', 'Connection': 'close' },
+    }, (res) => {
+      if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
+        res.resume();
+        return fetchText(new URL(res.headers.location, u).toString(), timeoutMs).then(finish(resolve), finish(reject));
+      }
+      if (res.statusCode !== 200) { res.resume(); return finish(reject)(new Error(`HTTP ${res.statusCode}`)); }
+      let data = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => (data += c));
+      res.on('end', () => finish(resolve)(data));
+    });
+    const kill = setTimeout(() => { if (!done) r.destroy(new Error(`таймаут запроса (${timeoutMs} мс)`)); }, timeoutMs);
+    function finish(fn) {
+      return (v) => { if (done) return; done = true; clearTimeout(kill); fn(v); };
+    }
+    r.on('timeout', () => r.destroy(new Error('таймаут соединения')));
+    r.on('error', (e) => finish(reject)(e));
+  });
+}
+
+const isLoopbackUrl = (u) => /^https?:\/\/(127\.|localhost|0\.0\.0\.0|\[::1?\])/i.test(String(u || '').trim());
+
+/** Чтение страницы напрямую или через relay (для loopback-адресов). */
+async function fetchListing(url, relayUrl) {
+  const target = String(url || '').trim();
+  if (!target) throw new Error('не задан адрес источника');
+  if (isLoopbackUrl(target)) {
+    if (!relayUrl) throw new Error(`адрес ${target} локальный — сервер не может открыть его из контейнера. Укажите LAN-IP машины или настройте relay (aida-monitor)`);
+    const base = String(relayUrl).replace(/\/+$/, '');
+    try {
+      const html = await fetchText(base + '/fetch?url=' + encodeURIComponent(target), 15000);
+      return { html, via: 'relay' };
+    } catch (e) {
+      throw new Error('loopback-адрес, relay не ответил: ' + (e.message || e));
+    }
+  }
+  const html = await fetchText(target, 7000);
+  return { html, via: 'direct' };
+}
+
+// ─── Хранение рядов с ярусным сжатием ───────────────────────────────────────
+
+function mergePoints(dst, src) {
+  for (const k of Object.keys(src)) {
+    if (k === 't') continue;
+    const v = src[k];
+    if (typeof v !== 'number' || !isFinite(v)) continue;
+    dst[k] = dst[k] == null ? v : Math.round(((dst[k] + v) / 2) * 10) / 10;
+  }
+  dst.t = src.t;
+}
+
+/** < 24 ч — как есть; 24 ч–7 дн — минутные бакеты; > 7 дн — часовые. */
+function compactSeries(arr, now) {
+  const d1 = now - 86400000;
+  const d7 = now - 7 * 86400000;
+  const raw = [];
+  const byMin = new Map();
+  const byHour = new Map();
+  for (const pt of arr) {
+    if (pt.t >= d1) raw.push(pt);
+    else if (pt.t >= d7) {
+      const k = Math.floor(pt.t / 60000);
+      const ex = byMin.get(k);
+      if (ex) mergePoints(ex, pt);
+      else byMin.set(k, { ...pt });
+    } else {
+      const k = Math.floor(pt.t / 3600000);
+      const ex = byHour.get(k);
+      if (ex) mergePoints(ex, pt);
+      else byHour.set(k, { ...pt });
+    }
+  }
+  const out = [...byHour.values(), ...byMin.values(), ...raw];
+  out.sort((a, b) => a.t - b.t);
+  return out;
+}
+
+const MAX_POINTS = 20000;
+const AIDA_RETENTION_MS = 60 * 86400000; // 60 дней
+const GLANCES_RETENTION_MS = 30 * 86400000; // 30 дней
+
+function seriesAppend(agent, key, pt, retentionMs) {
+  if (!Array.isArray(agent[key])) agent[key] = [];
+  const arr = agent[key];
+  arr.push(pt);
+  if (arr.length > MAX_POINTS) agent[key] = compactSeries(arr, pt.t);
+  const cutoff = pt.t - retentionMs;
+  let i = 0;
+  while (i < agent[key].length && agent[key][i].t < cutoff) i++;
+  if (i > 0) agent[key].splice(0, i);
+}
+
+const AIDA_RANGE_MS = {
+  '5m': 5 * 60000, '30m': 30 * 60000, '3h': 3 * 3600000, '24h': 24 * 3600000,
+  '7d': 7 * 86400000, '30d': 30 * 86400000, '60d': 60 * 86400000,
+};
+const GLANCES_RANGE_MS = {
+  '5m': 5 * 60000, '30m': 30 * 60000, '3h': 3 * 3600000, '24h': 24 * 3600000,
+  '7d': 7 * 86400000, '30d': 30 * 86400000,
+};
+
+function rangePoints(arr, rangeMs, range) {
+  const cutoff = Date.now() - rangeMs;
+  let pts = (arr || []).filter((x) => x.t >= cutoff);
+  if (pts.length > 1500) {
+    const bw = rangeMs / 1500;
+    const out = [];
+    let cur = null, bi = -1;
+    for (const pt of pts) {
+      const idx = Math.floor((pt.t - cutoff) / bw);
+      if (idx !== bi) { if (cur) out.push(cur); cur = { ...pt }; bi = idx; }
+      else mergePoints(cur, pt);
+    }
+    if (cur) out.push(cur);
+    pts = out;
+  }
+  return { range, retentionDays: Math.round(rangeMs === AIDA_RETENTION_MS ? 60 : rangeMs / 86400000) || 30, points: pts };
+}
+
+// ─── Парсер AIDA64 RemoteSensor (спаны Simple1…SimpleN) ─────────────────────
+
+function cleanAidaText(t) {
+  return String(t)
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;|&#160;/g, ' ')
+    .replace(/&deg;C?;/gi, '°')
+    .replace(/&amp;/g, '&')
+    .replace(/&#(\d+);/g, (_, c) => String.fromCharCode(+c))
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const AIDA_LABEL_MAP = {
+  cpuu: 'cpuUsage', cpu: 'cpuTemp', ram: 'ram', ssd: 'ssdTemp',
+  usec: 'diskC', usedspacec: 'usedSpaceC', tx: 'tx', rx: 'rx',
+};
+const AGENT_AIDA_KEYS = ['cpuUsage', 'cpuTemp', 'ram', 'ssdTemp', 'diskC', 'usedSpaceC', 'tx', 'rx', 'uptimeSec'];
+
+function uptimeToSec(v) {
+  const s = String(v).trim();
+  const hms = /(\d{1,3}):(\d{1,2}):(\d{1,2})/.exec(s);
+  if (!hms) return null;
+  const dm = /(\d+)\s*(?:д|d)\.?/i.exec(s);
+  return (dm ? parseInt(dm[1], 10) : 0) * 86400 +
+    parseInt(hms[1], 10) * 3600 + parseInt(hms[2], 10) * 60 + parseInt(hms[3], 10);
+}
+
+function parseAidaLine(html) {
+  const out = { cpuUsage: null, cpuTemp: null, ram: null, ssdTemp: null, diskC: null, usedSpaceC: null, tx: null, rx: null, uptimeSec: null };
+  const spanRe = /<span[^>]*id="Simple\d+"[^>]*>([\s\S]*?)<\/span>/gi;
+  const items = [];
+  let m;
+  while ((m = spanRe.exec(html))) {
+    const t = cleanAidaText(m[1]);
+    if (t) items.push(t);
+  }
+  const setVal = (label, numStr) => {
+    const key = AIDA_LABEL_MAP[label.toLowerCase()];
+    if (!key) return;
+    const v = parseFloat(numStr.replace(',', '.'));
+    if (isFinite(v)) out[key] = v;
+  };
+  if (items.length) {
+    for (const it of items) {
+      const um = /^uptime\s+(.+)$/i.exec(it);
+      if (um) { out.uptimeSec = uptimeToSec(um[1]); continue; }
+      const pm = /^([A-Za-z]+)\s*[:=]?\s*(-?\d+(?:[.,]\d+)?)/.exec(it);
+      if (pm) setVal(pm[1], pm[2]);
+    }
+    return out;
+  }
+  const s = cleanAidaText(html);
+  const num = (label) => {
+    const re = new RegExp('\\b' + label + '\\b\\s*[:=]?\\s*(-?\\d+(?:[.,]\\d+)?)', 'i');
+    const mm = s.match(re);
+    return mm ? parseFloat(mm[1].replace(',', '.')) : null;
+  };
+  const um = s.match(/Uptime\s+((?:\d+\s*(?:д|d)\.?\s*)?\d{1,3}:\d{1,2}:\d{1,2})/i);
+  out.cpuUsage = num('CPUu'); out.cpuTemp = num('CPU'); out.ram = num('RAM'); out.ssdTemp = num('SSD');
+  out.diskC = num('UseC'); out.usedSpaceC = num('UsedSpaceC'); out.tx = num('TX'); out.rx = num('RX');
+  out.uptimeSec = um ? uptimeToSec(um[1]) : null;
+  return out;
+}
+
+// ─── SSE-подписка на AIDA64 (реальное время) ────────────────────────────────
+// Страница RemoteSensor обновляет показания через Server-Sent Events:
+//   data: Simple1|CPUu 5%{|}Simple4|SSD 46°C
+// Сырой HTML статичен (запекается при генерации страницы), поэтому SSE —
+// единственный способ получать живые значения. Сервер держит постоянное
+// соединение (напрямую или через relay /sse-stream) и пишет точки в архив.
+
+const sseConnections = new Map(); // agentId → { req, acc, flushTimer, closed }
+
+function sseParseFrame(agent, data) {
+  const conn = sseConnections.get(agent.id);
+  if (!conn) return;
+  const acc = conn.acc;
+  for (const item of String(data).split('{|}')) {
+    const pipe = item.indexOf('|');
+    if (pipe < 0) continue;
+    const text = cleanAidaText(item.slice(pipe + 1));
+    if (!text) continue;
+    const um = /^uptime\s+(.+)$/i.exec(text);
+    if (um) { const v = uptimeToSec(um[1]); if (v != null) acc.uptimeSec = v; continue; }
+    const pm = /^([A-Za-z]+)\s*[:=]?\s*(-?\d+(?:[.,]\d+)?)/.exec(text);
+    if (pm) {
+      const key = AIDA_LABEL_MAP[pm[1].toLowerCase()];
+      if (key) acc[key] = parseFloat(pm[2].replace(',', '.'));
+    }
+  }
+}
+
+function sseFlush(agent) {
+  const conn = sseConnections.get(agent.id);
+  if (!conn) return;
+  const acc = conn.acc;
+  if (!AGENT_AIDA_KEYS.some((k) => acc[k] != null)) return;
+  const pt = { ...acc, t: Date.now() };
+  agent.latest = pt;
+  seriesAppend(agent, 'aida', pt, AIDA_RETENTION_MS);
+  agent.lastAida = Date.now();
+  agent.lastError = null;
+  conn.acc = {};
+  saveDb();
+}
+
+function sseStart(agent) {
+  if (sseConnections.has(agent.id)) return;
+  const url = String(agent.aidaUrl || '').trim();
+  if (!url) return;
+
+  let streamUrl;
+  let viaRelay = false;
+  if (isLoopbackUrl(url) && agent.relayUrl) {
+    streamUrl = String(agent.relayUrl).replace(/\/+$/, '') + '/sse-stream?url=' + encodeURIComponent(url);
+    viaRelay = true;
+  } else if (isLoopbackUrl(url)) {
+    return; // без relay loopback недостижим — работаем опросом страницы
+  } else {
+    try { streamUrl = new URL('/sse', url).toString(); } catch { return; }
+  }
+
+  const conn = { acc: {}, closed: false, req: null, retryTimer: null };
+  sseConnections.set(agent.id, conn);
+
+  const connect = () => {
+    if (conn.closed) return;
+    let u;
+    try { u = new URL(streamUrl); } catch { return; }
+    const lib = u.protocol === 'https:' ? https : http;
+    const req = lib.get(u, { headers: { 'User-Agent': 'pluto-core', Accept: 'text/event-stream', 'Connection': 'close' } }, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        scheduleRetry();
+        return;
+      }
+      agent.sseActive = true;
+      console.log(`[pluto] AIDA-SSE «${agent.name}»: подключено (${viaRelay ? 'через relay' : 'напрямую'})`);
+      res.setEncoding('utf8');
+      let buf = '';
+      res.on('data', (chunk) => {
+        buf += chunk;
+        let idx;
+        while ((idx = buf.indexOf('\n\n')) >= 0) {
+          const frame = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          for (const line of frame.split('\n')) {
+            if (line.startsWith('data:')) sseParseFrame(agent, line.slice(5).trim());
+          }
+        }
+      });
+      res.on('end', () => { agent.sseActive = false; scheduleRetry(); });
+      res.on('error', () => { agent.sseActive = false; scheduleRetry(); });
+    });
+    req.on('error', () => { agent.sseActive = false; scheduleRetry(); });
+    conn.req = req;
+  };
+
+  const scheduleRetry = () => {
+    if (conn.closed || conn.retryTimer) return;
+    conn.retryTimer = setTimeout(() => { conn.retryTimer = null; connect(); }, 15000);
+  };
+
+  // запись точки раз в интервал «Датчик AIDA64» из накопленных SSE-значений
+  conn.flushTimer = setInterval(() => sseFlush(agent), Math.max(10, db.settings.intervals.aida || 10) * 1000);
+  connect();
+}
+
+function sseStop(agentId) {
+  const conn = sseConnections.get(agentId);
+  if (!conn) return;
+  conn.closed = true;
+  if (conn.flushTimer) clearInterval(conn.flushTimer);
+  if (conn.retryTimer) clearTimeout(conn.retryTimer);
+  if (conn.req) try { conn.req.destroy(); } catch { /* ignore */ }
+  sseConnections.delete(agentId);
+}
+
+function sseSync() {
+  // запускаем подписки для новых/изменённых агентов, останавливаем для удалённых
+  for (const a of db.agents) {
+    const want = !!(a.aidaUrl && (!isLoopbackUrl(a.aidaUrl) || a.relayUrl));
+    if (want && !sseConnections.has(a.id)) sseStart(a);
+    if (!want && sseConnections.has(a.id)) sseStop(a.id);
+  }
+  for (const id of [...sseConnections.keys()]) {
+    if (!db.agents.some((a) => a.id === id)) sseStop(id);
+  }
+}
+
+// ─── Парсер Glances (столбцы CPU/MEM/Rx/Tx/Package) ─────────────────────────
+
+const GLANCES_KEYS = ['cpu', 'user', 'system', 'iowait', 'idle', 'irq', 'nice', 'steal', 'mem', 'memTotal', 'memUsed', 'memFree', 'rx', 'tx', 'pkg'];
+
+function htmlToText(html) {
+  return String(html)
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&deg;/gi, '°')
+    .replace(/&amp;/gi, '&')
+    .replace(/&#(\d+);/g, (_, c) => String.fromCharCode(+c))
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ');
+}
+
+function gSection(t, startRe, endRe) {
+  const s = t.search(startRe);
+  if (s < 0) return '';
+  const rest = t.slice(s);
+  const e = rest.slice(1).search(endRe);
+  return e < 0 ? rest : rest.slice(0, e + 1);
+}
+const gNum = (s, re) => { const m = s.match(re); return m ? parseFloat(m[1]) : null; };
+
+function gValGB(s, label) {
+  const m = s.match(new RegExp(label + ':?\\s*([0-9]+(?:\\.[0-9]+)?)\\s*([KMGT])?', 'i'));
+  if (!m) return null;
+  const v = parseFloat(m[1]);
+  const u = (m[2] || 'G').toUpperCase();
+  if (u === 'T') return Math.round(v * 1024 * 100) / 100;
+  if (u === 'G') return v;
+  if (u === 'M') return Math.round((v / 1024) * 100) / 100;
+  return Math.round((v / (1024 * 1024)) * 100) / 100;
+}
+
+function gNetKB(t, label) {
+  const re = new RegExp(label + '/s:?\\s*([0-9]+(?:\\.[0-9]+)?)\\s*([KMGT])?', 'gi');
+  let sum = 0, n = 0, m;
+  while ((m = re.exec(t))) {
+    const v = parseFloat(m[1]);
+    const u = (m[2] || '').toUpperCase();
+    const mult = u === 'T' ? 1e12 : u === 'G' ? 1e9 : u === 'M' ? 1e6 : u === 'K' ? 1e3 : 1;
+    sum += (v * mult) / 1024;
+    n++;
+  }
+  return n ? Math.round(sum * 10) / 10 : null;
+}
+
+function parseGlances(html) {
+  const t = htmlToText(html);
+  const cpuS = gSection(t, /\bCPU\b/i, /\b(MEM|LOAD|PERCPU|SWAP)\b/i);
+  const memS = gSection(t, /\bMEM\b/i, /\b(SWAP|LOAD|NETWORK|DISK|SENSORS|PROCESSES)\b/i);
+  return {
+    cpu: gNum(cpuS, /\bCPU\s+([0-9]+(?:\.[0-9]+)?)\s*%/i),
+    user: gNum(cpuS, /user:?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i),
+    system: gNum(cpuS, /system:?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i),
+    iowait: gNum(cpuS, /iowait:?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i),
+    idle: gNum(cpuS, /idle:?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i),
+    irq: gNum(cpuS, /irq:?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i),
+    nice: gNum(cpuS, /nice:?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i),
+    steal: gNum(cpuS, /steal:?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i),
+    mem: gNum(memS, /\bMEM\s+([0-9]+(?:\.[0-9]+)?)\s*%/i),
+    memTotal: gValGB(memS, 'total'),
+    memUsed: gValGB(memS, 'used'),
+    memFree: gValGB(memS, 'free'),
+    rx: gNetKB(t, 'Rx'),
+    tx: gNetKB(t, 'Tx'),
+    pkg: gNum(t, /Package[^0-9°]{0,24}?([0-9]+(?:\.[0-9]+)?)\s*°?\s*C/i),
+  };
+}
+
+// ─── Проверки устройств ─────────────────────────────────────────────────────
+
+function checkPing(addr, timeoutMs) {
+  return new Promise((resolve) => {
+    const secs = Math.max(1, Math.round(timeoutMs / 1000));
+    const t0 = Date.now();
+    execFile('ping', ['-c', '1', '-W', String(secs), addr], { timeout: timeoutMs + 2000 }, (err, stdout) => {
+      if (err) return resolve({ ok: false, latency: 0 });
+      const m = /time[=<]\s*([\d.]+)\s*ms/.exec(stdout || '');
+      resolve(m ? { ok: true, latency: Math.max(1, Math.round(parseFloat(m[1]))) } : { ok: true, latency: Date.now() - t0 });
+    });
+  });
+}
+
+async function checkHttp(addr, port, pth, method, body, timeoutMs) {
+  const t0 = Date.now();
+  let url;
+  try {
+    url = /^https?:\/\//.test(addr) ? addr : `http://${addr}${port ? ':' + port : ''}${pth ? (pth.startsWith('/') ? pth : '/' + pth) : '/'}`;
+  } catch { return { ok: false, latency: 0 }; }
+  try {
+    const opts = { method: method || 'GET', signal: AbortSignal.timeout(timeoutMs) };
+    if (body && method !== 'GET') opts.body = body;
+    const res = await fetch(url, opts);
+    return { ok: res.status < 500, latency: Math.max(1, Date.now() - t0) };
+  } catch { return { ok: false, latency: 0 }; }
+}
+
+function checkRtsp(addr, port, timeoutMs) {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    const host = addr.replace(/^rtsp:\/\//i, '').split('/')[0].split(':')[0];
+    const p = port || 554;
+    const sock = net.connect(p, host, () => {
+      sock.write(`OPTIONS rtsp://${host}:${p}/ RTSP/1.0\r\nCSeq: 1\r\n\r\n`);
+    });
+    const done = (ok) => { clearTimeout(to); sock.destroy(); resolve({ ok, latency: ok ? Math.max(1, Date.now() - t0) : 0 }); };
+    const to = setTimeout(() => done(false), timeoutMs);
+    sock.on('data', (d) => done(/RTSP\/1\.0\s+200/.test(String(d))));
+    sock.on('error', () => done(false));
+  });
+}
+
+function checkSip(addr, timeoutMs) {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    const m = /^sip:([^@]+)@([^:;]+)(?::(\d+))?/.exec(addr);
+    if (!m) return resolve({ ok: false, latency: 0 });
+    const host = m[2];
+    const p = parseInt(m[3] || '5060', 10);
+    const sock = dgram.createSocket('udp4');
+    const req = `OPTIONS sip:${m[1]}@${host}:${p} SIP/2.0\r\nVia: SIP/2.0/UDP pluto.local\r\nFrom: <sip:pluto@pluto.local>\r\nTo: <sip:${m[1]}@${host}>\r\nCall-ID: ${uid()}@pluto\r\nCSeq: 1 OPTIONS\r\nContact: <sip:pluto@pluto.local>\r\nContent-Length: 0\r\n\r\n`;
+    const done = (ok) => { clearTimeout(to); try { sock.close(); } catch { /* ignore */ } resolve({ ok, latency: ok ? Math.max(1, Date.now() - t0) : 0 }); };
+    const to = setTimeout(() => done(false), timeoutMs);
+    sock.on('message', (msg) => done(/SIP\/2\.0\s+200/.test(String(msg))));
+    sock.on('error', () => done(false));
+    sock.send(req, p, host, (e) => { if (e) done(false); });
+  });
+}
+
+async function runDeviceCheck(d) {
+  const tm = db.settings.timeoutMs || 3000;
+  if (d.type === 'ping') return checkPing(d.address, tm);
+  if (d.type === 'rtsp') return checkRtsp(d.address, d.port, tm);
+  if (d.type === 'sip') return checkSip(d.address, tm);
+  return checkHttp(d.address, d.port, d.path, d.method, d.body, tm);
+}
+
+function applyDeviceResult(d, r) {
+  const cfg = db.settings;
+  d.history = [...(d.history || []), r.ok ? r.latency : -1].slice(-48);
+  d.lastCheck = Date.now();
+  if (!r.ok) {
+    d.fails = (d.fails || 0) + 1;
+    if (d.fails >= cfg.failThreshold && d.status !== 'down') {
+      d.status = 'down'; d.latency = null; d.lastChange = Date.now();
+      pushEvent('crit', 'device', `${d.type.toUpperCase()} ${d.address} — потеря связи (${d.fails} сб. подряд)`);
+    }
+    return;
+  }
+  const base = d.baseline || r.latency;
+  const degraded = r.latency > base * cfg.degradeFactor && r.latency > cfg.degradeMinMs;
+  const st = degraded ? 'degraded' : 'up';
+  if (d.status === 'down') pushEvent('ok', 'device', `${d.name} (${d.address}) — связь восстановлена`);
+  else if (degraded && d.status !== 'degraded') pushEvent('warn', 'device', `${d.name}: деградация — ${r.latency} мс при базовых ${Math.round(base)} мс`);
+  d.status = st; d.fails = 0; d.latency = r.latency;
+  d.baseline = Math.round(base * 0.9 + r.latency * 0.1);
+  if (st !== d.status) d.lastChange = Date.now();
+  saveDb();
+}
+
+// ─── Relay: пинги внутри VLAN агента ────────────────────────────────────────
+
+function expandIps(target) {
+  const t = String(target).trim();
+  if (!t) return [];
+  const range = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.)(\d{1,3})\s*-\s*(\d{1,3})$/.exec(t);
+  if (range) {
+    const out = [];
+    const a = parseInt(range[2], 10), b = parseInt(range[3], 10);
+    for (let i = Math.min(a, b); i <= Math.max(a, b) && out.length < 256; i++) out.push(range[1] + i);
+    return out;
+  }
+  const cidr = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.)\d{1,3}\/(\d{1,2})$/.exec(t);
+  if (cidr) {
+    if (parseInt(cidr[2], 10) < 24) return [];
+    const out = [];
+    for (let i = 1; i < 255; i++) out.push(cidr[1] + i);
+    return out;
+  }
+  return /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(t) ? [t] : [];
+}
+
+async function relayPing(agent, ips) {
+  if (!agent.relayUrl || !ips.length) return [];
+  const base = String(agent.relayUrl).replace(/\/+$/, '');
+  try {
+    const txt = await fetchText(base + '/ping?targets=' + encodeURIComponent(ips.join(',')), 15000);
+    const arr = JSON.parse(txt);
+    if (Array.isArray(arr)) {
+      return arr.map((r) => ({ ip: r.ip, alive: !!r.alive, latency: r.latencyMs != null ? r.latencyMs : (r.latency != null ? r.latency : null) }));
+    }
+  } catch { /* relay недоступен */ }
+  return [];
+}
+
+// ─── Опрос агента ───────────────────────────────────────────────────────────
+
+async function pollAgent(agent, force) {
+  const now = Date.now();
+
+  // 1) пинг до IP — доступность / uptime
+  const ping = await checkPing(agent.ip, db.settings.timeoutMs || 3000);
+  const wasOnline = agent.online;
+  agent.online = ping.ok;
+  agent.latency = ping.ok ? ping.latency : null;
+  agent.lastPoll = now;
+  if (!Array.isArray(agent.latHist)) agent.latHist = [];
+  agent.latHist.push({ t: now, ms: ping.ok ? ping.latency : null });
+  if (agent.latHist.length > 480) agent.latHist.splice(0, agent.latHist.length - 480);
+  if (ping.ok) {
+    agent.lastSeen = now;
+    if (!agent.onlineSince) agent.onlineSince = now;
+  } else {
+    agent.onlineSince = 0;
+  }
+  if (ping.ok && !wasOnline) pushEvent('ok', 'agent', `Агент «${agent.name}» (${agent.ip}) в сети`);
+  if (!ping.ok && wasOnline) pushEvent('warn', 'agent', `Агент «${agent.name}» (${agent.ip}) недоступен`);
+
+  // 2) AIDA64: если SSE-подписка жива — данные уже текут, страницу не дёргаем;
+  //    иначе резервный опрос HTML по интервалу «Датчик AIDA64»
+  const aidaIv = Math.max(10, (db.settings.intervals && db.settings.intervals.aida) || 10) * 1000;
+  const sseLive = !!agent.sseActive && now - (agent.lastAida || 0) < aidaIv * 3;
+  if (agent.aidaUrl && !sseLive && (force || now - (agent.lastAida || 0) >= aidaIv)) {
+    agent.lastAida = now;
+    try {
+      const { html, via } = await fetchListing(agent.aidaUrl, agent.relayUrl);
+      const pt = parseAidaLine(html);
+      pt.t = Date.now();
+      if (AGENT_AIDA_KEYS.some((k) => pt[k] != null)) {
+        agent.latest = pt;
+        seriesAppend(agent, 'aida', pt, AIDA_RETENTION_MS);
+        agent.lastError = null;
+        console.log(`[pluto] AIDA «${agent.name}» [${via}]: CPU ${pt.cpuUsage ?? '—'}% · ${pt.cpuTemp ?? '—'}°C · RAM ${pt.ram ?? '—'}%`);
+      } else {
+        agent.lastError = 'листинг AIDA64 загружен, но значения не распознаны — «Проверить листинг» в карточке';
+      }
+    } catch (e) {
+      agent.lastError = 'AIDA64: ' + (e.message || 'ошибка запроса');
+    }
+  }
+
+  // 3) Glances: веб-страница (порт 61208), свой интервал, хранение 30 дней
+  const glIv = Math.max(15, (db.settings.intervals && db.settings.intervals.glances) || 60) * 1000;
+  if (agent.glancesUrl && (force || now - (agent.lastGlances || 0) >= glIv)) {
+    agent.lastGlances = now;
+    try {
+      const { html, via } = await fetchListing(agent.glancesUrl, agent.relayUrl);
+      const pt = parseGlances(html);
+      pt.t = Date.now();
+      if (GLANCES_KEYS.some((k) => pt[k] != null)) {
+        agent.glancesLatest = pt;
+        seriesAppend(agent, 'glances', pt, GLANCES_RETENTION_MS);
+        agent.lastError = null;
+        console.log(`[pluto] Glances «${agent.name}» [${via}]: CPU ${pt.cpu ?? '—'}% · MEM ${pt.mem ?? '—'}% · ${pt.pkg ?? '—'}°C`);
+      } else {
+        agent.lastError = 'страница Glances загружена, но показатели не найдены — проверьте адрес (http://<IP>:61208)';
+      }
+    } catch (e) {
+      agent.lastError = 'Glances: ' + (e.message || 'ошибка запроса');
+    }
+  }
+
+  // 4) пинги устройств через relay (внутри VLAN агента)
+  if (agent.relayUrl && (agent.pingTargets || []).length) {
+    const out = [];
+    for (const tgt of agent.pingTargets) {
+      const ips = expandIps(tgt);
+      const results = await relayPing(agent, ips);
+      out.push({ target: tgt, results, lastCheck: Date.now() });
+    }
+    agent.targets = out;
+  }
+
+  saveDb();
+}
+
+// ─── Glances-устройства (вкладка Bars) ──────────────────────────────────────
+
+async function scrapeGlancesDev(dev, force) {
+  const giv = Math.max(15, (db.settings.intervals && db.settings.intervals.glances) || 60) * 1000;
+  if (!force && Date.now() - (dev.lastScrape || 0) < giv) return;
+  const now = Date.now();
+  try {
+    const html = await fetchText(dev.url, 7000);
+    const pt = parseGlances(html);
+    pt.t = Date.now();
+    const found = GLANCES_KEYS.filter((k) => pt[k] != null);
+    dev.lastScrape = now;
+    if (!found.length) {
+      dev.online = false;
+      dev.lastError = 'страница загружена, но показатели Glances не найдены';
+      saveDb();
+      return { point: null, error: dev.lastError };
+    }
+    dev.online = true;
+    dev.latest = pt;
+    dev.lastError = null;
+    if (!Array.isArray(dev.history)) dev.history = [];
+    dev.history.push(pt);
+    if (dev.history.length > MAX_POINTS) dev.history = compactSeries(dev.history, pt.t);
+    const cutoff = pt.t - GLANCES_RETENTION_MS;
+    let i = 0;
+    while (i < dev.history.length && dev.history[i].t < cutoff) i++;
+    if (i > 0) dev.history.splice(0, i);
+    saveDb();
+    return { point: pt, error: null };
+  } catch (e) {
+    dev.lastScrape = now;
+    dev.online = false;
+    dev.lastError = e.message || 'ошибка запроса';
+    saveDb();
+    return { point: null, error: dev.lastError };
+  }
+}
+
+// ─── Планировщик ────────────────────────────────────────────────────────────
+
+let lastCleanup = 0;
+
+setInterval(() => {
+  const now = Date.now();
+
+  for (const d of db.devices) {
+    const iv = Math.max(5, d.interval || (db.settings.intervals && db.settings.intervals[d.type]) || 60) * 1000;
+    if (!d.checking && now - (d.lastCheck || 0) >= iv) {
+      d.checking = true;
+      runDeviceCheck(d).then((r) => applyDeviceResult(d, r)).finally(() => { d.checking = false; });
+    }
+  }
+
+  const aiv = Math.max(10, (db.settings.intervals && db.settings.intervals.agent) || 30) * 1000;
+  for (const a of db.agents) {
+    if (a.polling && a.pollStarted && now - a.pollStarted > 180000) {
+      console.log(`[pluto] опрос «${a.name}» завис — флаг сброшен`);
+      a.polling = false;
+    }
+    if (!a.polling && now - (a.lastPoll || 0) >= aiv) {
+      a.polling = true;
+      a.pollStarted = now;
+      pollAgent(a).finally(() => { a.polling = false; a.lastPoll = Date.now(); });
+    }
+  }
+
+  for (const g of db.glances || []) {
+    if (!g.scraping) {
+      g.scraping = true;
+      scrapeGlancesDev(g).finally(() => { g.scraping = false; });
+    }
+  }
+
+  // автоочистка архивов по расписанию (раз в час): старше 60/30 дней
+  if (now - lastCleanup > 3600000) {
+    lastCleanup = now;
+    let changed = false;
+    for (const a of db.agents) {
+      for (const [key, ret] of [['aida', AIDA_RETENTION_MS], ['glances', GLANCES_RETENTION_MS]]) {
+        const arr = a[key];
+        if (Array.isArray(arr) && arr.length && arr[0].t < now - ret) {
+          let i = 0;
+          while (i < arr.length && arr[i].t < now - ret) i++;
+          arr.splice(0, i);
+          changed = true;
+        }
+      }
+    }
+    for (const g of db.glances || []) {
+      const arr = g.history;
+      if (Array.isArray(arr) && arr.length && arr[0].t < now - GLANCES_RETENTION_MS) {
+        let i = 0;
+        while (i < arr.length && arr[i].t < now - GLANCES_RETENTION_MS) i++;
+        arr.splice(0, i);
+        changed = true;
+      }
+    }
+    if (changed) saveDb();
+  }
+}, 1000);
+
+setInterval(sseSync, 5000);
+setTimeout(sseSync, 2000);
+
+// ─── HTTP-сервер ────────────────────────────────────────────────────────────
+
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const p = url.pathname;
+  const method = req.method || 'GET';
+
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (method === 'OPTIONS') { res.writeHead(204); return res.end(); }
+
+  try {
+    // ── публичные маршруты ──
+    if (p === '/api/health') return json(res, 200, { ok: true, name: 'pluto-core', version: VERSION, console: 'api' });
+    if (p === '/api/version') return json(res, 200, { version: VERSION });
+
+    // ── статика веб-консоли (без авторизации) ──
+    if (method === 'GET' && !p.startsWith('/api/')) {
+      let file = path.normalize(path.join(WEB_DIR, p === '/' ? 'index.html' : p));
+      if (!file.startsWith(WEB_DIR)) return json(res, 403, { error: 'forbidden' });
+      if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(WEB_DIR, 'index.html');
+      if (!fs.existsSync(file)) {
+        return text(res, 200, 'PLUTO Core работает. Веб-консоль не найдена: пересоберите образ Docker.');
+      }
+      const ext = path.extname(file);
+      if (ext === '.html' || !ext) {
+        // вшиваем подпись ядра — консоль по ней понимает, что работает с настоящим сервером
+        const html = fs.readFileSync(file, 'utf8').replace(
+          '<head>',
+          `<head><script>window.__PLUTO_CORE__={v:"${VERSION}"}</script>`,
+        );
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+        return res.end(html);
+      }
+      res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': 'public, max-age=31536000, immutable' });
+      return fs.createReadStream(file).pipe(res);
+    }
+
+    // ── авторизация ──
+    if (p === '/api/auth/login' && method === 'POST') {
+      const b = await readBody(req);
+      const u = db.users.find((x) => x.login === String(b.login || '').trim());
+      if (!u || !verifyPass(String(b.password || ''), u.passHash)) return json(res, 401, { error: 'Неверный логин или пароль' });
+      pushEvent('info', 'system', `Вход в систему: ${u.name}`);
+      return json(res, 200, { token: issueSession(u.id), user: publicUser(u) });
+    }
+
+    const user = authUser(req);
+    if (!user) return json(res, 401, { error: 'Требуется авторизация' });
+    const isAdmin = user.role === 'admin';
+
+    if (p === '/api/auth/me') return json(res, 200, publicUser(user));
+
+    // ── состояние ──
+    if (p === '/api/state' && method === 'GET') {
+      const devices = isAdmin ? db.devices : db.devices.filter((d) => user.scope.includes(d.type));
+      const agentsRaw = isAdmin || user.scope.includes('agent') ? db.agents : [];
+      const agents = agentsRaw.map((a) => ({ ...a, aida: undefined, glances: undefined, polling: undefined, pollStarted: undefined, sseActive: undefined }));
+      const glancesRaw = isAdmin || user.scope.includes('glances') ? db.glances : [];
+      const glances = glancesRaw.map((g) => ({ ...g, history: undefined, scraping: undefined }));
+      return json(res, 200, {
+        devices, agents, glances,
+        tags: db.tags, events: db.events, settings: db.settings,
+        users: isAdmin ? db.users.map(publicUser) : undefined,
+      });
+    }
+
+    // ── устройства ──
+    if (p === '/api/devices' && method === 'POST' && isAdmin) {
+      const b = await readBody(req);
+      if (!b.address) return json(res, 400, { error: 'укажите адрес устройства' });
+      const d = {
+        id: uid(), name: String(b.name || '').trim() || String(b.address), type: ['ping', 'http', 'api', 'rtsp', 'sip'].includes(b.type) ? b.type : 'ping',
+        address: String(b.address).trim(), port: b.port != null ? parseInt(b.port, 10) : null,
+        path: String(b.path || ''), method: b.method || null, body: b.body || null,
+        interval: Math.max(5, parseInt(b.interval, 10) || (db.settings.intervals[b.type] || 60)),
+        tags: Array.isArray(b.tags) ? b.tags : [], favorite: !!b.favorite,
+        status: 'unknown', latency: null, baseline: null, history: [], fails: 0,
+        lastCheck: 0, lastChange: Date.now(), checking: false, approx: false,
+        profile: { base: 20, failP: 0.03, spikeP: 0.02 }, spikeUntil: 0, createdAt: Date.now(),
+      };
+      db.devices.push(d);
+      pushEvent('info', 'device', `Добавлено устройство «${d.name}» (${d.type.toUpperCase()} ${d.address})`);
+      saveDb();
+      runDeviceCheck(d).then((r) => applyDeviceResult(d, r));
+      return json(res, 200, d);
+    }
+    let m = p.match(/^\/api\/devices\/([^/]+)$/);
+    if (m && isAdmin) {
+      const d = db.devices.find((x) => x.id === m[1]);
+      if (!d) return json(res, 404, { error: 'устройство не найдено' });
+      if (method === 'PUT' || method === 'PATCH') {
+        const b = await readBody(req);
+        for (const k of ['name', 'type', 'address', 'port', 'path', 'method', 'body', 'interval', 'tags', 'favorite']) {
+          if (k in b) d[k] = b[k];
+        }
+        saveDb();
+        return json(res, 200, d);
+      }
+      if (method === 'DELETE') {
+        db.devices = db.devices.filter((x) => x.id !== d.id);
+        pushEvent('info', 'device', `Устройство «${d.name}» удалено`);
+        saveDb();
+        return json(res, 200, { ok: true });
+      }
+    }
+    m = p.match(/^\/api\/devices\/([^/]+)\/check$/);
+    if (m && method === 'POST' && isAdmin) {
+      const d = db.devices.find((x) => x.id === m[1]);
+      if (!d) return json(res, 404, { error: 'устройство не найдено' });
+      const r = await runDeviceCheck(d);
+      applyDeviceResult(d, r);
+      return json(res, 200, { result: r });
+    }
+
+    // ── агенты ──
+    if (p === '/api/agents' && method === 'POST' && isAdmin) {
+      const b = await readBody(req);
+      const ip = String(b.ip || '').trim();
+      if (!ip) return json(res, 400, { error: 'укажите IP-адрес ПК' });
+      const a = {
+        id: uid(),
+        name: String(b.name || '').trim() || ('ПК ' + ip),
+        ip,
+        aidaUrl: String(b.aidaUrl || '').trim(),
+        glancesUrl: String(b.glancesUrl || '').trim(),
+        relayUrl: String(b.relayUrl || '').trim(),
+        pingTargets: Array.isArray(b.pingTargets) ? b.pingTargets.map((x) => String(x).trim()).filter(Boolean) : [],
+        online: false, latency: null, onlineSince: 0,
+        lastSeen: 0, lastPoll: 0, lastAida: 0, lastGlances: 0, lastError: null,
+        latest: null, glancesLatest: null, aida: [], glances: [], latHist: [], targets: [],
+        favorite: false, createdAt: Date.now(),
+      };
+      db.agents.push(a);
+      pushEvent('info', 'agent', `Добавлен агент «${a.name}» (${a.ip})`);
+      saveDb();
+      sseSync();
+      pollAgent(a, true);
+      return json(res, 200, a);
+    }
+    m = p.match(/^\/api\/agents\/([^/]+)$/);
+    if (m && isAdmin) {
+      const a = db.agents.find((x) => x.id === m[1]);
+      if (!a) return json(res, 404, { error: 'агент не найден' });
+      if (method === 'PUT' || method === 'PATCH') {
+        const b = await readBody(req);
+        for (const k of ['name', 'ip', 'aidaUrl', 'glancesUrl', 'relayUrl', 'favorite']) if (k in b) a[k] = b[k];
+        if (Array.isArray(b.pingTargets)) a.pingTargets = b.pingTargets.map((x) => String(x).trim()).filter(Boolean);
+        saveDb();
+        sseSync();
+        return json(res, 200, a);
+      }
+      if (method === 'DELETE') {
+        sseStop(a.id);
+        db.agents = db.agents.filter((x) => x.id !== a.id);
+        pushEvent('info', 'agent', `Агент «${a.name}» удалён`);
+        saveDb();
+        return json(res, 200, { ok: true });
+      }
+    }
+    m = p.match(/^\/api\/agents\/([^/]+)\/poll$/);
+    if (m && method === 'POST' && isAdmin) {
+      const a = db.agents.find((x) => x.id === m[1]);
+      if (!a) return json(res, 404, { error: 'агент не найден' });
+      await pollAgent(a, true);
+      return json(res, 200, a);
+    }
+    // диагностика источников (AIDA64 / Glances)
+    m = p.match(/^\/api\/agents\/([^/]+)\/test-(aida|glances)$/);
+    if (m && method === 'GET') {
+      const a = db.agents.find((x) => x.id === m[1]);
+      if (!a) return json(res, 404, { error: 'агент не найден' });
+      if (!isAdmin && !user.scope.includes('agent')) return json(res, 403, { error: 'нет доступа к агентам' });
+      const kind = m[2];
+      const srcUrl = kind === 'aida' ? a.aidaUrl : a.glancesUrl;
+      try {
+        const { html, via } = await fetchListing(srcUrl, a.relayUrl);
+        const parsed = kind === 'aida' ? parseAidaLine(html) : parseGlances(html);
+        const keys = kind === 'aida' ? AGENT_AIDA_KEYS : GLANCES_KEYS;
+        const recognized = keys.filter((k) => parsed[k] != null);
+        const plain = htmlToText(html);
+        return json(res, 200, {
+          ok: recognized.length > 0, url: srcUrl, via, bytes: html.length,
+          sample: plain.slice(0, 300), values: parsed, recognized,
+          missing: keys.filter((k) => parsed[k] == null),
+        });
+      } catch (e) {
+        return json(res, 200, { ok: false, url: srcUrl || '', via: null, error: e.message || String(e) });
+      }
+    }
+    // история AIDA64 (60 дней)
+    m = p.match(/^\/api\/agents\/([^/]+)\/aida$/);
+    if (m && method === 'GET') {
+      const a = db.agents.find((x) => x.id === m[1]);
+      if (!a) return json(res, 404, { error: 'агент не найден' });
+      if (!isAdmin && !user.scope.includes('agent')) return json(res, 403, { error: 'нет доступа к агентам' });
+      const rq = url.searchParams.get('range');
+      const range = AIDA_RANGE_MS[rq] ? rq : '5m';
+      const out = rangePoints(a.aida, AIDA_RANGE_MS[range], range);
+      out.retentionDays = 60;
+      return json(res, 200, out);
+    }
+    // история Glances агента (30 дней)
+    m = p.match(/^\/api\/agents\/([^/]+)\/glances$/);
+    if (m && method === 'GET') {
+      const a = db.agents.find((x) => x.id === m[1]);
+      if (!a) return json(res, 404, { error: 'агент не найден' });
+      if (!isAdmin && !user.scope.includes('agent')) return json(res, 403, { error: 'нет доступа к агентам' });
+      const rq = url.searchParams.get('range');
+      const range = GLANCES_RANGE_MS[rq] ? rq : '5m';
+      const out = rangePoints(a.glances, GLANCES_RANGE_MS[range], range);
+      out.retentionDays = 30;
+      return json(res, 200, out);
+    }
+
+    // ── Glances-устройства (Bars) ──
+    if (p === '/api/glances' && method === 'POST' && isAdmin) {
+      const b = await readBody(req);
+      if (!b.url) return json(res, 400, { error: 'укажите адрес мониторинга' });
+      const g = {
+        id: uid(), name: String(b.name || '').trim() || 'Glances-сервер', url: String(b.url).trim(),
+        serverLink: String(b.serverLink || '').trim(), createdAt: Date.now(),
+        lastScrape: 0, lastError: null, online: false, latest: null, history: [],
+      };
+      db.glances.push(g);
+      saveDb();
+      scrapeGlancesDev(g, true);
+      return json(res, 200, g);
+    }
+    m = p.match(/^\/api\/glances\/([^/]+)$/);
+    if (m && isAdmin && method === 'DELETE') {
+      db.glances = db.glances.filter((x) => x.id !== m[1]);
+      saveDb();
+      return json(res, 200, { ok: true });
+    }
+    m = p.match(/^\/api\/glances\/([^/]+)\/scrape$/);
+    if (m && method === 'POST' && isAdmin) {
+      const g = db.glances.find((x) => x.id === m[1]);
+      if (!g) return json(res, 404, { error: 'устройство не найдено' });
+      return json(res, 200, await scrapeGlancesDev(g, true));
+    }
+    m = p.match(/^\/api\/glances\/([^/]+)\/history$/);
+    if (m && method === 'GET') {
+      const g = db.glances.find((x) => x.id === m[1]);
+      if (!g) return json(res, 404, { error: 'устройство не найдено' });
+      if (!isAdmin && !user.scope.includes('glances')) return json(res, 403, { error: 'нет доступа' });
+      const rq = url.searchParams.get('range');
+      const range = GLANCES_RANGE_MS[rq] ? rq : '5m';
+      const out = rangePoints(g.history, GLANCES_RANGE_MS[range], range);
+      out.retentionDays = 30;
+      return json(res, 200, out);
+    }
+
+    // ── теги ──
+    if (p === '/api/tags' && method === 'POST' && isAdmin) {
+      const b = await readBody(req);
+      const label = String(b.label || '').trim();
+      if (!label) return json(res, 400, { error: 'укажите название тега' });
+      if (db.tags.some((t) => t.label.toLowerCase() === label.toLowerCase())) return json(res, 400, { error: 'такой тег уже есть' });
+      const t = { id: uid(), label, color: String(b.color || '#9a8cfa') };
+      db.tags.push(t);
+      saveDb();
+      return json(res, 200, t);
+    }
+    m = p.match(/^\/api\/tags\/([^/]+)$/);
+    if (m && isAdmin && method === 'DELETE') {
+      const t = db.tags.find((x) => x.id === m[1]);
+      db.tags = db.tags.filter((x) => x.id !== m[1]);
+      for (const d of db.devices) d.tags = (d.tags || []).filter((x) => x !== m[1]);
+      if (t) pushEvent('info', 'system', `Тег «${t.label}» удалён`);
+      saveDb();
+      return json(res, 200, { ok: true });
+    }
+
+    // ── пользователи ──
+    if (p === '/api/users' && method === 'POST' && isAdmin) {
+      const b = await readBody(req);
+      const login = String(b.login || '').trim();
+      if (!login || !String(b.name || '').trim()) return json(res, 400, { error: 'заполните логин и имя' });
+      if (db.users.some((x) => x.login === login)) return json(res, 400, { error: 'такой логин уже есть' });
+      const u = {
+        id: uid(), name: String(b.name).trim(), login, role: b.role === 'admin' ? 'admin' : 'viewer',
+        scope: Array.isArray(b.scope) ? b.scope : [], builtIn: false,
+        passHash: hashPass(String(b.password || 'pluto')), createdAt: Date.now(),
+      };
+      db.users.push(u);
+      saveDb();
+      return json(res, 200, publicUser(u));
+    }
+    m = p.match(/^\/api\/users\/([^/]+)$/);
+    if (m && isAdmin) {
+      const u = db.users.find((x) => x.id === m[1]);
+      if (!u) return json(res, 404, { error: 'пользователь не найден' });
+      if (method === 'PUT' || method === 'PATCH') {
+        const b = await readBody(req);
+        if (b.role) u.role = b.role;
+        if (Array.isArray(b.scope)) u.scope = b.scope;
+        if (b.password) u.passHash = hashPass(String(b.password));
+        saveDb();
+        return json(res, 200, publicUser(u));
+      }
+      if (method === 'DELETE') {
+        if (u.builtIn) return json(res, 400, { error: 'нельзя удалить встроенного администратора' });
+        db.users = db.users.filter((x) => x.id !== u.id);
+        saveDb();
+        return json(res, 200, { ok: true });
+      }
+    }
+
+    // ── настройки ──
+    if (p === '/api/settings' && method === 'PUT' && isAdmin) {
+      const b = await readBody(req);
+      db.settings = {
+        ...db.settings, ...b,
+        intervals: { ...db.settings.intervals, ...(b.intervals || {}) },
+        notifications: { ...db.settings.notifications, ...(b.notifications || {}) },
+      };
+      pushEvent('info', 'system', 'Системные настройки сохранены');
+      saveDb();
+      return json(res, 200, db.settings);
+    }
+
+    return json(res, 404, { error: 'Маршрут не найден' });
+  } catch (e) {
+    console.error('[pluto] ошибка запроса:', e);
+    return json(res, 500, { error: 'внутренняя ошибка' });
+  }
+});
+
+// ─── Шлюз агентов (WebSocket, порт 8443) — зарезервирован под будущие расширения ──
+const agentServer = http.createServer((req, res) => {
+  text(res, 200, 'pluto agent gateway');
+});
+attachWs(agentServer, (conn, url, ip) => {
+  console.log(`[pluto] шлюз: подключение от ${ip} (${url})`);
+  conn.onClose(() => {});
+});
+agentServer.listen(AGENT_PORT, () => {
+  console.log(`[pluto] шлюз агентов: :${AGENT_PORT}`);
+});
+
+server.listen(HTTP_PORT, () => {
+  console.log(`[pluto] core v${VERSION} · консоль и API: http://0.0.0.0:${HTTP_PORT} · health: /api/health`);
+});

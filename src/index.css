@@ -1,1 +1,177 @@
 @import "tailwindcss";
+
+/* ─── PLUTO: дизайн-система ─── глубокий космос, приглушённый фиолет и синий ── */
+
+@theme {
+  --font-display: "Space Grotesk", "IBM Plex Sans", system-ui, sans-serif;
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --color-void: #0b0e1a;   /* фон */
+  --color-deep: #0f1324;   /* панели */
+  --color-panel: #12162a;  /* карточки */
+  --color-raised: #181d36; /* приподнятое */
+  --color-line: #242b4a;   /* границы */
+  --color-ink: #dfe3f5;    /* основной текст */
+  --color-mut: #aeb6d8;    /* приглушённый */
+  --color-dim: #8b93b8;    /* слабый */
+
+  --color-vio: #8f7df0;    /* акцент */
+  --color-blu: #7ba4e6;    /* второй акцент */
+  --color-ok: #55c795;
+  --color-warn: #dfa65e;
+  --color-crit: #e07a80;
+  --color-mint: #5fc6d8;
+}
+
+html, body, #root {
+  height: 100%;
+  background: var(--color-void);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+/* фон: многослойное звёздное небо + туманности (композитинг, без перерисовок) */
+.nebula {
+  background:
+    radial-gradient(60% 50% at 15% 20%, rgba(143, 125, 240, 0.10), transparent 70%),
+    radial-gradient(50% 45% at 85% 75%, rgba(123, 164, 230, 0.09), transparent 70%),
+    radial-gradient(40% 40% at 60% 10%, rgba(95, 198, 216, 0.05), transparent 70%);
+}
+.stars, .stars-2 {
+  background-image:
+    radial-gradient(1px 1px at 25px 35px, rgba(223, 227, 245, 0.7), transparent),
+    radial-gradient(1px 1px at 120px 90px, rgba(223, 227, 245, 0.45), transparent),
+    radial-gradient(1.5px 1.5px at 200px 160px, rgba(143, 125, 240, 0.6), transparent),
+    radial-gradient(1px 1px at 300px 60px, rgba(123, 164, 230, 0.5), transparent),
+    radial-gradient(1px 1px at 80px 220px, rgba(223, 227, 245, 0.35), transparent),
+    radial-gradient(1.5px 1.5px at 260px 260px, rgba(223, 227, 245, 0.5), transparent);
+  background-size: 340px 340px;
+  will-change: transform;
+  animation: drift 240s linear infinite;
+}
+.stars-2 {
+  background-size: 520px 520px;
+  opacity: 0.6;
+  animation-duration: 380s;
+  animation-direction: reverse;
+}
+@keyframes drift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(-340px, -170px, 0); }
+}
+
+/* появление панелей */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise { animation: rise 0.35s ease-out both; }
+
+@keyframes pop {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+.pop { animation: pop 0.18s ease-out both; }
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translateX(24px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.toast-in { animation: toastIn 0.22s ease-out both; }
+
+@keyframes evIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.ev-in { animation: evIn 0.25s ease-out both; }
+
+/* дешёвая пульсация индикаторов (opacity, не scale) */
+@keyframes breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.dot-live { animation: breathe 2.4s ease-in-out infinite; }
+.dot-crit { animation: breathe 1.1s ease-in-out infinite; }
+
+/* элементы форм */
+.inp {
+  width: 100%;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-line);
+  background: var(--color-raised);
+  padding: 0.5rem 0.75rem;
+  font-size: 13px;
+  color: var(--color-ink);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.inp::placeholder { color: color-mix(in srgb, var(--color-dim) 70%, transparent); }
+.inp:focus {
+  border-color: color-mix(in srgb, var(--color-vio) 65%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-vio) 14%, transparent);
+}
+
+.btn-acc {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border-radius: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--color-vio) 45%, transparent);
+  background: color-mix(in srgb, var(--color-vio) 16%, transparent);
+  padding: 0.5rem 0.9rem;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-vio);
+  transition: all 0.15s ease;
+}
+.btn-acc:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-vio) 26%, transparent);
+  border-color: color-mix(in srgb, var(--color-vio) 65%, transparent);
+}
+.btn-acc:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-line);
+  background: var(--color-raised);
+  padding: 0.5rem 0.8rem;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-mut);
+  transition: all 0.15s ease;
+}
+.btn-ghost:hover:not(:disabled) { color: var(--color-ink); border-color: color-mix(in srgb, var(--color-line) 60%, var(--color-vio)); }
+.btn-ghost:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--color-crit) 45%, transparent);
+  background: color-mix(in srgb, var(--color-crit) 14%, transparent);
+  padding: 0.5rem 0.8rem;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-crit);
+  transition: all 0.15s ease;
+}
+.btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--color-crit) 24%, transparent); }
+
+/* тонкие скроллбары */
+.scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+.scroll-thin::-webkit-scrollbar-track { background: transparent; }
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 4px;
+}
+.scroll-thin::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--color-line) 60%, var(--color-vio)); }
+
+/* уважение к системной настройке «меньше движения» */
+@media (prefers-reduced-motion: reduce) {
+  .stars, .stars-2, .dot-live, .dot-crit, .rise, .pop, .toast-in, .ev-in { animation: none; }
+}

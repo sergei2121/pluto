@@ -1,0 +1,26 @@
+services:
+  core:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: pluto/core:1.10.0
+    restart: unless-stopped
+    ports:
+      # Хостовые порты настраиваются через .env (PLUTO_HTTP_PORT, PLUTO_AGENT_PORT);
+      # внутри контейнера всегда 8080/8443. Если 8080 занят (например, Zabbix) —
+      # задайте PLUTO_HTTP_PORT=8090 в .env, файл при этом необязателен.
+      - "${PLUTO_HTTP_PORT:-8080}:8080"
+      - "${PLUTO_AGENT_PORT:-8443}:8443"
+    environment:
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-pluto}
+      - TZ=${TZ:-Europe/Moscow}
+    volumes:
+      - pluto-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/health"]
+      interval: 15s
+      timeout: 4s
+      retries: 3
+
+volumes:
+  pluto-data:
