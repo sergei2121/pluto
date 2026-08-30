@@ -86,7 +86,6 @@ const FavDeviceCard = memo(function FavDeviceCard({ id }: { id: string }) {
 const FavAgentCard = memo(function FavAgentCard({ id }: { id: string }) {
   const a = usePluto((s) => s.agents.find((x) => x.id === id));
   if (!a) return null;
-  const l = a.latest;
   const gl = a.glancesLatest;
   return (
     <div
@@ -107,11 +106,11 @@ const FavAgentCard = memo(function FavAgentCard({ id }: { id: string }) {
           <div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">пинг, мс</div>
         </div>
         <div>
-          <div className="font-mono text-[16px] font-bold tabular-nums text-warn">{l?.cpuTemp != null ? `${l.cpuTemp}°` : gl?.pkg != null ? `${gl.pkg}°` : '—'}</div>
+          <div className="font-mono text-[16px] font-bold tabular-nums text-warn">{gl?.pkg != null ? `${gl.pkg}°` : '—'}</div>
           <div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">t°C ЦП</div>
         </div>
         <div>
-          <div className="font-mono text-[16px] font-bold tabular-nums text-blu">{l?.ram != null ? `${l.ram}%` : gl?.mem != null ? `${gl.mem}%` : '—'}</div>
+          <div className="font-mono text-[16px] font-bold tabular-nums text-blu">{gl?.mem != null ? `${gl.mem}%` : '—'}</div>
           <div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">ОЗУ</div>
         </div>
       </div>

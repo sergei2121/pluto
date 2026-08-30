@@ -1,6 +1,6 @@
 // ─── PLUTO: клиент REST API серверного ядра ─────────────────────────────────
 import type {
-  Agent, AidaPoint, Device, EventItem, GlancesDevice, GlancesPoint, Settings, SourceTestReport, Tag, User,
+  Agent, Device, EventItem, GlancesDevice, GlancesPoint, Settings, SourceTestReport, Tag, User,
 } from './types';
 
 const TOKEN_KEY = 'pluto_token';
@@ -90,16 +90,13 @@ export const api = {
   deleteDevice: (id: string) => req<{ ok: boolean }>('DELETE', `/api/devices/${id}`),
   checkDevice: (id: string) => req<{ result: { ok: boolean; latency: number } }>('POST', `/api/devices/${id}/check`),
 
-  // агенты (IP + AIDA64 + Glances + relay)
-  addAgent: (b: { name: string; ip: string; aidaUrl: string; glancesUrl?: string; relayUrl?: string; pingTargets?: string[] }) =>
+  // агенты (IP + Glances + relay)
+  addAgent: (b: { name: string; ip: string; glancesUrl?: string; relayUrl?: string; pingTargets?: string[] }) =>
     req<Agent>('POST', '/api/agents', b),
   updateAgent: (id: string, b: Record<string, unknown>) => req<Agent>('PUT', `/api/agents/${id}`, b),
   deleteAgent: (id: string) => req<{ ok: boolean }>('DELETE', `/api/agents/${id}`),
   pollAgent: (id: string) => req<Agent>('POST', `/api/agents/${id}/poll`),
-  testAgentSource: (id: string, kind: 'aida' | 'glances') =>
-    req<SourceTestReport>('GET', `/api/agents/${id}/test-${kind}`),
-  agentAida: (id: string, range: string) =>
-    req<{ range: string; retentionDays: number; points: AidaPoint[] }>('GET', `/api/agents/${id}/aida?range=${encodeURIComponent(range)}`),
+  testAgentSource: (id: string) => req<SourceTestReport>('GET', `/api/agents/${id}/test-glances`),
   agentGlances: (id: string, range: string) =>
     req<{ range: string; retentionDays: number; points: GlancesPoint[] }>('GET', `/api/agents/${id}/glances?range=${encodeURIComponent(range)}`),
 

@@ -1,4 +1,4 @@
-// ─── PLUTO: агенты = IP + AIDA64 + Glances + relay-пинги (без установки ПО) ──
+// ─── PLUTO: агенты = IP + Glances + relay-пинги (без установки ПО) ───────────
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Plus, Star, Trash2, Pencil, Activity, Cpu, Thermometer, MemoryStick, HardDrive,
@@ -8,7 +8,7 @@ import { Bar, Drawer, EmptyState, Field, Modal, Panel, StatusDot, TimeAgo } from
 import { store, useCurrentUser, usePluto, visibleAgents } from '../lib/store';
 import { api } from '../lib/api';
 import { cls, fmtNet, fmtUp, fmtUpSec, LINE_COLORS } from '../lib/util';
-import { AIDA_FIELDS, GLANCES_FIELDS, type Agent, type SourceTestReport } from '../lib/types';
+import { GLANCES_FIELDS, type Agent, type SourceTestReport } from '../lib/types';
 
 const isIp = (s: string) => /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(s);
 const isTarget = (s: string) =>
@@ -20,17 +20,17 @@ function availability(hist: { t: number; ms: number | null }[] | undefined): num
   return Math.round((ok / hist.length) * 100);
 }
 
-// ─── Диагностика источника (AIDA64 / Glances) ───────────────────────────────
+// ─── Диагностика источника (Glances) ─────────────────────────────────────────
 
-function TestSourcePanel({ agent, kind }: { agent: Agent; kind: 'aida' | 'glances' }) {
+function TestSourcePanel({ agent }: { agent: Agent }) {
   const [busy, setBusy] = useState(false);
   const [rep, setRep] = useState<SourceTestReport | null>(null);
-  const url = kind === 'aida' ? agent.aidaUrl : agent.glancesUrl;
-  const fields = kind === 'aida' ? AIDA_FIELDS : GLANCES_FIELDS;
+  const url = agent.glancesUrl;
+  const fields = GLANCES_FIELDS;
 
   const run = async () => {
     setBusy(true);
-    try { setRep(await api.testAgentSource(agent.id, kind)); }
+    try { setRep(await api.testAgentSource(agent.id)); }
     catch (e) { setRep({ ok: false, url, via: null, error: e instanceof Error ? e.message : String(e) }); }
     finally { setBusy(false); }
   };
@@ -171,17 +171,57 @@ function PulseChart({ agents }: { agents: Agent[] }) {
 
 // ─── Карточка агента ────────────────────────────────────────────────────────
 
-function AgentCard({ a, onOpen, onFav }: { a: Agent; onOpen: () => void; onFav: () => void }) {
-  const l = a.latest;
+/** Мини-ячейка карточки: значение + подпись + индикатор-полоса */
+function Cell({ v, t, c, bar, icon }: { v: string; t: string; c: string; bar?: number; icon?: React.ReactNode }) {
+  return (
+    <div className="rounded-md border border-line/60 bg-raised/30 px-1.5 py-1.5 text-center transition-colors hover:border-line">
+      <div className="flex items-center justify-center gap-1 text-dim">
+        {icon}
+        <span className={cls('font-mono text-[12.5px] font-bold tabular-nums leading-tight', c)}>{v}</span>
+      </div>
+      <div className="mt-0.5 text-[8px] font-bold uppercase tracking-wider text-dim">{t}</div>
+      {bar != null && <Bar value={bar} className="mt-1 h-[3px]" />}
+    </div>
+  );
+}
+
+/** Мини-диаграмма дисков: количество + полоски заполненности каждой ФС */
+function DisksCell({ a }: { a: Agent }) {
   const gl = a.glancesLatest;
-  const stale = a.lastAida ? Date.now() - a.lastAida : 0;
-  const sensorCls = !a.aidaUrl
-    ? 'text-dim'
-    : !a.lastAida
-      ? 'text-crit'
-      : stale > 5 * 60000
-        ? 'text-warn'
-        : 'text-ok';
+  const disks = a.glancesDisks || [];
+  return (
+    <div className="rounded-md border border-line/60 bg-raised/30 px-1.5 py-1.5 text-center">
+      <div className="flex items-center justify-center gap-1 text-dim">
+        <HardDrive className="h-3 w-3" />
+        <span className="font-mono text-[12.5px] font-bold tabular-nums leading-tight text-ink">
+          {gl?.diskCount != null ? gl.diskCount : disks.length || '—'}
+          <span className="text-[8.5px] font-semibold text-dim"> ФС</span>
+        </span>
+      </div>
+      <div className="mt-1 space-y-[3px]">
+        {(disks.length ? disks.slice(0, 3) : [null, null, null]).map((d, i) => (
+          <div key={i} className="h-[3px] overflow-hidden rounded-full bg-line/50">
+            <div
+              className="h-full rounded-full transition-all duration-700"
+              style={{
+                width: `${d?.percent ?? 0}%`,
+                background: (d?.percent ?? 0) > 85 ? '#e07a80' : (d?.percent ?? 0) > 65 ? '#dfa65e' : '#7ba4e6',
+              }}
+            />
+          </div>
+        ))}
+      </div>
+      <div className="mt-0.5 text-[8px] font-bold uppercase tracking-wider text-dim">
+        дисков{disks.length > 3 ? ` · ещё ${disks.length - 3}` : ''}
+      </div>
+    </div>
+  );
+}
+
+function AgentCard({ a, onOpen, onFav }: { a: Agent; onOpen: () => void; onFav: () => void }) {
+  const gl = a.glancesLatest;
+  const hot = (v: number | null, warn: number, crit: number) =>
+    v == null ? 'text-dim' : v >= crit ? 'text-crit' : v >= warn ? 'text-warn' : 'text-ok';
 
   return (
     <div className="group cursor-pointer rounded-xl border border-line bg-panel/90 p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-vio/40 hover:shadow-[0_16px_40px_-16px_rgba(0,0,0,.7)]" onClick={onOpen}>
@@ -189,7 +229,7 @@ function AgentCard({ a, onOpen, onFav }: { a: Agent; onOpen: () => void; onFav: 
         <StatusDot status={a.online ? 'up' : 'down'} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13.5px] font-semibold text-ink">{a.name}</div>
-          <div className="font-mono text-[10.5px] text-dim">{a.ip}</div>
+          <div className="font-mono text-[10.5px] text-dim">{a.ip}{a.glancesNetIface ? ` · ${a.glancesNetIface}` : ''}</div>
         </div>
         {a.glancesUrl && (
           <span className="rounded border border-blu/40 bg-blu/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-blu" title="Собирается Glances">GL</span>
@@ -212,30 +252,22 @@ function AgentCard({ a, onOpen, onFav }: { a: Agent; onOpen: () => void; onFav: 
             <span className={a.online ? 'text-ok' : 'text-crit'}>{a.online ? fmtUp(a.onlineSince ? Date.now() - a.onlineSince : 0) : 'офлайн'}</span>
           </div>
           <div className="mt-1 flex justify-between font-mono text-[10.5px] text-dim">
-            <span>опрос</span>
-            <span className="text-mut">{a.lastPoll ? <TimeAgo ts={a.lastPoll} /> : 'ещё не было'}</span>
+            <span>Glances</span>
+            <span className="text-mut">{a.lastGlances ? <TimeAgo ts={a.lastGlances} /> : 'ещё не было'}</span>
           </div>
-          {a.aidaUrl && (
-            <div className="mt-1 flex justify-between font-mono text-[10.5px]">
-              <span className={sensorCls}>AIDA</span>
-              <span className="text-mut">{a.lastAida ? <TimeAgo ts={a.lastAida} /> : 'нет данных'}</span>
-            </div>
-          )}
         </div>
       </div>
 
+      {/* 8 ячеек в 2 ряда: ЦП, t°C ЦП, диск C:, t°C SSD, ОЗУ, диски, RX, TX */}
       <div className="mt-3 grid grid-cols-4 gap-1.5">
-        {[
-          { v: l?.cpuTemp != null ? `${l.cpuTemp}°` : gl?.pkg != null ? `${gl.pkg}°` : '—', t: 'ЦП °C', c: l && l.cpuTemp != null && l.cpuTemp > 75 ? 'text-crit' : 'text-warn' },
-          { v: l?.cpuUsage != null ? `${l.cpuUsage}%` : gl?.cpu != null ? `${gl.cpu}%` : '—', t: 'ЦП', c: 'text-vio' },
-          { v: l?.ram != null ? `${l.ram}%` : gl?.mem != null ? `${gl.mem}%` : '—', t: 'ОЗУ', c: 'text-blu' },
-          { v: l?.ssdTemp != null ? `${l.ssdTemp}°` : '—', t: 'SSD °C', c: 'text-mint' },
-        ].map((x) => (
-          <div key={x.t} className="rounded-md border border-line/60 bg-raised/30 px-1.5 py-1.5 text-center">
-            <div className={cls('font-mono text-[12.5px] font-bold tabular-nums', x.c)}>{x.v}</div>
-            <div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">{x.t}</div>
-          </div>
-        ))}
+        <Cell icon={<Gauge className="h-3 w-3" />} v={gl?.cpu != null ? `${gl.cpu}%` : '—'} t="ЦП" c="text-vio" bar={gl?.cpu ?? undefined} />
+        <Cell icon={<Thermometer className="h-3 w-3" />} v={gl?.pkg != null ? `${gl.pkg}°` : '—'} t="t°C ЦП" c={hot(gl?.pkg ?? null, 70, 85)} />
+        <Cell icon={<HardDrive className="h-3 w-3" />} v={gl?.diskUsed != null ? `${gl.diskUsed}%` : '—'} t="диск C:" c={hot(gl?.diskUsed != null ? gl.diskUsed - 20 : null, 70, 88)} bar={gl?.diskUsed ?? undefined} />
+        <Cell icon={<Thermometer className="h-3 w-3" />} v={gl?.ssdTemp != null ? `${gl.ssdTemp}°` : '—'} t="t°C SSD" c={hot(gl?.ssdTemp ?? null, 60, 70)} />
+        <Cell icon={<MemoryStick className="h-3 w-3" />} v={gl?.mem != null ? `${gl.mem}%` : '—'} t="ОЗУ" c="text-blu" bar={gl?.mem ?? undefined} />
+        <DisksCell a={a} />
+        <Cell icon={<Network className="h-3 w-3" />} v={gl?.rx != null ? fmtNet(gl.rx) : '—'} t="RX" c="text-mint" />
+        <Cell icon={<Network className="h-3 w-3" />} v={gl?.tx != null ? fmtNet(gl.tx) : '—'} t="TX" c="text-blu" />
       </div>
 
       {a.targets.length > 0 && (
@@ -253,7 +285,6 @@ function AgentCard({ a, onOpen, onFav }: { a: Agent; onOpen: () => void; onFav: 
 function AgentForm({ initial, onClose }: { initial: Agent | null; onClose: () => void }) {
   const [name, setName] = useState('');
   const [ip, setIp] = useState('');
-  const [aidaUrl, setAidaUrl] = useState('');
   const [glancesUrl, setGlancesUrl] = useState('');
   const [relayUrl, setRelayUrl] = useState('');
   const [targets, setTargets] = useState('');
@@ -261,7 +292,7 @@ function AgentForm({ initial, onClose }: { initial: Agent | null; onClose: () =>
 
   useEffect(() => {
     if (initial) {
-      setName(initial.name); setIp(initial.ip); setAidaUrl(initial.aidaUrl || '');
+      setName(initial.name); setIp(initial.ip);
       setGlancesUrl(initial.glancesUrl || ''); setRelayUrl(initial.relayUrl || '');
       setTargets((initial.pingTargets || []).join('\n')); setErr('');
     }
@@ -271,7 +302,6 @@ function AgentForm({ initial, onClose }: { initial: Agent | null; onClose: () =>
     setErr('');
     if (!name.trim()) return setErr('Укажите имя');
     if (!isIp(ip.trim())) return setErr('IP-адрес в формате 192.168.1.10');
-    if (aidaUrl.trim() && !/^https?:\/\//i.test(aidaUrl.trim())) return setErr('Ссылка AIDA64 должна начинаться с http://');
     if (glancesUrl.trim() && !/^https?:\/\//i.test(glancesUrl.trim())) return setErr('Адрес Glances должен начинаться с http://');
     if (relayUrl.trim() && !/^https?:\/\//i.test(relayUrl.trim())) return setErr('Адрес relay должен начинаться с http://');
     const list = targets.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
@@ -279,10 +309,10 @@ function AgentForm({ initial, onClose }: { initial: Agent | null; onClose: () =>
     if (bad) return setErr(`Некорректная цель пинга: «${bad}». Форматы: 1.2.3.4, 1.2.3.10-20, 1.2.3.0/24`);
 
     if (initial) {
-      store.updateAgent(initial.id, { name: name.trim(), ip: ip.trim(), aidaUrl: aidaUrl.trim(), glancesUrl: glancesUrl.trim(), relayUrl: relayUrl.trim(), pingTargets: list });
+      store.updateAgent(initial.id, { name: name.trim(), ip: ip.trim(), glancesUrl: glancesUrl.trim(), relayUrl: relayUrl.trim(), pingTargets: list });
       onClose();
     } else {
-      await store.addAgent({ name: name.trim(), ip: ip.trim(), aidaUrl: aidaUrl.trim(), glancesUrl: glancesUrl.trim(), relayUrl: relayUrl.trim(), pingTargets: list });
+      await store.addAgent({ name: name.trim(), ip: ip.trim(), glancesUrl: glancesUrl.trim(), relayUrl: relayUrl.trim(), pingTargets: list });
       onClose();
     }
   };
@@ -295,13 +325,10 @@ function AgentForm({ initial, onClose }: { initial: Agent | null; onClose: () =>
       <Field label="IP-адрес ПК" hint="Сервер будет пинговать этот адрес: доступность и статистика uptime">
         <input className="inp font-mono" value={ip} onChange={(e) => { setIp(e.target.value); setErr(''); }} />
       </Field>
-      <Field label="Ссылка на листинг AIDA64" hint="Сенсорная веб-страница RemoteSensor. Данные идут в реальном времени через SSE, резерв — опрос страницы.">
-        <input className="inp font-mono" value={aidaUrl} onChange={(e) => { setAidaUrl(e.target.value); setErr(''); }} placeholder="http://192.168.1.10:8090/" />
-      </Field>
-      <Field label="Адрес Glances (необязательно)" hint="Glances (glances -w, порт 61208): данные через REST API — ЦП по компонентам, ОЗУ, сеть, температура Package. Хранение — 30 дней.">
+      <Field label="Адрес Glances" hint="Glances (glances -w, порт 61208): данные через REST API — ЦП по ядрам, ОЗУ, swap, диски, сеть, датчики. Хранение — 30 дней.">
         <input className="inp font-mono" value={glancesUrl} onChange={(e) => { setGlancesUrl(e.target.value); setErr(''); }} placeholder="http://192.168.1.10:61208/" />
       </Field>
-      <Field label="Relay для пингов и loopback (необязательно)" hint="Адрес aida-monitor внутри сети агента (по умолчанию :8091). Через него сервер пингует недоступные себе устройства и открывает локальные страницы (127.0.0.1).">
+      <Field label="Relay для пингов и loopback (необязательно)" hint="Адрес pluto-relay внутри сети агента (по умолчанию :8091). Через него сервер пингует недоступные себе устройства и открывает локальные страницы (127.0.0.1).">
         <input className="inp font-mono" value={relayUrl} onChange={(e) => { setRelayUrl(e.target.value); setErr(''); }} placeholder="http://192.168.1.10:8091/" />
       </Field>
       <Field label="Цели пинга через relay (необязательно)" hint="По строке на цель: одиночный IP, диапазон 1.2.3.10-20 или подсеть 1.2.3.0/24. Пингуются изнутри VLAN агента.">
@@ -328,7 +355,6 @@ function AgentDrawer({ agent, onClose, onEdit, isAdmin }: { agent: Agent | null;
   const [targetErr, setTargetErr] = useState('');
 
   if (!agent) return <Drawer open={false} onClose={onClose} title=""><div /></Drawer>;
-  const l = agent.latest;
   const gl = agent.glancesLatest;
 
   const pollNow = async () => {
@@ -359,7 +385,7 @@ function AgentDrawer({ agent, onClose, onEdit, isAdmin }: { agent: Agent | null;
             <div className="font-mono text-[10.5px] text-dim">
               {agent.ip}
               {agent.glancesUrl && <span className="ml-2 rounded border border-blu/40 bg-blu/10 px-1 py-0.5 text-[8.5px] font-bold text-blu">GLANCES</span>}
-              {agent.aidaUrl && <span className="ml-1.5 rounded border border-vio/40 bg-vio/10 px-1 py-0.5 text-[8.5px] font-bold text-vio">AIDA64</span>}
+              {agent.glancesNetIface && <span className="ml-1.5 rounded border border-mint/40 bg-mint/10 px-1 py-0.5 text-[8.5px] font-bold text-mint">{agent.glancesNetIface}</span>}
             </div>
           </div>
         </div>
@@ -376,8 +402,8 @@ function AgentDrawer({ agent, onClose, onEdit, isAdmin }: { agent: Agent | null;
             <div className="mt-0.5 text-[9px] font-bold uppercase tracking-wider text-dim">в сети</div>
           </div>
           <div className="rounded-lg border border-line bg-raised/40 p-3">
-            <div className="font-mono text-[20px] font-bold tabular-nums text-ink">{fmtUpSec(l?.uptimeSec ?? null)}</div>
-            <div className="mt-0.5 text-[9px] font-bold uppercase tracking-wider text-dim">uptime (AIDA)</div>
+            <div className="font-mono text-[20px] font-bold tabular-nums text-ink">{fmtUpSec(gl?.uptimeSec ?? null)}</div>
+            <div className="mt-0.5 text-[9px] font-bold uppercase tracking-wider text-dim">uptime (Glances)</div>
           </div>
         </div>
 
@@ -385,41 +411,7 @@ function AgentDrawer({ agent, onClose, onEdit, isAdmin }: { agent: Agent | null;
           <p className="rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-[12px] font-semibold text-warn">{agent.lastError}</p>
         )}
 
-        {/* AIDA64 */}
-        <div>
-          <div className="mb-2 flex items-center justify-between">
-            <h4 className="text-[11px] font-bold uppercase tracking-[0.14em] text-dim">Показания AIDA64 · SSE</h4>
-            <button className="flex items-center gap-1 text-[11.5px] font-semibold text-vio transition-colors hover:text-ink" onClick={() => store.nav('telemetry', agent.id)}>
-              Журнал телеметрии <ExternalLink className="h-3 w-3" />
-            </button>
-          </div>
-          {l ? (
-            <div className="grid grid-cols-4 gap-1.5">
-              {[
-                { v: `${l.cpuUsage ?? '—'}${l.cpuUsage != null ? '%' : ''}`, t: 'CPUu', c: 'text-vio', i: <Cpu className="h-3.5 w-3.5" /> },
-                { v: l.cpuTemp != null ? `${l.cpuTemp}°C` : '—', t: 'CPU', c: 'text-warn', i: <Thermometer className="h-3.5 w-3.5" /> },
-                { v: l.ram != null ? `${l.ram}%` : '—', t: 'RAM', c: 'text-blu', i: <MemoryStick className="h-3.5 w-3.5" /> },
-                { v: l.ssdTemp != null ? `${l.ssdTemp}°C` : '—', t: 'SSD', c: 'text-mint', i: <HardDrive className="h-3.5 w-3.5" /> },
-                { v: l.diskC != null ? `${l.diskC}%` : '—', t: 'UseC', c: 'text-ink', i: <HardDrive className="h-3.5 w-3.5" /> },
-                { v: l.usedSpaceC != null ? `${l.usedSpaceC} ГБ` : '—', t: 'Занято C', c: 'text-ink', i: <HardDrive className="h-3.5 w-3.5" /> },
-                { v: fmtNet(l.tx), t: 'TX', c: 'text-blu', i: <Network className="h-3.5 w-3.5" /> },
-                { v: fmtNet(l.rx), t: 'RX', c: 'text-mint', i: <Network className="h-3.5 w-3.5" /> },
-              ].map((x) => (
-                <div key={x.t} className="rounded-lg border border-line bg-raised/30 px-2 py-2">
-                  <div className="flex items-center gap-1 text-dim">{x.i}<span className="text-[8.5px] font-bold uppercase tracking-wider">{x.t}</span></div>
-                  <div className={cls('mt-1 font-mono text-[13px] font-bold tabular-nums', x.c)}>{x.v}</div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="rounded-lg border border-dashed border-line bg-raised/20 px-3 py-3 text-[12px] text-dim">
-              Показаний пока нет{agent.aidaUrl ? ' — листинг ещё не прочитан.' : ' — не указана ссылка на листинг AIDA64.'}
-            </p>
-          )}
-          {isAdmin && agent.aidaUrl && <div className="mt-2"><TestSourcePanel agent={agent} kind="aida" /></div>}
-        </div>
-
-        {/* Glances */}
+        {/* Glances: полная детализация */}
         {agent.glancesUrl && (
           <div>
             <div className="mb-2 flex items-center justify-between">
@@ -429,50 +421,97 @@ function AgentDrawer({ agent, onClose, onEdit, isAdmin }: { agent: Agent | null;
               </button>
             </div>
             {gl ? (
-              <div className="grid grid-cols-4 gap-1.5">
-                {[
-                  { v: gl.cpu != null ? `${gl.cpu}%` : '—', t: 'CPU', c: 'text-vio', i: <Gauge className="h-3.5 w-3.5" /> },
-                  { v: gl.user != null ? `${gl.user}%` : '—', t: 'user', c: 'text-blu', i: <Cpu className="h-3.5 w-3.5" /> },
-                  { v: gl.system != null ? `${gl.system}%` : '—', t: 'system', c: 'text-blu', i: <Cpu className="h-3.5 w-3.5" /> },
-                  { v: gl.idle != null ? `${gl.idle}%` : '—', t: 'idle', c: 'text-dim', i: <Cpu className="h-3.5 w-3.5" /> },
-                  { v: gl.mem != null ? `${gl.mem}%` : '—', t: 'MEM', c: 'text-mint', i: <MemoryStick className="h-3.5 w-3.5" /> },
-                  { v: gl.memUsed != null ? `${gl.memUsed}/${gl.memTotal ?? '—'} ГБ` : '—', t: 'used/total', c: 'text-ink', i: <MemoryStick className="h-3.5 w-3.5" /> },
-                  { v: fmtNet(gl.rx), t: 'Rx/s', c: 'text-blu', i: <Network className="h-3.5 w-3.5" /> },
-                  { v: fmtNet(gl.tx), t: 'Tx/s', c: 'text-mint', i: <Network className="h-3.5 w-3.5" /> },
-                ].map((x) => (
-                  <div key={x.t} className="rounded-lg border border-line bg-raised/30 px-2 py-2">
-                    <div className="flex items-center gap-1 text-dim">{x.i}<span className="text-[8.5px] font-bold uppercase tracking-wider">{x.t}</span></div>
-                    <div className={cls('mt-1 font-mono text-[13px] font-bold tabular-nums', x.c)}>{x.v}</div>
+              <>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {[
+                    { v: gl.cpu != null ? `${gl.cpu}%` : '—', t: 'CPU', c: 'text-vio', i: <Gauge className="h-3.5 w-3.5" /> },
+                    { v: gl.user != null ? `${gl.user}%` : '—', t: 'user', c: 'text-blu', i: <Cpu className="h-3.5 w-3.5" /> },
+                    { v: gl.system != null ? `${gl.system}%` : '—', t: 'system', c: 'text-blu', i: <Cpu className="h-3.5 w-3.5" /> },
+                    { v: gl.iowait != null ? `${gl.iowait}%` : '—', t: 'iowait', c: 'text-warn', i: <Cpu className="h-3.5 w-3.5" /> },
+                    { v: gl.idle != null ? `${gl.idle}%` : '—', t: 'idle', c: 'text-dim', i: <Cpu className="h-3.5 w-3.5" /> },
+                    { v: gl.pkg != null ? `${gl.pkg}°C` : '—', t: 't°C ЦП', c: (gl.pkg ?? 0) > 78 ? 'text-crit' : 'text-warn', i: <Thermometer className="h-3.5 w-3.5" /> },
+                    { v: gl.ssdTemp != null ? `${gl.ssdTemp}°C` : '—', t: 't°C SSD', c: 'text-mint', i: <Thermometer className="h-3.5 w-3.5" /> },
+                    { v: gl.mem != null ? `${gl.mem}%` : '—', t: 'ОЗУ', c: 'text-mint', i: <MemoryStick className="h-3.5 w-3.5" /> },
+                    { v: gl.memUsed != null ? `${gl.memUsed}/${gl.memTotal ?? '—'} ГБ` : '—', t: 'ОЗУ исп/всего', c: 'text-ink', i: <MemoryStick className="h-3.5 w-3.5" /> },
+                    { v: gl.swap != null ? `${gl.swap}%` : '—', t: 'swap', c: 'text-dim', i: <MemoryStick className="h-3.5 w-3.5" /> },
+                    { v: fmtNet(gl.rx), t: 'Rx/s', c: 'text-blu', i: <Network className="h-3.5 w-3.5" /> },
+                    { v: fmtNet(gl.tx), t: 'Tx/s', c: 'text-mint', i: <Network className="h-3.5 w-3.5" /> },
+                    { v: fmtNet(gl.diskRead), t: 'диск чтение', c: 'text-blu', i: <HardDrive className="h-3.5 w-3.5" /> },
+                    { v: fmtNet(gl.diskWrite), t: 'диск запись', c: 'text-warn', i: <HardDrive className="h-3.5 w-3.5" /> },
+                    { v: gl.load1 != null ? gl.load1 : '—', t: 'load 1м', c: 'text-ink', i: <Activity className="h-3.5 w-3.5" /> },
+                    { v: gl.load5 != null ? gl.load5 : '—', t: 'load 5м', c: 'text-ink', i: <Activity className="h-3.5 w-3.5" /> },
+                  ].map((x) => (
+                    <div key={x.t} className="rounded-lg border border-line bg-raised/30 px-2 py-2">
+                      <div className="flex items-center gap-1 text-dim">{x.i}<span className="text-[8.5px] font-bold uppercase tracking-wider">{x.t}</span></div>
+                      <div className={cls('mt-1 font-mono text-[13px] font-bold tabular-nums', x.c)}>{x.v}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* загрузка по ядрам */}
+                {agent.glancesCores.length > 0 && (
+                  <div className="mt-2 rounded-lg border border-line bg-raised/30 p-2.5">
+                    <div className="mb-1.5 text-[9px] font-bold uppercase tracking-wider text-dim">Загрузка по ядрам · {agent.glancesCores.length} шт</div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-4">
+                      {agent.glancesCores.map((c, i) => (
+                        <div key={i} className="flex items-center gap-1.5">
+                          <span className="w-5 shrink-0 font-mono text-[9.5px] text-dim">#{i}</span>
+                          <Bar value={c} color="#8f7df0" className="flex-1" />
+                          <span className="w-8 shrink-0 text-right font-mono text-[9.5px] font-bold tabular-nums text-mut">{Math.round(c)}%</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                ))}
-              </div>
-            ) : (
-              <p className="rounded-lg border border-dashed border-line bg-raised/20 px-3 py-3 text-[12px] text-dim">Показаний Glances пока нет — страница ещё не прочитана.</p>
-            )}
-            {gl?.pkg != null && (
-              <p className="mt-1.5 font-mono text-[11px] text-dim">Package (t°C ЦП): <span className={gl.pkg > 78 ? 'text-crit' : 'text-warn'}>{gl.pkg}°C</span></p>
-            )}
-            {(agent.glancesDisks.length > 0 || agent.glancesNetIface) && (
-              <div className="mt-2 space-y-1.5 rounded-lg border border-line bg-raised/30 p-2.5">
+                )}
+
+                {/* все датчики */}
+                {agent.glancesSensors.length > 0 && (
+                  <div className="mt-2 rounded-lg border border-line bg-raised/30 p-2.5">
+                    <div className="mb-1.5 text-[9px] font-bold uppercase tracking-wider text-dim">Датчики · {agent.glancesSensors.length} шт</div>
+                    <div className="grid grid-cols-2 gap-1 sm:grid-cols-3">
+                      {agent.glancesSensors.map((s) => (
+                        <div key={s.label} className="flex items-center justify-between gap-1 rounded bg-raised/40 px-1.5 py-1">
+                          <span className="truncate font-mono text-[9.5px] text-dim" title={s.label}>{s.label}</span>
+                          <span className={cls('font-mono text-[10px] font-bold tabular-nums', s.unit === 'RPM' ? 'text-blu' : 'text-warn')}>
+                            {s.value != null ? `${s.value}${s.unit === 'RPM' ? '' : '°'}` : '—'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* файловые системы */}
+                {agent.glancesDisks.length > 0 && (
+                  <div className="mt-2 space-y-1.5 rounded-lg border border-line bg-raised/30 p-2.5">
+                    <div className="text-[9px] font-bold uppercase tracking-wider text-dim">Файловые системы · {agent.glancesDisks.length} шт</div>
+                    {agent.glancesDisks.map((d) => (
+                      <div key={d.mnt} className="flex items-center gap-2">
+                        <span className="w-24 shrink-0 truncate font-mono text-[10.5px] text-dim" title={d.mnt}>{d.mnt}</span>
+                        <Bar value={d.percent ?? 0} color="#8f7df0" className="flex-1" />
+                        <span className={cls('w-11 shrink-0 text-right font-mono text-[10.5px] font-bold tabular-nums', (d.percent ?? 0) > 85 ? 'text-crit' : (d.percent ?? 0) > 65 ? 'text-warn' : 'text-mut')}>
+                          {d.percent != null ? `${d.percent}%` : '—'}
+                        </span>
+                        <span className="w-20 shrink-0 text-right font-mono text-[9.5px] text-dim">
+                          {d.usedGB != null && d.sizeGB ? `${d.usedGB}/${d.sizeGB} ГБ` : ''}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 {agent.glancesNetIface && (
-                  <div className="flex items-center gap-1.5 font-mono text-[10.5px] text-dim">
+                  <div className="mt-2 flex items-center gap-1.5 font-mono text-[10.5px] text-dim">
                     <Network className="h-3 w-3 text-mint" />
-                    <span>реальный адаптер:</span>
+                    <span>сетевой трафик — реальный адаптер:</span>
                     <span className="max-w-[180px] truncate rounded bg-raised/60 px-1.5 py-px text-mint">{agent.glancesNetIface}</span>
                   </div>
                 )}
-                {agent.glancesDisks.map((d) => (
-                  <div key={d.mnt} className="flex items-center gap-2">
-                    <span className="w-20 shrink-0 truncate font-mono text-[10.5px] text-dim" title={d.mnt}>{d.mnt}</span>
-                    <Bar value={d.percent ?? 0} color="#8f7df0" className="flex-1" />
-                    <span className={cls('w-11 shrink-0 text-right font-mono text-[10.5px] font-bold tabular-nums', (d.percent ?? 0) > 85 ? 'text-crit' : (d.percent ?? 0) > 65 ? 'text-warn' : 'text-mut')}>
-                      {d.percent != null ? `${d.percent}%` : '—'}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              </>
+            ) : (
+              <p className="rounded-lg border border-dashed border-line bg-raised/20 px-3 py-3 text-[12px] text-dim">Показаний Glances пока нет — страница ещё не прочитана.</p>
             )}
-            {isAdmin && <div className="mt-2"><TestSourcePanel agent={agent} kind="glances" /></div>}
+            {isAdmin && <div className="mt-2"><TestSourcePanel agent={agent} /></div>}
           </div>
         )}
 
