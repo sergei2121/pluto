@@ -7,7 +7,7 @@ export const DATA_DIR = process.env.DATA_DIR || './data';
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
 export const DEFAULT_SETTINGS = {
-  intervals: { ping: 60, http: 60, api: 180, rtsp: 120, sip: 120, glances: 60, agent: 30, aida: 10 },
+  intervals: { ping: 60, http: 60, api: 180, rtsp: 120, sip: 120, glances: 60, agent: 30 },
   timeoutMs: 3000,
   failThreshold: 3,
   degradeFactor: 10,
@@ -64,16 +64,14 @@ export function loadDb() {
     pingTargets: Array.isArray(a.pingTargets) ? a.pingTargets : [],
     targets: Array.isArray(a.targets) ? a.targets : [],
     latHist: Array.isArray(a.latHist) ? a.latHist : [],
-    aida: Array.isArray(a.aida) ? a.aida : [],
     glances: Array.isArray(a.glances) ? a.glances : [],
-    aidaUrl: a.aidaUrl || '',
     glancesUrl: a.glancesUrl || '',
     relayUrl: a.relayUrl || '',
-    latest: a.latest || null,
     glancesLatest: a.glancesLatest || null,
     glancesDisks: Array.isArray(a.glancesDisks) ? a.glancesDisks : [],
     glancesNetIface: a.glancesNetIface || null,
-    lastAida: a.lastAida || 0,
+    glancesSensors: Array.isArray(a.glancesSensors) ? a.glancesSensors : [],
+    glancesCores: Array.isArray(a.glancesCores) ? a.glancesCores : [],
     lastGlances: a.lastGlances || 0,
   }));
   db.glances = (db.glances || []).map((g) => ({ ...g, history: Array.isArray(g.history) ? g.history : [], disks: Array.isArray(g.disks) ? g.disks : [], netIface: g.netIface || null, scraping: false }));
