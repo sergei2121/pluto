@@ -11,7 +11,7 @@ import {
   loadDb, saveDb, uid, pushEvent, hashPass, verifyPass, issueSession, authUser, attachWs,
 } from './lib.js';
 
-const VERSION = '1.10.1';
+const VERSION = '1.10.2';
 const HTTP_PORT = parseInt(process.env.HTTP_PORT || '8080', 10);
 const AGENT_PORT = parseInt(process.env.AGENT_PORT || '8443', 10);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -368,7 +368,7 @@ function sseSync() {
 
 // ─── Парсер Glances (столбцы CPU/MEM/Rx/Tx/Package) ─────────────────────────
 
-const GLANCES_KEYS = ['cpu', 'user', 'system', 'iowait', 'idle', 'irq', 'nice', 'steal', 'mem', 'memTotal', 'memUsed', 'memFree', 'rx', 'tx', 'pkg'];
+const GLANCES_KEYS = ['cpu', 'user', 'system', 'iowait', 'idle', 'irq', 'nice', 'steal', 'mem', 'memTotal', 'memUsed', 'memFree', 'rx', 'tx', 'pkg', 'diskCount', 'diskUsed'];
 
 function htmlToText(html) {
   return String(html)
@@ -436,6 +436,8 @@ function parseGlances(html) {
     rx: gNetKB(t, 'Rx'),
     tx: gNetKB(t, 'Tx'),
     pkg: gNum(t, /Package[^0-9°]{0,24}?([0-9]+(?:\.[0-9]+)?)\s*°?\s*C/i),
+    diskCount: null,
+    diskUsed: null,
   };
 }
 
@@ -448,10 +450,14 @@ function parseGlances(html) {
 const GB = 1024 ** 3;
 const n2 = (v) => (typeof v === 'number' && isFinite(v) ? Math.round(v * 100) / 100 : null);
 
+/** Виртуальные интерфейсы, которые НЕ являются реальным адаптером (VM, контейнеры, туннели). */
+const VIRT_NET = /^(lo|loopback|veth|virbr|docker|br[-\d]|vboxnet|vmnet|vnet|venet|tap|tun|bond|team|wsl|bluetooth|isatap|teredo|pseudo|any|virtual|hyper-v|vethernet|vmware|virtualbox|local area connection\s*\*)/i;
+
 function glancesFromApi(data) {
   const pt = {
     cpu: null, user: null, system: null, iowait: null, idle: null, irq: null, nice: null, steal: null,
     mem: null, memTotal: null, memUsed: null, memFree: null, rx: null, tx: null, pkg: null,
+    diskCount: null, diskUsed: null,
   };
   const cpu = data && data.cpu;
   if (cpu && typeof cpu === 'object') {
@@ -471,15 +477,50 @@ function glancesFromApi(data) {
     pt.memUsed = n2((mem.used || 0) / GB);
     pt.memFree = n2((mem.free || 0) / GB);
   }
-  const net = data && data.network;
-  if (Array.isArray(net)) {
-    let rx = 0, tx = 0, got = false;
-    for (const itf of net) {
-      if (itf && typeof itf.rx === 'number') { rx += itf.rx; got = true; }
-      if (itf && typeof itf.tx === 'number') { tx += itf.tx; got = true; }
+
+  // ── FILE SYS (плагин fs): количество ФС и заполненность основной ──
+  let disks = [];
+  const fs = data && data.fs;
+  if (Array.isArray(fs)) {
+    disks = fs
+      .filter((f) => f && typeof f.percent === 'number')
+      .map((f) => ({
+        mnt: String(f.mnt_point || f.device_name || '?'),
+        percent: n2(f.percent),
+        usedGB: n2((f.used || 0) / GB),
+        sizeGB: n2((f.size || 0) / GB),
+      }));
+    if (disks.length) {
+      pt.diskCount = disks.length;
+      const root = disks.find((d) => d.mnt === '/' || d.mnt === '\\')
+        || disks.find((d) => /^[A-Za-z]:[\\/]?$/.test(d.mnt)) // Windows: диск C:
+        || disks[0];
+      pt.diskUsed = root.percent;
     }
-    if (got) { pt.rx = n2(rx / 1024); pt.tx = n2(tx / 1024); } // байт/с → КБ/с
   }
+
+  // ── NETWORK: реальный адаптер, не виртуальный ──
+  // Из физических (после отсева виртуальных) берём самый нагруженный —
+  // через него, как правило, идёт аплинк. Если всё отфильтровалось —
+  // берём лучший из всех, чтобы не терять данные.
+  let netIface = null;
+  const net = data && data.network;
+  if (Array.isArray(net) && net.length) {
+    const phys = net.filter((i) => i && i.interface_name && !VIRT_NET.test(String(i.interface_name)));
+    const cand = phys.length ? phys : net;
+    let best = null;
+    let bestT = -1;
+    for (const itf of cand) {
+      const t = (typeof itf.rx === 'number' ? itf.rx : 0) + (typeof itf.tx === 'number' ? itf.tx : 0);
+      if (t > bestT) { best = itf; bestT = t; }
+    }
+    if (best) {
+      netIface = String(best.interface_name);
+      pt.rx = n2((best.rx || 0) / 1024); // байт/с → КБ/с
+      pt.tx = n2((best.tx || 0) / 1024);
+    }
+  }
+
   const sensors = data && data.sensors;
   if (Array.isArray(sensors)) {
     // Package — температура процессора (label «Package id 0» / «coretemp … Package …»)
@@ -491,7 +532,7 @@ function glancesFromApi(data) {
       if (anyTemp) pt.pkg = n2(anyTemp.value); // нет package — берём первый температурный датчик
     }
   }
-  return pt;
+  return { pt, disks, netIface };
 }
 
 /** Возвращает { pt, source: 'api4'|'api3'|'html', via } или бросает ошибку с причиной. */
@@ -505,15 +546,17 @@ async function collectGlances(rawUrl, relayUrl) {
       const txt = await fetchListing(apiUrl, relayUrl).then((r) => r.html);
       if (!txt || txt.trim().startsWith('<')) continue; // это HTML, а не JSON — пробуем другую версию
       const data = JSON.parse(txt);
-      const pt = glancesFromApi(data);
-      if (GLANCES_KEYS.some((k) => pt[k] != null)) return { pt, source: ver === 4 ? 'api4' : 'api3', via: 'direct' };
+      const { pt, disks, netIface } = glancesFromApi(data);
+      if (GLANCES_KEYS.some((k) => pt[k] != null)) {
+        return { pt, disks, netIface, source: ver === 4 ? 'api4' : 'api3', via: 'direct' };
+      }
     } catch { /* версия API недоступна — пробуем следующую */ }
   }
 
   // запасной вариант: разбор HTML (старый Glances без REST API)
   const { html } = await fetchListing(base, relayUrl);
   const pt = parseGlances(html);
-  if (GLANCES_KEYS.some((k) => pt[k] != null)) return { pt, source: 'html', via: 'direct' };
+  if (GLANCES_KEYS.some((k) => pt[k] != null)) return { pt, disks: [], netIface: null, source: 'html', via: 'direct' };
 
   throw new Error('Glances отвечает, но данные не получены: REST API (/api/4/all и /api/3/all) и HTML-разбор не дали показателей. Проверьте, что это именно Glances (glances -w)');
 }
@@ -695,12 +738,14 @@ async function pollAgent(agent, force) {
   if (agent.glancesUrl && (force || now - (agent.lastGlances || 0) >= glIv)) {
     agent.lastGlances = now;
     try {
-      const { pt, source } = await collectGlances(agent.glancesUrl, agent.relayUrl);
+      const { pt, disks, netIface, source } = await collectGlances(agent.glancesUrl, agent.relayUrl);
       pt.t = Date.now();
       agent.glancesLatest = pt;
+      agent.glancesDisks = Array.isArray(disks) ? disks : [];
+      agent.glancesNetIface = netIface || null;
       seriesAppend(agent, 'glances', pt, GLANCES_RETENTION_MS);
       agent.lastError = null;
-      console.log(`[pluto] Glances «${agent.name}» [${source}]: CPU ${pt.cpu ?? '—'}% · MEM ${pt.mem ?? '—'}% · ${pt.pkg ?? '—'}°C`);
+      console.log(`[pluto] Glances «${agent.name}» [${source}]: CPU ${pt.cpu ?? '—'}% · MEM ${pt.mem ?? '—'}% · FS ${pt.diskCount ?? '—'} шт (${pt.diskUsed ?? '—'}%) · net ${netIface ?? '—'}`);
     } catch (e) {
       agent.lastError = 'Glances: ' + (e.message || 'ошибка запроса');
       console.log(`[pluto] Glances «${agent.name}»: ${agent.lastError}`);
@@ -728,11 +773,13 @@ async function scrapeGlancesDev(dev, force) {
   if (!force && Date.now() - (dev.lastScrape || 0) < giv) return;
   const now = Date.now();
   try {
-    const { pt, source } = await collectGlances(dev.url, null);
+    const { pt, disks, netIface, source } = await collectGlances(dev.url, null);
     pt.t = Date.now();
     dev.lastScrape = now;
     dev.online = true;
     dev.latest = pt;
+    dev.disks = Array.isArray(disks) ? disks : [];
+    dev.netIface = netIface || null;
     dev.lastError = null;
     if (!Array.isArray(dev.history)) dev.history = [];
     dev.history.push(pt);
@@ -949,7 +996,8 @@ const server = http.createServer(async (req, res) => {
         pingTargets: Array.isArray(b.pingTargets) ? b.pingTargets.map((x) => String(x).trim()).filter(Boolean) : [],
         online: false, latency: null, onlineSince: 0,
         lastSeen: 0, lastPoll: 0, lastAida: 0, lastGlances: 0, lastError: null,
-        latest: null, glancesLatest: null, aida: [], glances: [], latHist: [], targets: [],
+        latest: null, glancesLatest: null, glancesDisks: [], glancesNetIface: null,
+        aida: [], glances: [], latHist: [], targets: [],
         favorite: false, createdAt: Date.now(),
       };
       db.agents.push(a);
@@ -997,12 +1045,15 @@ const server = http.createServer(async (req, res) => {
       if (kind === 'glances') {
         // Glances: пробуем REST API (/api/4/all → /api/3/all), затем HTML
         try {
-          const { pt, source } = await collectGlances(srcUrl, a.relayUrl);
+          const { pt, disks, netIface, source } = await collectGlances(srcUrl, a.relayUrl);
           const recognized = GLANCES_KEYS.filter((k) => pt[k] != null);
+          const viaText = source === 'html'
+            ? 'разбор HTML-страницы'
+            : 'REST API Glances, ' + (source === 'api4' ? '/api/4' : '/api/3');
           return json(res, 200, {
             ok: recognized.length > 0, url: srcUrl, via: source,
-            sample: source === 'html' ? 'разбор HTML-страницы' : `REST API Glances · ${source === 'api4' ? '/api/4' : '/api/3'}`,
-            values: pt, recognized,
+            sample: viaText + (netIface ? ' · адаптер: ' + netIface : '') + (disks.length ? ' · ФС: ' + disks.length + ' шт' : ''),
+            values: pt, recognized, disks, netIface,
             missing: GLANCES_KEYS.filter((k) => pt[k] == null),
           });
         } catch (e) {
@@ -1056,6 +1107,7 @@ const server = http.createServer(async (req, res) => {
         id: uid(), name: String(b.name || '').trim() || 'Glances-сервер', url: String(b.url).trim(),
         serverLink: String(b.serverLink || '').trim(), createdAt: Date.now(),
         lastScrape: 0, lastError: null, online: false, latest: null, history: [],
+        disks: [], netIface: null,
       };
       db.glances.push(g);
       saveDb();

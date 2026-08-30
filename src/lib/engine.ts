@@ -194,6 +194,7 @@ function stepAgent(id: string, now: number) {
       memFree: Math.round(rnd(1, 8) * 10) / 10,
       rx: Math.round(rnd(0, 5000) * 10) / 10, tx: Math.round(rnd(0, 1500) * 10) / 10,
       pkg: Math.round(rnd(35, 78) * 10) / 10,
+      diskCount: 3, diskUsed: Math.round(rnd(30, 80) * 10) / 10,
     };
     glancesLatest = pt;
     glances = [...glances, pt].slice(-4000);
@@ -231,6 +232,7 @@ function stepGlancesDevice(id: string, now: number) {
     mem: Math.round(rnd(20, 90) * 10) / 10, memTotal: 32, memUsed: Math.round(rnd(4, 28) * 10) / 10,
     memFree: Math.round(rnd(2, 16) * 10) / 10,
     rx: Math.round(rnd(0, 20000) * 10) / 10, tx: Math.round(rnd(0, 5000) * 10) / 10,
+    diskCount: 4, diskUsed: Math.round(rnd(25, 85) * 10) / 10,
     pkg: Math.round(rnd(35, 80) * 10) / 10,
   };
   set({
