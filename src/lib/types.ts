@@ -49,42 +49,7 @@ export const DEVICE_TYPE_META: Record<DeviceType, { label: string; desc: string 
 
 export const DEVICE_TYPES: DeviceType[] = ['ping', 'http', 'api', 'rtsp', 'sip'];
 
-// ─── AIDA64: точка показаний (листинг RemoteSensor) ─────────────────────────
-
-export interface AidaPoint {
-  t: number; // unix ms
-  cpuUsage: number | null; // %  — пункт «CPUu»
-  cpuTemp: number | null; // °C — пункт «CPU»
-  ram: number | null; // %  — пункт «RAM»
-  ssdTemp: number | null; // °C — пункт «SSD»
-  diskC: number | null; // %  — пункт «UseC»
-  usedSpaceC: number | null; // ГБ — пункт «UsedSpaceC»
-  tx: number | null; // КБ/с — пункт «TX»
-  rx: number | null; // КБ/с — пункт «RX»
-  uptimeSec: number | null; // сек — пункт «Uptime»
-}
-
-export type AidaRange = '5m' | '30m' | '3h' | '24h' | '7d' | '30d' | '60d';
-
-export const AIDA_RANGES: { v: AidaRange; label: string }[] = [
-  { v: '5m', label: '5 мин' }, { v: '30m', label: '30 мин' }, { v: '3h', label: '3 часа' },
-  { v: '24h', label: '24 часа' }, { v: '7d', label: '7 дней' }, { v: '30d', label: '30 дней' },
-  { v: '60d', label: '60 дней' },
-];
-
-export const AIDA_FIELDS: { k: keyof AidaPoint; label: string; unit: string }[] = [
-  { k: 'cpuUsage', label: 'CPUu', unit: '%' },
-  { k: 'cpuTemp', label: 'CPU', unit: '°C' },
-  { k: 'ram', label: 'RAM', unit: '%' },
-  { k: 'ssdTemp', label: 'SSD', unit: '°C' },
-  { k: 'diskC', label: 'UseC', unit: '%' },
-  { k: 'usedSpaceC', label: 'UsedSpaceC', unit: 'ГБ' },
-  { k: 'tx', label: 'TX', unit: 'КБ/с' },
-  { k: 'rx', label: 'RX', unit: 'КБ/с' },
-  { k: 'uptimeSec', label: 'Uptime', unit: 'с' },
-];
-
-// ─── Glances: точка показаний (веб-страница, порт 61208) ────────────────────
+// ─── Glances: точка показаний (REST API, порт 61208) ────────────────────────
 
 export interface GlancesPoint {
   t: number;
@@ -171,9 +136,8 @@ export interface Agent {
   id: string;
   name: string;
   ip: string;
-  aidaUrl: string; // листинг AIDA64 RemoteSensor
-  glancesUrl: string; // веб-страница Glances (http://<IP>:61208)
-  relayUrl: string; // aida-monitor внутри VLAN (loopback-обход + пинги)
+  glancesUrl: string; // Glances (http://<IP>:61208)
+  relayUrl: string; // pluto-relay внутри VLAN (loopback-обход + пинги)
   pingTargets: string[]; // IP / диапазон / подсеть — пингуются через relay
   favorite: boolean;
   online: boolean;
@@ -181,16 +145,13 @@ export interface Agent {
   onlineSince: number;
   lastSeen: number;
   lastPoll: number;
-  lastAida: number;
   lastGlances: number;
   lastError: string | null;
-  latest: AidaPoint | null;
   glancesLatest: GlancesPoint | null;
   glancesDisks: GlancesDisk[]; // снимок ФС (FILE SYS)
   glancesNetIface: string | null; // имя реального адаптера
   glancesSensors: GlancesSensor[]; // все датчики (t°C, RPM)
   glancesCores: number[]; // загрузка каждого ядра, %
-  aida: AidaPoint[]; // 60 дней
   glances: GlancesPoint[]; // 30 дней
   latHist: { t: number; ms: number | null }[];
   targets: AgentTarget[];
@@ -241,7 +202,7 @@ export interface User {
 }
 
 export interface Settings {
-  intervals: Record<DeviceType | 'glances' | 'agent' | 'aida', number>;
+  intervals: Record<DeviceType | 'glances' | 'agent', number>;
   timeoutMs: number;
   failThreshold: number;
   degradeFactor: number;

@@ -61,7 +61,7 @@ const INJECTED_CORE: string | null =
 
 function defaultSettings(): Settings {
   return {
-    intervals: { ping: 60, http: 60, api: 180, rtsp: 120, sip: 120, glances: 60, agent: 30, aida: 10 },
+    intervals: { ping: 60, http: 60, api: 180, rtsp: 120, sip: 120, glances: 60, agent: 30 },
     timeoutMs: 3000,
     failThreshold: 3,
     degradeFactor: 10,
@@ -209,15 +209,14 @@ export const store = {
       pingTargets: Array.isArray(a.pingTargets) ? a.pingTargets : [],
       targets: Array.isArray(a.targets) ? a.targets : [],
       latHist: Array.isArray(a.latHist) ? a.latHist : [],
-      aida: Array.isArray(a.aida) ? a.aida : [],
       glances: Array.isArray(a.glances) ? a.glances : [],
-      latest: a.latest ?? null,
       glancesLatest: a.glancesLatest ?? null,
       glancesDisks: Array.isArray(a.glancesDisks) ? a.glancesDisks : [],
       glancesNetIface: a.glancesNetIface ?? null,
+      glancesSensors: Array.isArray(a.glancesSensors) ? a.glancesSensors : [],
+      glancesCores: Array.isArray(a.glancesCores) ? a.glancesCores : [],
       latency: a.latency ?? null,
       lastError: a.lastError ?? null,
-      aidaUrl: a.aidaUrl ?? '',
       glancesUrl: a.glancesUrl ?? '',
       relayUrl: a.relayUrl ?? '',
     });
@@ -290,7 +289,7 @@ export const store = {
   },
 
   // ── агенты ──
-  async addAgent(d: { name: string; ip: string; aidaUrl: string; glancesUrl?: string; relayUrl?: string; pingTargets?: string[] }): Promise<Agent | null> {
+  async addAgent(d: { name: string; ip: string; glancesUrl?: string; relayUrl?: string; pingTargets?: string[] }): Promise<Agent | null> {
     if (getState().apiMode === 'server') {
       try {
         await api.addAgent(d);
@@ -303,11 +302,11 @@ export const store = {
       }
     }
     const a: Agent = {
-      id: uid('ag'), name: d.name, ip: d.ip, aidaUrl: d.aidaUrl, glancesUrl: d.glancesUrl || '', relayUrl: d.relayUrl || '',
+      id: uid('ag'), name: d.name, ip: d.ip, glancesUrl: d.glancesUrl || '', relayUrl: d.relayUrl || '',
       pingTargets: d.pingTargets || [], favorite: false, online: false, latency: null, onlineSince: 0,
-      lastSeen: 0, lastPoll: 0, lastAida: 0, lastGlances: 0, lastError: null, latest: null, glancesLatest: null,
-      glancesDisks: [], glancesNetIface: null,
-      aida: [], glances: [], latHist: [], targets: [], createdAt: Date.now(),
+      lastSeen: 0, lastPoll: 0, lastGlances: 0, lastError: null, glancesLatest: null,
+      glancesDisks: [], glancesNetIface: null, glancesSensors: [], glancesCores: [],
+      glances: [], latHist: [], targets: [], createdAt: Date.now(),
     };
     set({ agents: [...getState().agents, a] });
     get().pushEvent('info', 'agent', `Добавлен агент «${a.name}» (${a.ip})`);

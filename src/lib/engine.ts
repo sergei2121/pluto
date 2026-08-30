@@ -4,7 +4,7 @@
 // движок выключен — все проверки выполняет ядро.
 
 import { getState, store, useToasts } from './store';
-import type { AidaPoint, Device, GlancesPoint } from './types';
+import type { Device, GlancesPoint } from './types';
 import { clamp, mulberry32, hashStr, rnd, rndInt } from './util';
 
 let timer: number | null = null;
@@ -152,7 +152,26 @@ function applyResult(id: string, ok: boolean, latency: number, approx: boolean) 
   });
 }
 
-// ─── Агенты (эмуляция телеметрии AIDA64 / Glances) ──────────────────────────
+// ─── Агенты (эмуляция телеметрии Glances) ────────────────────────────────────
+
+function mockGlancesPoint(t: number, memTotal: number): GlancesPoint {
+  return {
+    t,
+    cpu: Math.round(rnd(2, 90) * 10) / 10, user: Math.round(rnd(1, 50) * 10) / 10,
+    system: Math.round(rnd(1, 25) * 10) / 10, iowait: Math.round(rnd(0, 10) * 10) / 10,
+    idle: Math.round(rnd(10, 95) * 10) / 10, irq: 0, nice: 0, steal: 0,
+    mem: Math.round(rnd(20, 90) * 10) / 10, memTotal,
+    memUsed: Math.round(rnd(memTotal * 0.2, memTotal * 0.85) * 10) / 10,
+    memFree: Math.round(rnd(memTotal * 0.1, memTotal * 0.6) * 10) / 10,
+    rx: Math.round(rnd(0, 5000) * 10) / 10, tx: Math.round(rnd(0, 1500) * 10) / 10,
+    pkg: Math.round(rnd(35, 78) * 10) / 10, ssdTemp: Math.round(rnd(30, 58) * 10) / 10,
+    load1: Math.round(rnd(0.2, 3.5) * 100) / 100, load5: Math.round(rnd(0.2, 2.5) * 100) / 100,
+    load15: Math.round(rnd(0.2, 2) * 100) / 100, swap: Math.round(rnd(0, 15) * 10) / 10,
+    diskRead: Math.round(rnd(0, 8000) * 10) / 10, diskWrite: Math.round(rnd(0, 4000) * 10) / 10,
+    diskCount: 3, diskUsed: Math.round(rnd(30, 80) * 10) / 10,
+    uptimeSec: Math.floor(t / 1000) % 864000,
+  };
+}
 
 function stepAgent(id: string, now: number) {
   const s = getState();
@@ -163,39 +182,13 @@ function stepAgent(id: string, now: number) {
   const online = rng() > 0.015;
   const ms = online ? Math.round(rnd(1, 40)) : null;
 
-  const aidaIv = Math.max(10, s.settings.intervals.aida ?? 10) * 1000;
-  const dueAida = a.aidaUrl && now - a.lastAida >= aidaIv;
   const glIv = Math.max(15, s.settings.intervals.glances ?? 60) * 1000;
   const dueGl = a.glancesUrl && now - a.lastGlances >= glIv;
-
-  let latest = a.latest;
-  let aida = a.aida;
-  if (online && dueAida) {
-    const pt: AidaPoint = {
-      t: now,
-      cpuUsage: Math.round(rnd(2, 85)), cpuTemp: Math.round(rnd(36, 72)), ram: Math.round(rnd(20, 90)),
-      ssdTemp: Math.round(rnd(30, 58)), diskC: Math.round(rnd(30, 80)), usedSpaceC: Math.round(rnd(60, 400)),
-      tx: Math.round(rnd(0, 3000) * 10) / 10, rx: Math.round(rnd(0, 8000) * 10) / 10,
-      uptimeSec: Math.floor((now - a.createdAt) / 1000),
-    };
-    latest = pt;
-    aida = [...aida, pt].slice(-4000);
-  }
 
   let glancesLatest = a.glancesLatest;
   let glances = a.glances;
   if (online && dueGl) {
-    const pt: GlancesPoint = {
-      t: now,
-      cpu: Math.round(rnd(2, 90) * 10) / 10, user: Math.round(rnd(1, 50) * 10) / 10,
-      system: Math.round(rnd(1, 25) * 10) / 10, iowait: Math.round(rnd(0, 10) * 10) / 10,
-      idle: Math.round(rnd(10, 95) * 10) / 10, irq: 0, nice: 0, steal: 0,
-      mem: Math.round(rnd(20, 90) * 10) / 10, memTotal: 16, memUsed: Math.round(rnd(3, 14) * 10) / 10,
-      memFree: Math.round(rnd(1, 8) * 10) / 10,
-      rx: Math.round(rnd(0, 5000) * 10) / 10, tx: Math.round(rnd(0, 1500) * 10) / 10,
-      pkg: Math.round(rnd(35, 78) * 10) / 10,
-      diskCount: 3, diskUsed: Math.round(rnd(30, 80) * 10) / 10,
-    };
+    const pt = mockGlancesPoint(now, 16);
     glancesLatest = pt;
     glances = [...glances, pt].slice(-4000);
   }
@@ -205,9 +198,8 @@ function stepAgent(id: string, now: number) {
     onlineSince: online ? (a.onlineSince || now) : 0,
     lastSeen: online ? now : a.lastSeen,
     lastPoll: now,
-    lastAida: dueAida && online ? now : a.lastAida,
     lastGlances: dueGl && online ? now : a.lastGlances,
-    latest, aida, glancesLatest, glances,
+    glancesLatest, glances,
     latHist: [...a.latHist, { t: now, ms }].slice(-480),
     lastError: online ? null : 'агент недоступен (эмуляция)',
   });
@@ -224,17 +216,7 @@ function stepGlancesDevice(id: string, now: number) {
     set({ glances: getState().glances.map((x) => (x.id === id ? { ...x, online: false, lastScrape: now, lastError: 'сервер не ответил (эмуляция)' } : x)) });
     return;
   }
-  const pt: GlancesPoint = {
-    t: now,
-    cpu: Math.round(rnd(2, 90) * 10) / 10, user: Math.round(rnd(1, 50) * 10) / 10,
-    system: Math.round(rnd(1, 25) * 10) / 10, iowait: Math.round(rnd(0, 8) * 10) / 10,
-    idle: Math.round(rnd(10, 95) * 10) / 10, irq: 0, nice: 0, steal: 0,
-    mem: Math.round(rnd(20, 90) * 10) / 10, memTotal: 32, memUsed: Math.round(rnd(4, 28) * 10) / 10,
-    memFree: Math.round(rnd(2, 16) * 10) / 10,
-    rx: Math.round(rnd(0, 20000) * 10) / 10, tx: Math.round(rnd(0, 5000) * 10) / 10,
-    diskCount: 4, diskUsed: Math.round(rnd(25, 85) * 10) / 10,
-    pkg: Math.round(rnd(35, 80) * 10) / 10,
-  };
+  const pt = mockGlancesPoint(now, 32);
   set({
     glances: getState().glances.map((x) =>
       x.id === id

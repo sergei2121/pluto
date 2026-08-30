@@ -63,7 +63,7 @@ function PollingTab() {
   useEffect(() => setDraft({ ...settings, intervals: { ...settings.intervals } }), [settings]);
 
   const set = (patch: Partial<TSettings>) => setDraft((d) => ({ ...d, ...patch }));
-  const setInt = (k: DeviceType | 'glances' | 'agent' | 'aida', v: number) => setDraft((d) => ({ ...d, intervals: { ...d.intervals, [k]: v } }));
+  const setInt = (k: DeviceType | 'glances' | 'agent', v: number) => setDraft((d) => ({ ...d, intervals: { ...d.intervals, [k]: v } }));
 
   return (
     <Panel title="Интервалы опросов и пороги" icon={<Send className="h-4 w-4" />}>
@@ -72,8 +72,7 @@ function PollingTab() {
           <NumField key={t} label={`${DEVICE_TYPE_META[t].label} — интервал`} value={draft.intervals[t]} onChange={(v) => setInt(t, v)} min={5} suffix="сек" />
         ))}
         <NumField label="Агенты — интервал опроса" value={draft.intervals.agent ?? 30} onChange={(v) => setInt('agent', v)} min={10} suffix="сек" hint="Пинг до IP (uptime) и relay-пинги устройств" />
-        <NumField label="Датчик AIDA64 — интервал" value={draft.intervals.aida ?? 10} onChange={(v) => setInt('aida', v)} min={10} suffix="сек" hint="Частота записи точек из SSE-потока / опроса листинга" />
-        <NumField label="Glances — интервал" value={draft.intervals.glances ?? 60} onChange={(v) => setInt('glances', v)} min={15} suffix="сек" hint="Опрос веб-страницы Glances (агенты и Bars)" />
+        <NumField label="Glances — интервал" value={draft.intervals.glances ?? 60} onChange={(v) => setInt('glances', v)} min={15} suffix="сек" hint="Опрос Glances (агенты и Bars)" />
         <NumField label="Таймаут проверки" value={draft.timeoutMs} onChange={(v) => set({ timeoutMs: v })} min={500} suffix="мс" />
         <NumField label="Порог аварии" value={draft.failThreshold} onChange={(v) => set({ failThreshold: v })} min={1} suffix="сб." hint="Сбоев подряд до статуса «Авария»" />
         <NumField label="Фактор деградации" value={draft.degradeFactor} onChange={(v) => set({ degradeFactor: v })} min={2} suffix="×" hint="Во сколько раз пинг выше базового — деградация" />
