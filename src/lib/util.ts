@@ -1,6 +1,6 @@
 // ─── PLUTO: утилиты ─────────────────────────────────────────────────────────
 
-export const CONSOLE_VERSION = '1.10.0';
+export const CONSOLE_VERSION = '1.10.1';
 
 export function hashStr(s: string): number {
   let h = 2166136261;

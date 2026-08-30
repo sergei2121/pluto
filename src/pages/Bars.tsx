@@ -130,7 +130,7 @@ function AddGlancesModal({ open, onClose }: { open: boolean; onClose: () => void
         <Field label="Имя">
           <input className="inp" value={name} onChange={(e) => { setName(e.target.value); setErr(''); }} placeholder="Rocky-DB" />
         </Field>
-        <Field label="Адрес мониторинга" hint="Веб-страница Glances (glances -w, порт 61208). Ядро само считывает столбцы CPU / MEM / Rx-Tx / Package.">
+        <Field label="Адрес мониторинга" hint="Glances (glances -w, порт 61208). Ядро берёт JSON из REST API /api/4 и /api/3 — CPU, MEM, сеть, температуру Package; разбор HTML — запасной.">
           <input className="inp font-mono" value={url} onChange={(e) => { setUrl(e.target.value); setErr(''); }} placeholder="http://192.168.1.20:61208/" />
         </Field>
         <Field label="Ссылка на физ. сервер" hint="Будет кликабельной в карточке — например, SSH-консоль, iDRAC или страница управления.">

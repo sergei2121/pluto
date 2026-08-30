@@ -298,7 +298,7 @@ function AgentForm({ initial, onClose }: { initial: Agent | null; onClose: () =>
       <Field label="Ссылка на листинг AIDA64" hint="Сенсорная веб-страница RemoteSensor. Данные идут в реальном времени через SSE, резерв — опрос страницы.">
         <input className="inp font-mono" value={aidaUrl} onChange={(e) => { setAidaUrl(e.target.value); setErr(''); }} placeholder="http://192.168.1.10:8090/" />
       </Field>
-      <Field label="Адрес Glances (необязательно)" hint="Веб-интерфейс Glances (glances -w): ЦП по компонентам, ОЗУ, сеть, температура Package. Хранение — 30 дней.">
+      <Field label="Адрес Glances (необязательно)" hint="Glances (glances -w, порт 61208): данные через REST API — ЦП по компонентам, ОЗУ, сеть, температура Package. Хранение — 30 дней.">
         <input className="inp font-mono" value={glancesUrl} onChange={(e) => { setGlancesUrl(e.target.value); setErr(''); }} placeholder="http://192.168.1.10:61208/" />
       </Field>
       <Field label="Relay для пингов и loopback (необязательно)" hint="Адрес aida-monitor внутри сети агента (по умолчанию :8091). Через него сервер пингует недоступные себе устройства и открывает локальные страницы (127.0.0.1).">
