@@ -11,7 +11,7 @@ import {
   loadDb, saveDb, uid, pushEvent, hashPass, verifyPass, issueSession, authUser, attachWs,
 } from './lib.js';
 
-const VERSION = '1.10.0';
+const VERSION = '1.10.1';
 const HTTP_PORT = parseInt(process.env.HTTP_PORT || '8080', 10);
 const AGENT_PORT = parseInt(process.env.AGENT_PORT || '8443', 10);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -439,6 +439,85 @@ function parseGlances(html) {
   };
 }
 
+/**
+ * Сбор Glances через REST API — надёжный способ: веб-страница Glances — это SPA,
+ * значения в сыром HTML отсутствуют, но тот же порт отдаёт JSON:
+ *   /api/4/all (Glances 4.x) и /api/3/all (Glances 3.x).
+ * Разбор HTML (parseGlances) оставлен как запасной вариант для очень старых версий.
+ */
+const GB = 1024 ** 3;
+const n2 = (v) => (typeof v === 'number' && isFinite(v) ? Math.round(v * 100) / 100 : null);
+
+function glancesFromApi(data) {
+  const pt = {
+    cpu: null, user: null, system: null, iowait: null, idle: null, irq: null, nice: null, steal: null,
+    mem: null, memTotal: null, memUsed: null, memFree: null, rx: null, tx: null, pkg: null,
+  };
+  const cpu = data && data.cpu;
+  if (cpu && typeof cpu === 'object') {
+    pt.cpu = n2(cpu.total);
+    pt.user = n2(cpu.user);
+    pt.system = n2(cpu.system);
+    pt.iowait = n2(cpu.iowait);
+    pt.idle = n2(cpu.idle);
+    pt.irq = n2(cpu.irq);
+    pt.nice = n2(cpu.nice);
+    pt.steal = n2(cpu.steal);
+  }
+  const mem = data && data.mem;
+  if (mem && typeof mem === 'object') {
+    pt.mem = n2(mem.percent);
+    pt.memTotal = n2((mem.total || 0) / GB);
+    pt.memUsed = n2((mem.used || 0) / GB);
+    pt.memFree = n2((mem.free || 0) / GB);
+  }
+  const net = data && data.network;
+  if (Array.isArray(net)) {
+    let rx = 0, tx = 0, got = false;
+    for (const itf of net) {
+      if (itf && typeof itf.rx === 'number') { rx += itf.rx; got = true; }
+      if (itf && typeof itf.tx === 'number') { tx += itf.tx; got = true; }
+    }
+    if (got) { pt.rx = n2(rx / 1024); pt.tx = n2(tx / 1024); } // байт/с → КБ/с
+  }
+  const sensors = data && data.sensors;
+  if (Array.isArray(sensors)) {
+    // Package — температура процессора (label «Package id 0» / «coretemp … Package …»)
+    const pkg = sensors.find((s) => s && /package/i.test(String(s.label || '')) && s.unit === 'C')
+      || sensors.find((s) => s && /package/i.test(String(s.label || '')));
+    if (pkg && typeof pkg.value === 'number') pt.pkg = n2(pkg.value);
+    else {
+      const anyTemp = sensors.find((s) => s && s.unit === 'C' && typeof s.value === 'number');
+      if (anyTemp) pt.pkg = n2(anyTemp.value); // нет package — берём первый температурный датчик
+    }
+  }
+  return pt;
+}
+
+/** Возвращает { pt, source: 'api4'|'api3'|'html', via } или бросает ошибку с причиной. */
+async function collectGlances(rawUrl, relayUrl) {
+  const base = String(rawUrl || '').trim().replace(/\/+$/, '');
+  if (!base) throw new Error('не задан адрес Glances');
+
+  for (const ver of [4, 3]) {
+    const apiUrl = `${base}/api/${ver}/all`;
+    try {
+      const txt = await fetchListing(apiUrl, relayUrl).then((r) => r.html);
+      if (!txt || txt.trim().startsWith('<')) continue; // это HTML, а не JSON — пробуем другую версию
+      const data = JSON.parse(txt);
+      const pt = glancesFromApi(data);
+      if (GLANCES_KEYS.some((k) => pt[k] != null)) return { pt, source: ver === 4 ? 'api4' : 'api3', via: 'direct' };
+    } catch { /* версия API недоступна — пробуем следующую */ }
+  }
+
+  // запасной вариант: разбор HTML (старый Glances без REST API)
+  const { html } = await fetchListing(base, relayUrl);
+  const pt = parseGlances(html);
+  if (GLANCES_KEYS.some((k) => pt[k] != null)) return { pt, source: 'html', via: 'direct' };
+
+  throw new Error('Glances отвечает, но данные не получены: REST API (/api/4/all и /api/3/all) и HTML-разбор не дали показателей. Проверьте, что это именно Glances (glances -w)');
+}
+
 // ─── Проверки устройств ─────────────────────────────────────────────────────
 
 function checkPing(addr, timeoutMs) {
@@ -616,19 +695,15 @@ async function pollAgent(agent, force) {
   if (agent.glancesUrl && (force || now - (agent.lastGlances || 0) >= glIv)) {
     agent.lastGlances = now;
     try {
-      const { html, via } = await fetchListing(agent.glancesUrl, agent.relayUrl);
-      const pt = parseGlances(html);
+      const { pt, source } = await collectGlances(agent.glancesUrl, agent.relayUrl);
       pt.t = Date.now();
-      if (GLANCES_KEYS.some((k) => pt[k] != null)) {
-        agent.glancesLatest = pt;
-        seriesAppend(agent, 'glances', pt, GLANCES_RETENTION_MS);
-        agent.lastError = null;
-        console.log(`[pluto] Glances «${agent.name}» [${via}]: CPU ${pt.cpu ?? '—'}% · MEM ${pt.mem ?? '—'}% · ${pt.pkg ?? '—'}°C`);
-      } else {
-        agent.lastError = 'страница Glances загружена, но показатели не найдены — проверьте адрес (http://<IP>:61208)';
-      }
+      agent.glancesLatest = pt;
+      seriesAppend(agent, 'glances', pt, GLANCES_RETENTION_MS);
+      agent.lastError = null;
+      console.log(`[pluto] Glances «${agent.name}» [${source}]: CPU ${pt.cpu ?? '—'}% · MEM ${pt.mem ?? '—'}% · ${pt.pkg ?? '—'}°C`);
     } catch (e) {
       agent.lastError = 'Glances: ' + (e.message || 'ошибка запроса');
+      console.log(`[pluto] Glances «${agent.name}»: ${agent.lastError}`);
     }
   }
 
@@ -653,17 +728,9 @@ async function scrapeGlancesDev(dev, force) {
   if (!force && Date.now() - (dev.lastScrape || 0) < giv) return;
   const now = Date.now();
   try {
-    const html = await fetchText(dev.url, 7000);
-    const pt = parseGlances(html);
+    const { pt, source } = await collectGlances(dev.url, null);
     pt.t = Date.now();
-    const found = GLANCES_KEYS.filter((k) => pt[k] != null);
     dev.lastScrape = now;
-    if (!found.length) {
-      dev.online = false;
-      dev.lastError = 'страница загружена, но показатели Glances не найдены';
-      saveDb();
-      return { point: null, error: dev.lastError };
-    }
     dev.online = true;
     dev.latest = pt;
     dev.lastError = null;
@@ -927,16 +994,30 @@ const server = http.createServer(async (req, res) => {
       if (!isAdmin && !user.scope.includes('agent')) return json(res, 403, { error: 'нет доступа к агентам' });
       const kind = m[2];
       const srcUrl = kind === 'aida' ? a.aidaUrl : a.glancesUrl;
+      if (kind === 'glances') {
+        // Glances: пробуем REST API (/api/4/all → /api/3/all), затем HTML
+        try {
+          const { pt, source } = await collectGlances(srcUrl, a.relayUrl);
+          const recognized = GLANCES_KEYS.filter((k) => pt[k] != null);
+          return json(res, 200, {
+            ok: recognized.length > 0, url: srcUrl, via: source,
+            sample: source === 'html' ? 'разбор HTML-страницы' : `REST API Glances · ${source === 'api4' ? '/api/4' : '/api/3'}`,
+            values: pt, recognized,
+            missing: GLANCES_KEYS.filter((k) => pt[k] == null),
+          });
+        } catch (e) {
+          return json(res, 200, { ok: false, url: srcUrl || '', via: null, error: e.message || String(e) });
+        }
+      }
       try {
         const { html, via } = await fetchListing(srcUrl, a.relayUrl);
-        const parsed = kind === 'aida' ? parseAidaLine(html) : parseGlances(html);
-        const keys = kind === 'aida' ? AGENT_AIDA_KEYS : GLANCES_KEYS;
-        const recognized = keys.filter((k) => parsed[k] != null);
+        const parsed = parseAidaLine(html);
+        const recognized = AGENT_AIDA_KEYS.filter((k) => parsed[k] != null);
         const plain = htmlToText(html);
         return json(res, 200, {
           ok: recognized.length > 0, url: srcUrl, via, bytes: html.length,
           sample: plain.slice(0, 300), values: parsed, recognized,
-          missing: keys.filter((k) => parsed[k] == null),
+          missing: AGENT_AIDA_KEYS.filter((k) => parsed[k] == null),
         });
       } catch (e) {
         return json(res, 200, { ok: false, url: srcUrl || '', via: null, error: e.message || String(e) });
