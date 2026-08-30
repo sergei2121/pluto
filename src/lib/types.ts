@@ -103,8 +103,23 @@ export interface GlancesPoint {
   rx: number | null; // КБ/с (реальный адаптер)
   tx: number | null; // КБ/с (реальный адаптер)
   pkg: number | null; // Package — температура ЦП, °C
+  ssdTemp: number | null; // температура SSD/NVMe (датчик), °C
   diskCount: number | null; // секция FILE SYS — количество файловых систем
   diskUsed: number | null; // заполненность основной ФС (корень / диск C:), %
+  load1: number | null; // load average 1 мин
+  load5: number | null;
+  load15: number | null;
+  swap: number | null; // swap, %
+  diskRead: number | null; // дисковый ввод, КБ/с
+  diskWrite: number | null; // дисковый вывод, КБ/с
+  uptimeSec: number | null; // аптайм по версии самого Glances
+}
+
+/** Датчик из плагина sensors: температура (°C) или вентилятор (RPM). */
+export interface GlancesSensor {
+  label: string;
+  unit: string;
+  value: number | null;
 }
 
 /** Снимок файловой системы из плагина fs (не хранится в истории — только последний). */
@@ -173,6 +188,8 @@ export interface Agent {
   glancesLatest: GlancesPoint | null;
   glancesDisks: GlancesDisk[]; // снимок ФС (FILE SYS)
   glancesNetIface: string | null; // имя реального адаптера
+  glancesSensors: GlancesSensor[]; // все датчики (t°C, RPM)
+  glancesCores: number[]; // загрузка каждого ядра, %
   aida: AidaPoint[]; // 60 дней
   glances: GlancesPoint[]; // 30 дней
   latHist: { t: number; ms: number | null }[];
