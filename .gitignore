@@ -1,20 +1,12 @@
-# секреты — никогда не коммитить
-.env
-
-# node / сборка
 node_modules/
 dist/
-
-# агенты: артефакты сборки
-agent/pluto-agent.exe
-agent/agent
-
-# aida-monitor: артефакты сборки
+data/
+*.log
+.env
+.env.local
 aida-monitor/aida-monitor
 aida-monitor/aida-monitor.exe
-
-# системные файлы
+server/data/
 .DS_Store
-*.log
 .next/
 build/

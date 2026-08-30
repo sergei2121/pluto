@@ -1,18 +1,18 @@
 // ─── PLUTO: корень приложения ────────────────────────────────────────────────
 import { useEffect, useState } from 'react';
-import { usePluto, useCurrentUser, getState, store, syncAll } from './lib/store';
-import { startEngine, stopEngine } from './lib/engine';
-import { detectApi, getApiToken, setApiToken, apiMe } from './lib/api';
-import { Shell } from './components/layout';
 import { Orbit } from 'lucide-react';
+import { getState, rehydrate, restoreServerSession, store, useCurrentUser, usePluto } from './lib/store';
+import { startEngine, stopEngine } from './lib/engine';
+import { detectApi, syncAll } from './lib/api';
+import { Shell } from './components/layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Devices from './pages/Devices';
 import Agents from './pages/Agents';
-import SettingsPage from './pages/Settings';
-import Deploy from './pages/Deploy';
 import Telemetry from './pages/Telemetry';
 import Bars from './pages/Bars';
+import SettingsPage from './pages/Settings';
+import Deploy from './pages/Deploy';
 
 export default function App() {
   const hasSession = usePluto((s) => !!s.session);
@@ -21,32 +21,36 @@ export default function App() {
   const user = useCurrentUser();
   const [booting, setBooting] = useState(true);
 
-  // Определение режима при старте: есть ли рядом серверное ядро?
+  // Определение режима: есть ли серверное ядро рядом?
   useEffect(() => {
+    rehydrate();
     let alive = true;
-    (async () => {
+
+    const probe = async (first: boolean) => {
       const ver = await detectApi();
       if (!alive) return;
+      const s = getState();
       if (ver) {
         store.setCoreVersion(ver);
-        // если остался токен прошлой сессии — восстанавливаем её через ядро
-        if (getApiToken()) {
-          try {
-            const me = await apiMe();
-            if (alive) {
-              store.enterServer(me);
-              await syncAll();
-            }
-          } catch {
-            setApiToken(null); // токен протух — покажем экран входа
-            store.clearSession();
-          }
+        // восстанавливаем сессию по сохранённому токену
+        if (!s.session && !(await restoreServerSession())) {
+          /* покажем экран входа */
+        } else if (s.apiMode === 'server') {
+          void syncAll();
         }
       }
-      if (alive) setBooting(false);
-    })();
+      if (first && alive) setBooting(false);
+    };
+
+    void probe(true);
+    // если ядро стартует позже консоли — доопределимся
+    const t = window.setInterval(() => {
+      if (!getState().session) void probe(false);
+    }, 5000);
+
     return () => {
       alive = false;
+      window.clearInterval(t);
     };
   }, []);
 
@@ -54,7 +58,9 @@ export default function App() {
   useEffect(() => {
     if (hasSession && apiMode === 'embedded') startEngine();
     else stopEngine();
-    return () => stopEngine();
+    return () => {
+      stopEngine();
+    };
   }, [hasSession, apiMode]);
 
   // Серверный режим: поллинг состояния ядра

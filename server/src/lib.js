@@ -8,16 +8,13 @@ const DB_FILE = path.join(DATA_DIR, 'db.json');
 
 export const DEFAULT_SETTINGS = {
   intervals: { ping: 60, http: 60, api: 180, rtsp: 120, sip: 120, glances: 60, agent: 30, aida: 10 },
-  heartbeat: 10,
-  metrics: 15,
-  lanScan: 300,
+  timeoutMs: 3000,
   failThreshold: 3,
   degradeFactor: 10,
   degradeMinMs: 250,
-  timeoutMs: 3000,
   notifications: {
     telegram: { enabled: false, botToken: '', chatId: '' },
-    email: { enabled: false, smtp: '', port: 587, from: '', to: '' },
+    email: { enabled: false, smtp: '', from: '', to: '' },
     push: { enabled: false },
     on: { down: true, degraded: true, recover: true, agentOff: true, agentOn: false },
   },
@@ -43,68 +40,58 @@ export function loadDb() {
   try {
     if (fs.existsSync(DB_FILE)) data = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
   } catch (e) {
-    console.error('[pluto] повреждён db.json, создаём новую базу:', e.message);
+    console.error('[pluto] db.json повреждён, создаём новую базу:', e.message);
   }
   db = { ...DEFAULT_DB(), ...(data || {}) };
   db.settings = {
     ...DEFAULT_SETTINGS,
-    ...db.settings,
-    intervals: { ...DEFAULT_SETTINGS.intervals, ...(db.settings?.intervals || {}) },
-    notifications: { ...DEFAULT_SETTINGS.notifications, ...(db.settings?.notifications || {}) },
+    ...(db.settings || {}),
+    intervals: { ...DEFAULT_SETTINGS.intervals, ...((db.settings || {}).intervals || {}) },
+    notifications: { ...DEFAULT_SETTINGS.notifications, ...((db.settings || {}).notifications || {}) },
   };
-  if (db.users.length === 0) {
+
+  // Нормализация записей: db.json живёт между версиями ядра, старые записи
+  // могут не иметь новых полей — гарантируем дефолты, чтобы клиенты не падали.
+  db.devices = (db.devices || []).map((d) => ({
+    ...d,
+    tags: Array.isArray(d.tags) ? d.tags : [],
+    history: Array.isArray(d.history) ? d.history : [],
+    checking: false,
+    profile: d.profile || { base: 20, failP: 0.03, spikeP: 0.02 },
+  }));
+  db.agents = (db.agents || []).map((a) => ({
+    ...a,
+    pingTargets: Array.isArray(a.pingTargets) ? a.pingTargets : [],
+    targets: Array.isArray(a.targets) ? a.targets : [],
+    latHist: Array.isArray(a.latHist) ? a.latHist : [],
+    aida: Array.isArray(a.aida) ? a.aida : [],
+    glances: Array.isArray(a.glances) ? a.glances : [],
+    aidaUrl: a.aidaUrl || '',
+    glancesUrl: a.glancesUrl || '',
+    relayUrl: a.relayUrl || '',
+    latest: a.latest || null,
+    glancesLatest: a.glancesLatest || null,
+    lastAida: a.lastAida || 0,
+    lastGlances: a.lastGlances || 0,
+  }));
+  db.glances = (db.glances || []).map((g) => ({ ...g, history: Array.isArray(g.history) ? g.history : [], scraping: false }));
+
+  // первый запуск: администратор по умолчанию
+  if (!db.users.length) {
     db.users.push({
       id: uid(),
       name: 'admin',
+      login: 'admin',
       role: 'admin',
       scope: [],
-      passHash: hashPass(process.env.ADMIN_PASSWORD || 'pluto'),
       builtIn: true,
+      passHash: hashPass(process.env.ADMIN_PASSWORD || 'pluto'),
       createdAt: Date.now(),
     });
     pushEvent('info', 'system', 'Первый запуск ядра: создан администратор admin');
     saveDb();
   }
-  // Нормализация записей: db.json живёт между версиями ядра, и старые записи
-  // могут не иметь полей, появившихся позже (disks, networks, history, aida…).
-  // Гарантируем дефолты, чтобы ни один клиент не упал на undefined.
-  db.devices = (db.devices || []).map(normalizeDevice);
-  db.agents = (db.agents || []).map(normalizeAgent);
-  db.devices.forEach((d) => (d.checking = false));
-  db.agents.forEach((a) => (a.online = false));
   return db;
-}
-
-/** Дефолты для устройства (PING/HTTP/API/RTSP/SIP) */
-function normalizeDevice(d) {
-  return {
-    id: d.id, name: d.name || d.address || 'устройство', type: d.type || 'ping',
-    address: d.address || '', port: d.port ?? null, path: d.path || '', method: d.method || null,
-    body: d.body || null, interval: d.interval || 60, tags: Array.isArray(d.tags) ? d.tags : [],
-    favorite: !!d.favorite, status: d.status || 'unknown', latency: d.latency ?? null,
-    baseline: d.baseline ?? null, history: Array.isArray(d.history) ? d.history : [],
-    fails: d.fails || 0, lastCheck: d.lastCheck || 0, lastChange: d.lastChange || 0,
-    checking: false, approx: !!d.approx, createdAt: d.createdAt || Date.now(),
-  };
-}
-
-/** Дефолты для агента (старые записи без новых полей получат пустые массивы) */
-function normalizeAgent(a) {
-  return {
-    ...a,
-    name: a.name || a.hostname || 'агент', hostname: a.hostname || '', token: a.token || '',
-    ip: a.ip || '', os: a.os || '', version: a.version || '', online: false,
-    cpuLoad: a.cpuLoad || 0, cpuCores: a.cpuCores || 0, cpuTemp: a.cpuTemp || 0,
-    ramUsed: a.ramUsed || 0, ramTotal: a.ramTotal || 0, ramTemp: a.ramTemp || 0,
-    disks: Array.isArray(a.disks) ? a.disks : [],
-    networks: Array.isArray(a.networks) ? a.networks : [],
-    history: Array.isArray(a.history) ? a.history : [],
-    aida: Array.isArray(a.aida) ? a.aida : [], aidaLatest: a.aidaLatest || null,
-    aida64Url: a.aida64Url || 'http://127.0.0.1:8090/',
-    rxBytes: a.rxBytes || 0, txBytes: a.txBytes || 0, rxRate: a.rxRate || 0, txRate: a.txRate || 0,
-    lastSeen: a.lastSeen || 0, lastMetrics: a.lastMetrics || 0, lastScan: a.lastScan || 0,
-    favorite: !!a.favorite, createdAt: a.createdAt || Date.now(),
-  };
 }
 
 export function saveDb() {
@@ -179,9 +166,7 @@ export function attachWs(httpServer, onConnection) {
     }
     const accept = crypto.createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
     socket.write(
-      'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ' +
-        accept +
-        '\r\n\r\n',
+      'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ' + accept + '\r\n\r\n',
     );
     onConnection(wrapSocket(socket), url, socket.remoteAddress);
   });
@@ -198,9 +183,8 @@ function wrapSocket(socket) {
       if (closed) return;
       const payload = Buffer.from(text, 'utf8');
       let header;
-      if (payload.length < 126) {
-        header = Buffer.from([0x81, payload.length]);
-      } else if (payload.length < 65536) {
+      if (payload.length < 126) header = Buffer.from([0x81, payload.length]);
+      else if (payload.length < 65536) {
         header = Buffer.alloc(4);
         header[0] = 0x81;
         header[1] = 126;
@@ -211,9 +195,7 @@ function wrapSocket(socket) {
         header[1] = 127;
         header.writeBigUInt64BE(BigInt(payload.length), 2);
       }
-      try {
-        socket.write(Buffer.concat([header, payload]));
-      } catch { /* сокет уже закрыт */ }
+      try { socket.write(Buffer.concat([header, payload])); } catch { /* сокет закрыт */ }
     },
     close() {
       closed = true;
@@ -249,14 +231,10 @@ function wrapSocket(socket) {
       }
       if (buf.length < off + (masked ? 4 : 0) + len) return;
       let mask = null;
-      if (masked) {
-        mask = buf.subarray(off, off + 4);
-        off += 4;
-      }
+      if (masked) { mask = buf.subarray(off, off + 4); off += 4; }
       const payload = Buffer.from(buf.subarray(off, off + len));
       if (mask) for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i & 3];
       buf = buf.subarray(off + len);
-
       if (opcode === 0x8) { emitClose(); socket.end(); return; }
       if (opcode === 0x9) { socket.write(Buffer.concat([Buffer.from([0x8a, payload.length]), payload])); continue; }
       if (opcode === 0xa) continue;

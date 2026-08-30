@@ -1,318 +1,166 @@
-// PLUTO aida-monitor — лёгкий прокси-мониторинг для Windows-машин.
+// PLUTO relay (aida-monitor) — лёгкий сервис для Windows-машин и VLAN.
 //
-// Сервер сам пингует агента, читает строку показаний с его веб-страницы AIDA64
-// (RemoteSensor, формат: "CPUu 3%, CPU 42°C, RAM 25%, ..."), разбирает её и
-// пингует устройства по заданным IP / диапазонам. Никаких токенов, агентов-служб
-// и WMI — только ping + HTTP-чтение страницы AIDA64.
+// Ядро PLUTO опрашивает агентов само, но не может дотянуться до:
+//   1) loopback-адресов (127.0.0.1) — AIDA64/Glances на самой машине;
+//   2) устройств внутри чужого VLAN (разграничение сети).
+// Этот сервис ставится внутри сети агента и даёт ядру три возможности:
+//   GET /ping?targets=10.0.0.5,10.0.0.6   → [{"ip","alive","latencyMs"}]
+//   GET /fetch?url=http://127.0.0.1:8090/ → тело страницы (text/plain)
+//   GET /sse-stream?url=...               → прокси SSE-потока AIDA64 (реальное время)
 //
-// Сборка и запуск:
-//   go mod tidy && go build -o aida-monitor.exe .
-//   .\aida-monitor.exe            (слушает :8080)
-//
-// Список агентов берётся из agents.json (если файл есть рядом), иначе — из
-// встроенного примера ниже.
+// Никаких зависимостей, только стандартная библиотека Go:
+//   go build -o aida-monitor.exe .   (или aida-monitor для Linux)
+//   .\aida-monitor.exe               (слушает :8091)
 package main
 
 import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
-	"os"
 	"os/exec"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
-
-	"github.com/gin-gonic/gin"
 )
 
-// ─── Модели ──────────────────────────────────────────────────────────────────
+const listenAddr = ":8091"
 
-// Agent — одна наблюдаемая машина: её адрес (по нему же отдаётся страница
-// AIDA64) и список устройств/диапазонов для пинга.
-type Agent struct {
-	ID      string   `json:"id"`
-	Address string   `json:"address"` // http://<ip>:8090 — страница AIDA64 RemoteSensor
-	Devices []string `json:"devices"` // "192.168.1.5" или "192.168.1.10-20"
+func writeJSON(w http.ResponseWriter, code int, v interface{}) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(v)
 }
 
-// Metrics — сводка по агенту: доступность, задержка, показания AIDA64 и
-// результаты пинга устройств.
-type Metrics struct {
-	CPUUsage    float64      `json:"cpu_usage"`     // CPUu, %
-	CPUTemp     float64      `json:"cpu_temp"`      // CPU, °C
-	RAMUsage    float64      `json:"ram_usage"`     // RAM, %
-	SSDTemp     float64      `json:"ssd_temp"`      // SSD, °C
-	UseC        float64      `json:"use_c"`         // UseC, %
-	UsedSpaceC  float64      `json:"used_space_c"`  // UsedSpaceC, ГБ
-	TX          float64      `json:"tx"`            // TX, КБ/с
-	RX          float64      `json:"rx"`            // RX, КБ/с
-	Uptime      string       `json:"uptime"`        // Uptime, "чч:мм:сс"
-	IsOnline    bool         `json:"is_online"`     // отвечает ли машина на ping
-	Latency     int64        `json:"latency_ms"`    // задержка ping до агента
-	DevicePings []PingResult `json:"device_pings"`  // пинг устройств через агента
+// pingAddress — кроссплатформенный пинг (Linux: -c, Windows: -n).
+func pingAddress(addr string) (bool, int64) {
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("ping", "-n", "1", "-w", "2000", addr)
+	} else {
+		cmd = exec.Command("ping", "-c", "1", "-W", "2", addr)
+	}
+	start := time.Now()
+	err := cmd.Run()
+	return err == nil, time.Since(start).Milliseconds()
 }
 
-// PingResult — результат пинга одного устройства.
-type PingResult struct {
-	Address string `json:"address"`
-	IsAlive bool   `json:"is_alive"`
-	Latency int64  `json:"latency_ms"`
-}
-
-// ─── Список агентов ─────────────────────────────────────────────────────────
-
-var agents = map[string]Agent{
-	"agent1": {ID: "agent1", Address: "http://localhost:8090", Devices: []string{"192.168.1.1", "192.168.1.10-20"}},
-}
-
-// loadAgents подменяет встроенный пример списком из agents.json, если файл есть.
-func loadAgents() {
-	data, err := os.ReadFile("agents.json")
-	if err != nil {
-		return // файла нет — остаётся встроенный пример
-	}
-	var list []Agent
-	if err := json.Unmarshal(data, &list); err != nil {
-		fmt.Println("[aida-monitor] не удалось разобрать agents.json:", err)
-		return
-	}
-	if len(list) == 0 {
-		return
-	}
-	agents = make(map[string]Agent, len(list))
-	for _, a := range list {
-		agents[a.ID] = a
-	}
-	fmt.Printf("[aida-monitor] загружено агентов из agents.json: %d\n", len(list))
-}
-
-// ─── Разбор строки AIDA64 ───────────────────────────────────────────────────
-
-// parseAidaLine разбирает строку вида:
-//   "CPUu 3%, CPU 42°C, RAM 25%, SSD 50°C, UseC 43%, UsedSpaceC 101GB,
-//    TX 0.8 KB/s, RX 0.4 KB/s, Uptime 01:39:45"
-// Формат одинаков на всех машинах — значения идут сразу после имени, через
-// запятую с пробелом.
-func parseAidaLine(line string) *Metrics {
-	parts := strings.Split(strings.TrimSpace(line), ", ")
-	if len(parts) < 2 {
-		return nil
-	}
-
-	m := &Metrics{}
-	for _, part := range parts {
-		kv := strings.SplitN(strings.TrimSpace(part), " ", 2)
-		if len(kv) != 2 {
+// handlePing — GET /ping?targets=ip1,ip2,...
+func handlePing(w http.ResponseWriter, r *http.Request) {
+	raw := r.URL.Query().Get("targets")
+	out := make([]map[string]interface{}, 0)
+	for _, t := range strings.Split(raw, ",") {
+		t = strings.TrimSpace(t)
+		if t == "" {
 			continue
 		}
-		key := kv[0]
-		value := kv[1]
-
-		switch key {
-		case "CPUu":
-			if v, err := strconv.ParseFloat(strings.TrimSuffix(value, "%"), 64); err == nil {
-				m.CPUUsage = v
-			}
-		case "CPU":
-			if v, err := strconv.ParseFloat(strings.TrimSuffix(value, "°C"), 64); err == nil {
-				m.CPUTemp = v
-			}
-		case "RAM":
-			if v, err := strconv.ParseFloat(strings.TrimSuffix(value, "%"), 64); err == nil {
-				m.RAMUsage = v
-			}
-		case "SSD":
-			if v, err := strconv.ParseFloat(strings.TrimSuffix(value, "°C"), 64); err == nil {
-				m.SSDTemp = v
-			}
-		case "UseC":
-			if v, err := strconv.ParseFloat(strings.TrimSuffix(value, "%"), 64); err == nil {
-				m.UseC = v
-			}
-		case "UsedSpaceC":
-			if v, err := strconv.ParseFloat(strings.TrimSuffix(value, "GB"), 64); err == nil {
-				m.UsedSpaceC = v
-			}
-		case "TX":
-			if v, err := strconv.ParseFloat(strings.TrimSuffix(value, " KB/s"), 64); err == nil {
-				m.TX = v
-			}
-		case "RX":
-			if v, err := strconv.ParseFloat(strings.TrimSuffix(value, " KB/s"), 64); err == nil {
-				m.RX = v
-			}
-		case "Uptime":
-			m.Uptime = value
+		alive, ms := pingAddress(t)
+		item := map[string]interface{}{"ip": t, "alive": alive, "latencyMs": nil}
+		if alive {
+			item["latencyMs"] = ms
 		}
+		out = append(out, item)
 	}
-	return m
+	writeJSON(w, http.StatusOK, out)
 }
 
-// ─── Пинг и диапазоны ───────────────────────────────────────────────────────
-
-// pingAddress пингует адрес и возвращает (доступен, задержка_мс).
-// Флаг количества пакетов зависит от ОС: -c (Linux/macOS) или -n (Windows).
-func pingAddress(addr string) (bool, int64) {
-	start := time.Now()
-	flag := "-c"
-	if runtime.GOOS == "windows" {
-		flag = "-n"
+// handleFetch — GET /fetch?url=... — отдаёт тело страницы (для loopback-адресов).
+func handleFetch(w http.ResponseWriter, r *http.Request) {
+	target := r.URL.Query().Get("url")
+	if target == "" {
+		http.Error(w, "no url", http.StatusBadRequest)
+		return
 	}
-	cmd := exec.Command("ping", flag, "1", addr)
-	err := cmd.Run()
-	duration := time.Since(start).Milliseconds()
-	return err == nil, duration
+	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+		http.Error(w, "bad url", http.StatusBadRequest)
+		return
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Get(target)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(resp.StatusCode)
+	_, _ = w.Write(body)
 }
 
-// expandIPRange разворачивает "192.168.1.10-20" в список отдельных IP.
-// Одиночный IP возвращается как есть.
-func expandIPRange(ipRange string) []string {
-	var ips []string
-	if strings.Contains(ipRange, "-") {
-		parts := strings.Split(ipRange, "-")
-		baseIP := parts[0]
-		suffixes := strings.Split(baseIP, ".")
-		prefix := strings.Join(suffixes[:3], ".") + "."
-
-		start, _ := strconv.Atoi(suffixes[3])
-		end, _ := strconv.Atoi(parts[1])
-
-		for i := start; i <= end; i++ {
-			ips = append(ips, fmt.Sprintf("%s%d", prefix, i))
-		}
-	} else {
-		ips = append(ips, ipRange)
+// handleSSEStream — GET /sse-stream?url=... — проксирует SSE-поток AIDA64.
+// Ядро подписывается на этот эндпоинт и получает обновления в реальном времени:
+// AIDA64 шлёт «data: Simple1|CPUu 5%{|}Simple4|SSD 46°C» — значения текут живьём,
+// в то время как сырой HTML страницы статичен.
+func handleSSEStream(w http.ResponseWriter, r *http.Request) {
+	target := r.URL.Query().Get("url")
+	if target == "" {
+		http.Error(w, "no url", http.StatusBadRequest)
+		return
 	}
-	return ips
-}
+	base := strings.TrimRight(target, "/")
+	sseURL := base + "/sse"
 
-// ─── Сбор метрик ────────────────────────────────────────────────────────────
+	client := &http.Client{Timeout: 0} // поток живёт долго — таймаут только на чтение
+	req, err := http.NewRequest("GET", sseURL, nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("User-Agent", "pluto-relay")
 
-// getMetrics: пингует агента, читает строку AIDA64 по его адресу, парсит её и
-// пингует все устройства агента.
-func getMetrics(agent Agent) *Metrics {
-	isOnline, latency := pingAddress(agent.Address)
+	resp, err := client.Do(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		http.Error(w, fmt.Sprintf("upstream %d", resp.StatusCode), http.StatusBadGateway)
+		return
+	}
 
-	m := &Metrics{IsOnline: isOnline, Latency: latency}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
 
-	if isOnline {
-		resp, err := http.Get(agent.Address)
-		if err == nil {
-			body, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			line := strings.TrimSpace(string(body))
-			if parsed := parseAidaLine(line); parsed != nil {
-				*m = *parsed
-				m.IsOnline = true
-				m.Latency = latency
+	buf := make([]byte, 4096)
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				return // клиент (ядро) отключился
 			}
+			flusher.Flush()
+		}
+		if err != nil {
+			return
 		}
 	}
-
-	for _, deviceRange := range agent.Devices {
-		for _, ip := range expandIPRange(deviceRange) {
-			alive, delay := pingAddress(ip)
-			m.DevicePings = append(m.DevicePings, PingResult{Address: ip, IsAlive: alive, Latency: delay})
-		}
-	}
-
-	return m
 }
-
-// ─── HTTP-сервер ────────────────────────────────────────────────────────────
 
 func main() {
-	loadAgents()
-
-	gin.SetMode(gin.ReleaseMode)
-	r := gin.Default()
-
-	// Список всех агентов.
-	r.GET("/agents", func(c *gin.Context) {
-		c.JSON(200, agents)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ping", handlePing)
+	mux.HandleFunc("/fetch", handleFetch)
+	mux.HandleFunc("/sse-stream", handleSSEStream)
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "service": "pluto-relay"})
 	})
 
-	// Метрики одного агента.
-	r.GET("/metrics/:agent_id", func(c *gin.Context) {
-		id := c.Param("agent_id")
-		agent, exists := agents[id]
-		if !exists {
-			c.JSON(404, gin.H{"error": "Agent not found"})
-			return
-		}
-		c.JSON(200, getMetrics(agent))
-	})
-
-	// Метрики всех агентов сразу.
-	r.GET("/metrics", func(c *gin.Context) {
-		out := make(map[string]*Metrics, len(agents))
-		for id, agent := range agents {
-			out[id] = getMetrics(agent)
-		}
-		c.JSON(200, out)
-	})
-
-	// Пинг произвольных адресов по запросу ядра PLUTO (обход VLAN:
-	// сервис стоит внутри сети агента и пингует локально).
-	// GET /ping?targets=10.0.0.5,10.0.0.6 → [{"ip":"10.0.0.5","alive":true,"latencyMs":2}, ...]
-	r.GET("/ping", func(c *gin.Context) {
-		raw := c.Query("targets")
-		var out []gin.H
-		for _, t := range strings.Split(raw, ",") {
-			t = strings.TrimSpace(t)
-			if t == "" {
-				continue
-			}
-			alive, ms := pingAddress(t)
-			item := gin.H{"ip": t, "alive": alive, "latencyMs": nil}
-			if alive {
-				item["latencyMs"] = ms
-			}
-			out = append(out, item)
-		}
-		if out == nil {
-			out = []gin.H{}
-		}
-		c.JSON(200, out)
-	})
-
-	// Чтение произвольной веб-страницы по запросу ядра PLUTO. Ключевой случай —
-	// сенсорная страница AIDA64 на http://127.0.0.1:8090/: из контейнера сервера
-	// loopback недостижим, а этот сервис стоит на той же машине и открывает её
-	// локально, отдавая содержимое ядру.
-	// GET /fetch?url=http://127.0.0.1:8090/ → тело страницы (text/plain)
-	r.GET("/fetch", func(c *gin.Context) {
-		target := c.Query("url")
-		if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
-			c.JSON(400, gin.H{"error": "url must start with http:// or https://"})
-			return
-		}
-		client := &http.Client{Timeout: 10 * time.Second}
-		resp, err := client.Get(target)
-		if err != nil {
-			c.JSON(502, gin.H{"error": err.Error()})
-			return
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != 200 {
-			c.JSON(502, gin.H{"error": fmt.Sprintf("HTTP %d", resp.StatusCode)})
-			return
-		}
-		body, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024)) // не более 256 КБ
-		if err != nil {
-			c.JSON(502, gin.H{"error": err.Error()})
-			return
-		}
-		c.Data(200, "text/plain; charset=utf-8", body)
-	})
-
-	// Health-check.
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{"ok": true, "agents": len(agents)})
-	})
-
-	r.Run(":8080")
+	log.Printf("[pluto-relay] старт на %s (ping / fetch / sse-stream)", listenAddr)
+	log.Fatal(http.ListenAndServe(listenAddr, mux))
 }

@@ -1,292 +1,38 @@
-// ─── PLUTO Core: HTTP API, движок опроса, шлюз агентов, статика ─────────────
+// ─── PLUTO Core v1.10: REST API + движок опроса + шлюз агентов ──────────────
 import http from 'node:http';
 import https from 'node:https';
-import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
 import dgram from 'node:dgram';
 import { fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
 import {
-  loadDb, saveDb, pushEvent, uid, authUser, hashPass, verifyPass,
-  issueSession, attachWs, DEFAULT_SETTINGS,
+  loadDb, saveDb, uid, pushEvent, hashPass, verifyPass, issueSession, authUser, attachWs,
 } from './lib.js';
 
-const VERSION = '1.9.4';
+const VERSION = '1.10.0';
+const HTTP_PORT = parseInt(process.env.HTTP_PORT || '8080', 10);
+const AGENT_PORT = parseInt(process.env.AGENT_PORT || '8443', 10);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const WEB_DIR = path.join(__dirname, '..', 'web');
+
 const db = loadDb();
-const HTTP_PORT = Number(process.env.HTTP_PORT || 8080);
-const AGENT_PORT = Number(process.env.AGENT_PORT || 8443);
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const WEB_DIR = process.env.WEB_DIR || path.join(HERE, '..', 'web');
-// В образе исходник агента лежит в /app/agent, при локальном запуске — в корне репозитория
-const AGENT_DIR =
-  process.env.AGENT_DIR ||
-  (fs.existsSync(path.resolve(HERE, '..', 'agent', 'PlutoAgent.cs'))
-    ? path.resolve(HERE, '..', 'agent')
-    : path.resolve(HERE, '..', '..', 'agent'));
 
-function text(res, code, body, type) {
-  res.writeHead(code, { 'Content-Type': type, 'Access-Control-Allow-Origin': '*' });
-  res.end(body);
-}
-
-function hostIp(req) {
-  const h = (req.headers['x-forwarded-host'] || req.headers.host || '').split(':')[0];
-  return h || '127.0.0.1';
-}
-
-// ─── PowerShell-установщик агента (генерируется при отдаче) ─────────────────
-// Механизм 1.8.0: сервер и токен записываются в agent.conf, служба запускает exe
-// БЕЗ аргументов. Установщик сам ждёт подключения и печатает вердикт.
-const INSTALL_PS = `# PLUTO Agent — установщик для Windows (запускать от имени администратора)
-param(
-  [string]$Token = "",
-  [string]$Server = "__WS_URL__",
-  [string]$Name = "pluto-agent"
-)
-$ErrorActionPreference = 'Stop'
-$base = "__HTTP_BASE__"
-$dir  = "$env:ProgramData\\pluto"
-$src  = "$dir\\PlutoAgent.cs"
-$exe  = "$dir\\pluto-agent.exe"
-$conf = "$dir\\agent.conf"
-
-if (-not $Token) { $Token = Read-Host "Введите токен агента (консоль: Агенты -> Создать токен)" }
-if (-not $Token) { Write-Host "Токен обязателен." -ForegroundColor Red; exit 1 }
-
-Write-Host "[pluto] каталог: $dir"
-New-Item -ItemType Directory -Force -Path $dir | Out-Null
-
-# Конфигурация: сервер и токен. Служба читает их отсюда, exe стартует без аргументов.
-@"
-server=$Server
-token=$Token
-metrics=15
-lan=300
-aida64=http://127.0.0.1:8090/
-"@ | Set-Content -Path $conf -Encoding ASCII
-Write-Host "[pluto] конфигурация записана: $conf"
-
-Write-Host "[pluto] скачиваю исходник агента с ядра..."
-Invoke-WebRequest -UseBasicParsing -Uri "$base/agent/PlutoAgent.cs" -OutFile $src
-
-# Самопроверка: устаревший образ ядра отдаёт HTML вместо исходника
-$head = (Get-Content $src -TotalCount 1 -Encoding UTF8 -ErrorAction SilentlyContinue)
-if ($head -match '<!doctype|<html') {
-  Write-Host "[pluto] ОШИБКА: ядро отдало HTML, а не исходник — образ устарел." -ForegroundColor Red
-  Write-Host "        На сервере: git pull && docker compose up -d --build" -ForegroundColor Yellow
-  exit 1
-}
-if (-not (Select-String -Path $src -Pattern 'class Program' -Quiet)) {
-  Write-Host "[pluto] ОШИБКА: скачанный файл не похож на исходник агента." -ForegroundColor Red
-  exit 1
-}
-
-$csc = Get-ChildItem "$env:WINDIR\\Microsoft.NET\\Framework64\\*\\csc.exe" -ErrorAction SilentlyContinue |
-       Sort-Object FullName -Descending | Select-Object -First 1
-if (-not $csc) { throw "csc.exe не найден. Нужен .NET Framework 4.x." }
-
-# Сначала остановить и удалить старую службу — она держит exe открытым
-Write-Host "[pluto] останавливаю и удаляю старую службу (если была)..."
-sc.exe stop $Name 2>$null | Out-Null
-sc.exe delete $Name 2>$null | Out-Null
-$w = 0
-while ((Get-Service $Name -ErrorAction SilentlyContinue) -and $w -lt 15) { Start-Sleep -Seconds 1; $w++ }
-
-Write-Host "[pluto] компилирую агент под вашу Windows ($($csc.FullName))..."
-& $csc.FullName /nologo /target:exe /out:$exe /reference:System.Management.dll /reference:System.ServiceProcess.dll /reference:System.Net.Http.dll $src
-if ($LASTEXITCODE -ne 0) { throw "компиляция не удалась (код $LASTEXITCODE). Полный вывод выше." }
-Write-Host "[pluto] скомпилировано: $exe"
-
-$binPath = $exe
-Write-Host "[pluto] создаю службу Windows '$Name'..."
-try { New-Service -Name $Name -BinaryPathName $binPath -DisplayName "PLUTO Agent" -StartupType Automatic -ErrorAction Stop | Out-Null }
-catch { throw "не удалось создать службу: $($_.Exception.Message). Запустите PowerShell от имени администратора." }
-
-# Самовосстановление: если процесс агента упадёт, Windows перезапустит его
-# автоматически (через 5 с, затем 15 с, затем 60 с; счётчик сбрасывается раз в сутки)
-sc.exe failure $Name reset= 86400 actions= restart/5000/restart/15000/restart/60000 | Out-Null
-
-$svc = Get-CimInstance Win32_Service -Filter "Name='$Name'"
-Write-Host "[pluto] путь службы: $($svc.PathName)"
-if (-not (Select-String -Path $conf -Pattern '^token=' -Quiet)) { throw "конфигурация не записана — повторите установку." }
-
-Write-Host "[pluto] запускаю службу..."
-if (Test-Path "$dir\\agent.log") { Move-Item "$dir\\agent.log" "$dir\\agent.old.log" -Force -ErrorAction SilentlyContinue }
-Start-Service $Name
-
-Write-Host "[pluto] жду подключения агента к ядру (до 15 с)..."
-$ok = $false
-for ($i = 0; $i -lt 15; $i++) {
-  Start-Sleep -Seconds 1
-  if (Test-Path "$dir\\agent.log") {
-    $tail = Get-Content "$dir\\agent.log" -Tail 25 -Encoding UTF8 -ErrorAction SilentlyContinue
-    if ($tail -match "подключено к") { $ok = $true; break }
-  }
-}
-Write-Host ""
-if ($ok) {
-  Write-Host "[pluto] АГЕНТ В СЕТИ — метрики уже поступают в консоль PLUTO." -ForegroundColor Green
-} else {
-  Write-Host "[pluto] Агент пока не подключился. Последние строки лога:" -ForegroundColor Yellow
-  if (Test-Path "$dir\\agent.log") { Get-Content "$dir\\agent.log" -Tail 8 -Encoding UTF8 -ErrorAction SilentlyContinue }
-  Write-Host "[pluto] Проверьте: Test-NetConnection <IP-сервера> -Port 8443" -ForegroundColor Yellow
-}
-Write-Host "[pluto] сервер : $Server"
-Write-Host "[pluto] конфиг : $conf"
-Write-Host "[pluto] лог    : $dir\\agent.log"
-`;
-
-// ─── Проверки устройств (настоящие) ─────────────────────────────────────────
-
-function checkPing(addr, timeoutMs) {
-  return new Promise((resolve) => {
-    const secs = Math.max(1, Math.round(timeoutMs / 1000));
-    const t0 = Date.now();
-    execFile('ping', ['-c', '1', '-W', String(secs), addr], { timeout: timeoutMs + 2000 }, (err, stdout) => {
-      if (err) return resolve({ ok: false, latency: 0 });
-      const m = /time[=<]\s*([\d.]+)\s*ms/.exec(stdout || '');
-      resolve(m ? { ok: true, latency: Math.max(1, Math.round(parseFloat(m[1]))) } : { ok: true, latency: Date.now() - t0 });
-    });
-  });
-}
-
-function checkHttp(addr, port, pth, method, body, timeoutMs) {
-  return new Promise((resolve) => {
-    const t0 = Date.now();
-    let url;
-    try {
-      url = /^https?:\/\//.test(addr) ? addr : `http://${addr}${port ? ':' + port : ''}${pth ? (pth.startsWith('/') ? pth : '/' + pth) : '/'}`;
-    } catch { return resolve({ ok: false, latency: 0 }); }
-    const opts = { method: method || 'GET', signal: AbortSignal.timeout(timeoutMs) };
-    if (body && method !== 'GET') opts.body = body;
-    fetch(url, opts)
-      .then(() => resolve({ ok: true, latency: Date.now() - t0 }))
-      .catch(() => resolve({ ok: false, latency: 0 }));
-  });
-}
-
-function checkRtsp(url, timeoutMs) {
-  return new Promise((resolve) => {
-    const t0 = Date.now();
-    const m = /^rtsp:\/\/([^:/]+)(?::(\d+))?/.exec(url || '');
-    if (!m) return resolve({ ok: false, latency: 0 });
-    const host = m[1], port = Number(m[2] || 554);
-    const sock = net.connect({ host, port, timeout: timeoutMs });
-    const done = (ok) => { try { sock.destroy(); } catch {} resolve({ ok, latency: ok ? Date.now() - t0 : 0 }); };
-    sock.on('connect', () => sock.write(`OPTIONS ${url} RTSP/1.0\r\nCSeq: 1\r\n\r\n`));
-    sock.on('data', (d) => done(/RTSP\/1\.0 200/.test(d.toString())));
-    sock.on('timeout', () => done(false));
-    sock.on('error', () => done(false));
-  });
-}
-
-function checkSip(uri, timeoutMs) {
-  return new Promise((resolve) => {
-    const t0 = Date.now();
-    const m = /^sip:([^@]+@)?([^:/]+)(?::(\d+))?/.exec(uri || '');
-    if (!m) return resolve({ ok: false, latency: 0 });
-    const host = m[2], port = Number(m[3] || 5060);
-    const sock = dgram.createSocket('udp4');
-    const timer = setTimeout(() => { try { sock.close(); } catch {} resolve({ ok: false, latency: 0 }); }, timeoutMs);
-    const req = `OPTIONS ${uri} SIP/2.0\r\nVia: SIP/2.0/UDP pluto;branch=z9hG4bK${uid()}\r\nFrom: <sip:pluto@monitor>;tag=${uid()}\r\nTo: <${uri}>\r\nCall-ID: ${uid()}@pluto\r\nCSeq: 1 OPTIONS\r\nMax-Forwards: 5\r\nContent-Length: 0\r\n\r\n`;
-    sock.on('message', (msg) => { clearTimeout(timer); try { sock.close(); } catch {} resolve({ ok: /SIP\/2\.0 200/.test(msg.toString()), latency: Date.now() - t0 }); });
-    sock.on('error', () => { clearTimeout(timer); resolve({ ok: false, latency: 0 }); });
-    sock.send(req, port, host);
-  });
-}
-
-async function runDeviceCheck(d) {
-  const s = db.settings;
-  let res;
-  switch (d.type) {
-    case 'ping': res = await checkPing(d.address, s.timeoutMs); break;
-    case 'http': res = await checkHttp(d.address, d.port, d.path, 'GET', null, s.timeoutMs); break;
-    case 'api': res = await checkHttp(d.address, d.port, d.path, d.method || 'POST', d.body || '', s.timeoutMs); break;
-    case 'rtsp': res = await checkRtsp(d.address, s.timeoutMs); break;
-    case 'sip': res = await checkSip(d.address, s.timeoutMs); break;
-    default: res = { ok: false, latency: 0 };
-  }
-  const now = Date.now();
-  d.history = [...(d.history || []), res.ok ? res.latency : -1].slice(-48);
-  if (!res.ok) {
-    d.fails = (d.fails || 0) + 1;
-    if (d.fails >= s.failThreshold && d.status !== 'down') {
-      d.status = 'down'; d.latency = null; d.lastChange = now;
-      pushEvent('crit', 'device', `${d.name} (${d.address}) — потеря связи (${d.fails} сб. подряд)`);
-    }
-  } else {
-    const degraded = d.baseline && res.latency > d.baseline * s.degradeFactor && res.latency > s.degradeMinMs;
-    const prev = d.status;
-    d.status = degraded ? 'degraded' : 'up';
-    d.latency = res.latency;
-    d.fails = 0;
-    d.baseline = d.baseline ? Math.round(d.baseline * 0.8 + res.latency * 0.2) : res.latency;
-    if (prev === 'down') pushEvent('ok', 'device', `${d.name} (${d.address}) — связь восстановлена`);
-    else if (degraded && prev !== 'degraded') pushEvent('warn', 'device', `${d.name}: деградация ${res.latency} мс (база ~${d.baseline} мс)`);
-    if (d.status !== prev) d.lastChange = now;
-  }
-  d.lastCheck = now;
-  saveDb();
-  console.log(`[pluto] ${d.type.toUpperCase()} ${d.address} → ${res.ok ? 'ok ' + res.latency + ' мс' : 'недоступен'}`);
-  return res;
-}
-
-// Планировщик: интервалы устройств + оффлайн-детектор агентов
-setInterval(() => {
-  const now = Date.now();
-  for (const d of db.devices) {
-    const iv = Math.max(5, d.interval || db.settings.intervals[d.type] || 60) * 1000;
-    if (!d.checking && now - (d.lastCheck || 0) >= iv) {
-      d.checking = true;
-      runDeviceCheck(d).finally(() => { d.checking = false; });
-    }
-  }
-  // Агенты: сервер сам пингует IP (uptime), читает листинг AIDA64 и через relay
-  // пингует устройства внутри VLAN. Интервал — из настроек (по умолчанию 30 с).
-  const aiv = Math.max(10, (db.settings.intervals && db.settings.intervals.agent) || 30) * 1000;
-  for (const a of db.agents) {
-    // страховка: если опрос завис (флаг висит дольше 3 минут) — отпускаем его,
-    // иначе агент замёрз бы навсегда
-    if (a.polling && a.pollStarted && now - a.pollStarted > 180000) {
-      console.log(`[pluto] опрос «${a.name}» завис — флаг сброшен`);
-      a.polling = false;
-    }
-    if (!a.polling && now - (a.lastPoll || 0) >= aiv) {
-      a.polling = true;
-      a.pollStarted = now;
-      pollAgent(a).finally(() => { a.polling = false; a.lastPoll = Date.now(); });
-    }
-  }
-  // Glances: периодический опрос веб-страниц (интервал из настроек, по умолчанию 60 с)
-  const giv = Math.max(15, (db.settings.intervals && db.settings.intervals.glances) || 60) * 1000;
-  for (const g of db.glances || []) {
-    if (!g.scraping && now - (g.lastScrape || 0) >= giv) {
-      g.scraping = true;
-      scrapeGlances(g).finally(() => { g.scraping = false; });
-    }
-  }
-  // автоочистка архива Glances (старше 30 дней) — раз в час по расписанию
-  if (now - lastGlancesCleanup > 3600000) {
-    lastGlancesCleanup = now;
-    glancesCleanup(now);
-  }
-}, 1000);
-
-// ─── Агенты: модель без токенов ─────────────────────────────────────────────
-// WebSocket-шлюз удалён. Агент больше не устанавливается и не подключается сам:
-// сервер опрашивает его по HTTP (см. pollAgent выше) — пинг до IP, чтение
-// листинга AIDA64 и relay-пинги устройств внутри VLAN через aida-monitor.
-
-// ─── REST API + статика ──────────────────────────────────────────────────────
-
-const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.json': 'application/json', '.webp': 'image/webp', '.txt': 'text/plain' };
+const MIME = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8',
+};
 
 function json(res, code, data) {
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(data));
 }
-
+function text(res, code, body, type = 'text/plain; charset=utf-8') {
+  res.writeHead(code, { 'Content-Type': type });
+  res.end(body);
+}
 function readBody(req) {
   return new Promise((resolve) => {
     let raw = '';
@@ -296,33 +42,62 @@ function readBody(req) {
     });
   });
 }
+const publicUser = (u) => ({ id: u.id, name: u.name, login: u.login, role: u.role, scope: u.scope, builtIn: u.builtIn, createdAt: u.createdAt });
 
-const publicUser = (u) => ({ id: u.id, name: u.name, role: u.role, scope: u.scope, builtIn: u.builtIn, createdAt: u.createdAt });
+// ─── HTTP-клиент с абсолютным таймаутом ─────────────────────────────────────
 
-// ─── Телеметрия AIDA64: хранение 60 дней с ярусным сжатием ──────────────────
-// < 24 ч — каждая точка; 24 ч–7 дн — укрупнение до минут; > 7 дн — до часов.
-// Бюджет ≈ 15 тыс. точек на агента при полном 60-дневном окне.
-
-const AIDA_RETENTION_MS = 60 * 86400000;
-const AIDA_MAX_POINTS = 20000;
-const AIDA_KEYS = ['cpuUsage', 'cpuTemp', 'ram', 'ssdTemp', 'diskC', 'tx', 'rx', 'uptimeSec'];
-const AIDA_RANGE_MS = {
-  '5m': 5 * 60000, '30m': 30 * 60000, '3h': 3 * 3600000, '24h': 24 * 3600000,
-  '7d': 7 * 86400000, '30d': 30 * 86400000, '60d': 60 * 86400000,
-};
-
-const numOrNull = (v) => (typeof v === 'number' && isFinite(v) ? v : null);
-
-function mergeAidaPoints(dst, src) {
-  for (const k of AIDA_KEYS) {
-    if (src[k] == null) continue;
-    dst[k] = dst[k] == null ? src[k] : Math.round(((dst[k] + src[k]) / 2) * 10) / 10;
-  }
-  dst.t = src.t;
+function fetchText(rawUrl, timeoutMs = 7000) {
+  return new Promise((resolve, reject) => {
+    let u;
+    try { u = new URL(rawUrl); } catch { return reject(new Error('некорректный адрес')); }
+    const lib = u.protocol === 'https:' ? https : http;
+    let done = false;
+    const r = lib.get(u, {
+      timeout: timeoutMs,
+      headers: { 'User-Agent': 'pluto-core', 'Accept': '*/*', 'Connection': 'close' },
+    }, (res) => {
+      if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
+        res.resume();
+        return fetchText(new URL(res.headers.location, u).toString(), timeoutMs).then(finish(resolve), finish(reject));
+      }
+      if (res.statusCode !== 200) { res.resume(); return finish(reject)(new Error(`HTTP ${res.statusCode}`)); }
+      let data = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => (data += c));
+      res.on('end', () => finish(resolve)(data));
+    });
+    const kill = setTimeout(() => { if (!done) r.destroy(new Error(`таймаут запроса (${timeoutMs} мс)`)); }, timeoutMs);
+    function finish(fn) {
+      return (v) => { if (done) return; done = true; clearTimeout(kill); fn(v); };
+    }
+    r.on('timeout', () => r.destroy(new Error('таймаут соединения')));
+    r.on('error', (e) => finish(reject)(e));
+  });
 }
 
-/** Усреднение числовых полей двух точек ряда (t берётся из более свежей). */
-function mergeSeriesPoints(dst, src) {
+const isLoopbackUrl = (u) => /^https?:\/\/(127\.|localhost|0\.0\.0\.0|\[::1?\])/i.test(String(u || '').trim());
+
+/** Чтение страницы напрямую или через relay (для loopback-адресов). */
+async function fetchListing(url, relayUrl) {
+  const target = String(url || '').trim();
+  if (!target) throw new Error('не задан адрес источника');
+  if (isLoopbackUrl(target)) {
+    if (!relayUrl) throw new Error(`адрес ${target} локальный — сервер не может открыть его из контейнера. Укажите LAN-IP машины или настройте relay (aida-monitor)`);
+    const base = String(relayUrl).replace(/\/+$/, '');
+    try {
+      const html = await fetchText(base + '/fetch?url=' + encodeURIComponent(target), 15000);
+      return { html, via: 'relay' };
+    } catch (e) {
+      throw new Error('loopback-адрес, relay не ответил: ' + (e.message || e));
+    }
+  }
+  const html = await fetchText(target, 7000);
+  return { html, via: 'direct' };
+}
+
+// ─── Хранение рядов с ярусным сжатием ───────────────────────────────────────
+
+function mergePoints(dst, src) {
   for (const k of Object.keys(src)) {
     if (k === 't') continue;
     const v = src[k];
@@ -332,13 +107,7 @@ function mergeSeriesPoints(dst, src) {
   dst.t = src.t;
 }
 
-/**
- * Сжатие длинного ряда для хранения 30–60 дней при ограниченном бюджете точек:
- *   < 24 ч  — каждая точка как есть;
- *   24 ч–7 дн — укрупнение до минутных бакетов;
- *   > 7 дн  — до часовых.
- * Вызывается, когда ряд превышает ~19 тыс. точек.
- */
+/** < 24 ч — как есть; 24 ч–7 дн — минутные бакеты; > 7 дн — часовые. */
 function compactSeries(arr, now) {
   const d1 = now - 86400000;
   const d7 = now - 7 * 86400000;
@@ -346,17 +115,16 @@ function compactSeries(arr, now) {
   const byMin = new Map();
   const byHour = new Map();
   for (const pt of arr) {
-    if (pt.t >= d1) {
-      raw.push(pt);
-    } else if (pt.t >= d7) {
+    if (pt.t >= d1) raw.push(pt);
+    else if (pt.t >= d7) {
       const k = Math.floor(pt.t / 60000);
       const ex = byMin.get(k);
-      if (ex) mergeSeriesPoints(ex, pt);
+      if (ex) mergePoints(ex, pt);
       else byMin.set(k, { ...pt });
     } else {
       const k = Math.floor(pt.t / 3600000);
       const ex = byHour.get(k);
-      if (ex) mergeSeriesPoints(ex, pt);
+      if (ex) mergePoints(ex, pt);
       else byHour.set(k, { ...pt });
     }
   }
@@ -365,41 +133,50 @@ function compactSeries(arr, now) {
   return out;
 }
 
-function aidaAppend(agent, pt) {
-  if (!Array.isArray(agent.aida)) agent.aida = [];
-  const arr = agent.aida;
-  const last = arr[arr.length - 1];
-  if (last) {
-    const age = pt.t - last.t;
-    const sameMinute = Math.floor(last.t / 60000) === Math.floor(pt.t / 60000);
-    const sameHour = Math.floor(last.t / 3600000) === Math.floor(pt.t / 3600000);
-    if ((age > 7 * 86400000 && sameHour) || (age > 86400000 && sameMinute)) {
-      mergeAidaPoints(last, pt); // данные старше суток/недели уплотняем в бакеты
-    } else {
-      arr.push(pt);
-    }
-  } else {
-    arr.push(pt);
-  }
-  const cutoff = pt.t - AIDA_RETENTION_MS; // хранение — 60 дней
+const MAX_POINTS = 20000;
+const AIDA_RETENTION_MS = 60 * 86400000; // 60 дней
+const GLANCES_RETENTION_MS = 30 * 86400000; // 30 дней
+
+function seriesAppend(agent, key, pt, retentionMs) {
+  if (!Array.isArray(agent[key])) agent[key] = [];
+  const arr = agent[key];
+  arr.push(pt);
+  if (arr.length > MAX_POINTS) agent[key] = compactSeries(arr, pt.t);
+  const cutoff = pt.t - retentionMs;
   let i = 0;
-  while (i < arr.length && arr[i].t < cutoff) i++;
-  if (i > 0) arr.splice(0, i);
-  // при переполнении бюджета — ярусное сжатие (а не обрезка старых данных),
-  // чтобы 60-дневное окно сохранялось даже при 10-секундном интервале
-  if (arr.length > AIDA_MAX_POINTS - 1000) agent.aida = compactSeries(arr, pt.t);
+  while (i < agent[key].length && agent[key][i].t < cutoff) i++;
+  if (i > 0) agent[key].splice(0, i);
 }
 
-// ─── Агенты: сервер опрашивает сам (без токенов и установленной программы) ──
-// Агент = IP + ссылка на листинг AIDA64. Сервер:
-//   1) пингует IP — доступность и статистика uptime;
-//   2) читает листинг AIDA64 и разбирает строку «CPUu 3%, CPU 42°C, RAM 25%, …»;
-//   3) через relay-сервис aida-monitor (внутри VLAN агента) пингует локальные
-//      устройства — обход разграничения VLAN.
+const AIDA_RANGE_MS = {
+  '5m': 5 * 60000, '30m': 30 * 60000, '3h': 3 * 3600000, '24h': 24 * 3600000,
+  '7d': 7 * 86400000, '30d': 30 * 86400000, '60d': 60 * 86400000,
+};
+const GLANCES_RANGE_MS = {
+  '5m': 5 * 60000, '30m': 30 * 60000, '3h': 3 * 3600000, '24h': 24 * 3600000,
+  '7d': 7 * 86400000, '30d': 30 * 86400000,
+};
 
-const AGENT_AIDA_KEYS = ['cpuUsage', 'cpuTemp', 'ram', 'ssdTemp', 'diskC', 'usedSpaceC', 'tx', 'rx', 'uptimeSec'];
+function rangePoints(arr, rangeMs, range) {
+  const cutoff = Date.now() - rangeMs;
+  let pts = (arr || []).filter((x) => x.t >= cutoff);
+  if (pts.length > 1500) {
+    const bw = rangeMs / 1500;
+    const out = [];
+    let cur = null, bi = -1;
+    for (const pt of pts) {
+      const idx = Math.floor((pt.t - cutoff) / bw);
+      if (idx !== bi) { if (cur) out.push(cur); cur = { ...pt }; bi = idx; }
+      else mergePoints(cur, pt);
+    }
+    if (cur) out.push(cur);
+    pts = out;
+  }
+  return { range, retentionDays: Math.round(rangeMs === AIDA_RETENTION_MS ? 60 : rangeMs / 86400000) || 30, points: pts };
+}
 
-/** Очистка фрагмента RemoteSensor-страницы: сущности, теги, пробелы. */
+// ─── Парсер AIDA64 RemoteSensor (спаны Simple1…SimpleN) ─────────────────────
+
 function cleanAidaText(t) {
   return String(t)
     .replace(/<[^>]+>/g, ' ')
@@ -415,8 +192,8 @@ const AIDA_LABEL_MAP = {
   cpuu: 'cpuUsage', cpu: 'cpuTemp', ram: 'ram', ssd: 'ssdTemp',
   usec: 'diskC', usedspacec: 'usedSpaceC', tx: 'tx', rx: 'rx',
 };
+const AGENT_AIDA_KEYS = ['cpuUsage', 'cpuTemp', 'ram', 'ssdTemp', 'diskC', 'usedSpaceC', 'tx', 'rx', 'uptimeSec'];
 
-/** «01:01:48» / «2 д. 03:42:11» / «2d 03:42:11» → секунды. */
 function uptimeToSec(v) {
   const s = String(v).trim();
   const hms = /(\d{1,3}):(\d{1,2}):(\d{1,2})/.exec(s);
@@ -426,18 +203,8 @@ function uptimeToSec(v) {
     parseInt(hms[1], 10) * 3600 + parseInt(hms[2], 10) * 60 + parseInt(hms[3], 10);
 }
 
-/**
- * Разбор страницы AIDA64 RemoteSensor.
- * Штатная структура — спаны Simple1…SimpleN, внутри каждого «Метка Значение»:
- *   <span id="Simple1">CPUu 5%</span>
- *   <span id="Simple6">UsedSpaceC 101&nbsp;GB</span>
- *   <span id="Simple9">Uptime 01:01:48</span>
- * Сначала значения вынимаются из спанов (детерминированно); если спанов нет —
- * запасной поиск меток по всему тексту страницы.
- */
 function parseAidaLine(html) {
   const out = { cpuUsage: null, cpuTemp: null, ram: null, ssdTemp: null, diskC: null, usedSpaceC: null, tx: null, rx: null, uptimeSec: null };
-
   const spanRe = /<span[^>]*id="Simple\d+"[^>]*>([\s\S]*?)<\/span>/gi;
   const items = [];
   let m;
@@ -445,14 +212,12 @@ function parseAidaLine(html) {
     const t = cleanAidaText(m[1]);
     if (t) items.push(t);
   }
-
   const setVal = (label, numStr) => {
     const key = AIDA_LABEL_MAP[label.toLowerCase()];
     if (!key) return;
     const v = parseFloat(numStr.replace(',', '.'));
     if (isFinite(v)) out[key] = v;
   };
-
   if (items.length) {
     for (const it of items) {
       const um = /^uptime\s+(.+)$/i.exec(it);
@@ -462,8 +227,6 @@ function parseAidaLine(html) {
     }
     return out;
   }
-
-  // запасной вариант: поиск «Метка Значение» по очищенному тексту всей страницы
   const s = cleanAidaText(html);
   const num = (label) => {
     const re = new RegExp('\\b' + label + '\\b\\s*[:=]?\\s*(-?\\d+(?:[.,]\\d+)?)', 'i');
@@ -477,357 +240,136 @@ function parseAidaLine(html) {
   return out;
 }
 
-/** Разворачивает цель в список IP: «1.2.3.4», «1.2.3.10-20», «1.2.3.0/24». */
-function expandIps(target) {
-  const t = String(target).trim();
-  if (!t) return [];
-  const range = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.)(\d{1,3})\s*-\s*(\d{1,3})$/.exec(t);
-  if (range) {
-    const out = [];
-    const a = parseInt(range[2]), b = parseInt(range[3]);
-    for (let i = Math.min(a, b); i <= Math.max(a, b) && out.length < 256; i++) out.push(range[1] + i);
-    return out;
-  }
-  const cidr = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.)\d{1,3}\/(\d{1,2})$/.exec(t);
-  if (cidr) {
-    if (parseInt(cidr[2]) < 24) return []; // слишком большая сеть — не раскрываем
-    const out = [];
-    for (let i = 1; i < 255; i++) out.push(cidr[1] + i);
-    return out;
-  }
-  return /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(t) ? [t] : [];
-}
+// ─── SSE-подписка на AIDA64 (реальное время) ────────────────────────────────
+// Страница RemoteSensor обновляет показания через Server-Sent Events:
+//   data: Simple1|CPUu 5%{|}Simple4|SSD 46°C
+// Сырой HTML статичен (запекается при генерации страницы), поэтому SSE —
+// единственный способ получать живые значения. Сервер держит постоянное
+// соединение (напрямую или через relay /sse-stream) и пишет точки в архив.
 
-/** Пинг списка IP через relay-сервис внутри VLAN агента. */
-async function relayPing(agent, ips) {
-  if (!agent.relayUrl || !ips.length) return [];
-  const base = String(agent.relayUrl).replace(/\/+$/, '');
-  const url = base + '/ping?targets=' + encodeURIComponent(ips.join(','));
-  try {
-    const txt = await fetchText(url, 15000);
-    const arr = JSON.parse(txt);
-    if (Array.isArray(arr)) {
-      return arr.map((r) => ({
-        ip: r.ip, alive: !!r.alive,
-        latency: r.latencyMs != null ? r.latencyMs : (r.latency != null ? r.latency : null),
-      }));
-    }
-  } catch { /* relay недоступен — вернём пустой результат */ }
-  return [];
-}
+const sseConnections = new Map(); // agentId → { req, acc, flushTimer, closed }
 
-const isLoopbackUrl = (u) => /^https?:\/\/(127\.|localhost|0\.0\.0\.0|\[::1?\])/i.test(String(u || '').trim());
-
-/**
- * Чтение листинга AIDA64 с выбором маршрута:
- *  - если адрес локальный (127.0.0.1/localhost) и у агента настроен relay —
- *    страницу открывает relay-сервис, стоящий на той же Windows-машине
- *    (из контейнера сервера 127.0.0.1 недостижим — это самая частая причина
- *    «данные не собираются»);
- *  - иначе сервер открывает страницу напрямую.
- * Возвращает { html, via, url } или бросает ошибку с человекочитаемой причиной.
- */
-async function fetchAidaListing(agent) {
-  const url = String(agent.aidaUrl || '').trim();
-  if (!url) throw new Error('не задан адрес листинга AIDA64');
-
-  if (isLoopbackUrl(url) && agent.relayUrl) {
-    const base = String(agent.relayUrl).replace(/\/+$/, '');
-    try {
-      const html = await fetchText(base + '/fetch?url=' + encodeURIComponent(url), 15000);
-      return { html, via: 'relay', url };
-    } catch (e) {
-      throw new Error('loopback-адрес, relay не ответил: ' + (e.message || e));
-    }
-  }
-  if (isLoopbackUrl(url)) {
-    throw new Error('адрес ' + url + ' локальный — сервер не может его открыть из контейнера. Укажите IP Windows-машины (http://<IP>:8090/) или настройте relay');
-  }
-  const html = await fetchText(url, 7000);
-  return { html, via: 'direct', url };
-}
-
-/** Диагностика источника AIDA64 — то же, что делает опрос, но с подробным отчётом. */
-async function testAidaSource(agent) {
-  try {
-    const { html, via, url } = await fetchAidaListing(agent);
-    const parsed = parseAidaLine(html);
-    parsed.t = Date.now();
-    const recognized = AGENT_AIDA_KEYS.filter((k) => parsed[k] != null);
-    const plain = String(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-    return {
-      ok: recognized.length > 0,
-      url, via,
-      bytes: html.length,
-      sample: plain.slice(0, 300),
-      parsed,
-      recognized,
-      missing: AGENT_AIDA_KEYS.filter((k) => parsed[k] == null),
-    };
-  } catch (e) {
-    return { ok: false, url: agent.aidaUrl || '', via: null, error: e.message || String(e) };
-  }
-}
-
-// ─── SSE-подписка на RemoteSensor (показания в реальном времени) ────────────
-// Сырой HTML страницы AIDA64 содержит значения, зафиксированные на момент
-// генерации; «живые» данные страница получает из потока /sse (Server-Sent
-// Events): кадры вида «data: Simple1|CPUu 5%{|}Simple2|CPU 41°C{|}». Сервер
-// держит постоянную подписку на этот поток (напрямую или через relay для
-// loopback-адресов) и пишет обновления в архив — так интервал 10 с даёт
-// действительно свежие показания.
-
-const sseConnections = new Map(); // agentId → { req, res, buf, acc, dead }
-const sseRetryAt = new Map();     // agentId → ближайшая попытка переподключения
-
-/** Применение одного SSE-кадра к агенту: частичные кадры накапливаются. */
-function applyAidaFrame(agent, data) {
-  const parts = String(data).split('{|}');
-  const patch = {};
-  let got = false;
-  for (const part of parts) {
-    const idx = part.indexOf('|');
-    if (idx < 0) continue;
-    const id = part.slice(0, idx).trim();
-    if (!/^Simple\d+$/.test(id)) continue; // ReLoad / Bar… / Gph… / Arc… — не данные
-    const t = cleanAidaText(part.slice(idx + 1));
-    if (!t) continue;
-    const um = /^uptime\s+(.+)$/i.exec(t);
-    if (um) { const s = uptimeToSec(um[1]); if (s != null) { patch.uptimeSec = s; got = true; } continue; }
-    const pm = /^([A-Za-z]+)\s*[:=]?\s*(-?\d+(?:[.,]\d+)?)/.exec(t);
+function sseParseFrame(agent, data) {
+  const conn = sseConnections.get(agent.id);
+  if (!conn) return;
+  const acc = conn.acc;
+  for (const item of String(data).split('{|}')) {
+    const pipe = item.indexOf('|');
+    if (pipe < 0) continue;
+    const text = cleanAidaText(item.slice(pipe + 1));
+    if (!text) continue;
+    const um = /^uptime\s+(.+)$/i.exec(text);
+    if (um) { const v = uptimeToSec(um[1]); if (v != null) acc.uptimeSec = v; continue; }
+    const pm = /^([A-Za-z]+)\s*[:=]?\s*(-?\d+(?:[.,]\d+)?)/.exec(text);
     if (pm) {
       const key = AIDA_LABEL_MAP[pm[1].toLowerCase()];
-      if (key) { const v = parseFloat(pm[2].replace(',', '.')); if (isFinite(v)) { patch[key] = v; got = true; } }
+      if (key) acc[key] = parseFloat(pm[2].replace(',', '.'));
     }
   }
-  if (!got) return;
+}
 
-  const now = Date.now();
-  // база — последние полные показания (не старше 2 мин), иначе старт с чистого кадра
-  const base = agent.latest && now - (agent.latest.t || 0) < 120000 ? { ...agent.latest } : {};
-  const pt = { ...base, ...patch, t: now };
+function sseFlush(agent) {
+  const conn = sseConnections.get(agent.id);
+  if (!conn) return;
+  const acc = conn.acc;
+  if (!AGENT_AIDA_KEYS.some((k) => acc[k] != null)) return;
+  const pt = { ...acc, t: Date.now() };
   agent.latest = pt;
-  agent.lastAida = now;
+  seriesAppend(agent, 'aida', pt, AIDA_RETENTION_MS);
+  agent.lastAida = Date.now();
   agent.lastError = null;
-
-  // в архив пишем не чаще интервала AIDA64, либо сразу при изменении значений —
-  // иначе поток 1–2 кадра/сек переполнил бы хранилище
-  const iv = Math.max(10, (db.settings.intervals && db.settings.intervals.aida) || 10) * 1000;
-  const arr = Array.isArray(agent.aida) ? agent.aida : (agent.aida = []);
-  const last = arr[arr.length - 1];
-  const changed = !last || AGENT_AIDA_KEYS.some((k) => (last[k] ?? null) !== (pt[k] ?? null));
-  const due = !agent._lastAidaPoint || now - agent._lastAidaPoint >= iv;
-  if (changed || due) {
-    agent._lastAidaPoint = now;
-    aidaAppend(agent, pt);
-  }
-  if (!agent._sseLogged) {
-    agent._sseLogged = true;
-    console.log(`[pluto] AIDA «${agent.name}»: SSE-подписка установлена — показания в реальном времени`);
-  }
-}
-
-/** Разбор потока SSE: буферизация, кадры «data: …», пустая строка = событие. */
-function handleSseData(agentId, chunk) {
-  const st = sseConnections.get(agentId);
-  const agent = db.agents.find((x) => x.id === agentId);
-  if (!st || !agent) return;
-  st.buf += chunk;
-  let nl;
-  while ((nl = st.buf.indexOf('\n')) >= 0) {
-    const line = st.buf.slice(0, nl).replace(/\r$/, '');
-    st.buf = st.buf.slice(nl + 1);
-    if (line.startsWith('data:')) {
-      st.acc.push(line.slice(5).trim());
-    } else if (line === '' && st.acc.length) {
-      applyAidaFrame(agent, st.acc.join('\n'));
-      st.acc = [];
-    }
-  }
-  if (st.buf.length > 65536) st.buf = st.buf.slice(-8192); // защита от разрастания
-}
-
-function closeAidaSse(agentId) {
-  const st = sseConnections.get(agentId);
-  if (!st) return;
-  st.dead = true;
-  try { st.req.destroy(); } catch { /* уже закрыт */ }
-  if (st.res) try { st.res.destroy(); } catch { /* уже закрыт */ }
-  sseConnections.delete(agentId);
-  const a = db.agents.find((x) => x.id === agentId);
-  if (a) { a.sse = false; a._sseLogged = false; }
-}
-
-/** Открыть SSE-подписку для агента (напрямую или через relay для loopback). */
-function openAidaSse(agent) {
-  closeAidaSse(agent.id);
-  const url = String(agent.aidaUrl || '').trim();
-  if (!url) return;
-  let sseUrl;
-  try {
-    const u = new URL(url);
-    u.pathname = '/sse';
-    u.search = '';
-    sseUrl = u.toString();
-  } catch { return; }
-
-  const finalUrl = isLoopbackUrl(url)
-    ? (agent.relayUrl ? String(agent.relayUrl).replace(/\/+$/, '') + '/sse?url=' + encodeURIComponent(sseUrl) : null)
-    : sseUrl;
-  if (!finalUrl) return; // loopback без relay — опрос страницы сам покажет ошибку
-
-  let fu;
-  try { fu = new URL(finalUrl); } catch { return; }
-  const lib = fu.protocol === 'https:' ? https : http;
-  const st = { req: null, res: null, buf: '', acc: [], dead: false };
-  sseConnections.set(agent.id, st);
-
-  const finish = () => {
-    if (st.dead) return;
-    st.dead = true;
-    sseConnections.delete(agent.id);
-    sseRetryAt.set(agent.id, Date.now() + 15000); // повтор не чаще раза в 15 с
-    const a = db.agents.find((x) => x.id === agent.id);
-    if (a) { a.sse = false; a._sseLogged = false; }
-  };
-
-  const req = lib.get(fu, {
-    headers: { 'User-Agent': 'pluto-core', 'Accept': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'close' },
-  }, (res) => {
-    if (st.dead) { res.resume(); return; }
-    if (res.statusCode !== 200) { res.resume(); return finish(); }
-    st.res = res;
-    sseRetryAt.delete(agent.id);
-    agent.sse = true;
-    res.setEncoding('utf8');
-    res.on('data', (c) => handleSseData(agent.id, c));
-    res.on('end', finish);
-    res.on('error', finish);
-  });
-  req.on('error', finish);
-  st.req = req;
-  agent.sse = true;
-}
-
-/** Синхронизация подписок с конфигурацией агентов (вызывается каждую секунду). */
-function reconcileSse() {
-  const now = Date.now();
-  for (const a of db.agents) {
-    const want = !!String(a.aidaUrl || '').trim();
-    const has = sseConnections.has(a.id);
-    if (want && !has && now >= (sseRetryAt.get(a.id) || 0)) openAidaSse(a);
-    if (!want && has) closeAidaSse(a.id);
-  }
-}
-
-/** Полный опрос агента: uptime-пинг + листинг AIDA64 + relay-пинги устройств. */
-async function pollAgent(agent, forceAida) {
-  const now = Date.now();
-
-  // 1) пинг до IP агента — доступность / uptime
-  const ping = await checkPing(agent.ip, db.settings.timeoutMs || 3000);
-  const wasOnline = agent.online;
-  agent.online = ping.ok;
-  agent.latency = ping.ok ? ping.latency : null;
-  agent.lastPoll = now;
-  if (!Array.isArray(agent.latHist)) agent.latHist = [];
-  agent.latHist.push({ t: now, ms: ping.ok ? ping.latency : null });
-  if (agent.latHist.length > 480) agent.latHist.splice(0, agent.latHist.length - 480);
-  if (ping.ok) {
-    agent.lastSeen = now;
-    if (!agent.onlineSince) agent.onlineSince = now;
-  } else {
-    agent.onlineSince = 0;
-  }
-  if (ping.ok && !wasOnline) pushEvent('ok', 'agent', `Агент «${agent.name}» (${agent.ip}) в сети`);
-  if (!ping.ok && wasOnline) pushEvent('warn', 'agent', `Агент «${agent.name}» (${agent.ip}) недоступен`);
-
-  // 2) листинг AIDA64 — отдельный интервал (по умолчанию раз в минуту),
-  //    чтобы частый пинг (uptime) не нагружал сенсорную страницу
-  const aidaIv = Math.max(10, (db.settings.intervals && db.settings.intervals.aida) || 10) * 1000;
-  if (agent.aidaUrl && (forceAida || now - (agent.lastAida || 0) >= aidaIv)) {
-    agent.lastAida = now;
-    try {
-      const { html, via } = await fetchAidaListing(agent);
-      const pt = parseAidaLine(html);
-      pt.t = Date.now();
-      if (AGENT_AIDA_KEYS.some((k) => pt[k] != null)) {
-        agent.latest = pt;
-        aidaAppend(agent, pt);
-        agent.lastError = null;
-        console.log(`[pluto] AIDA «${agent.name}» [${via}]: CPU ${pt.cpuUsage ?? '—'}% · ${pt.cpuTemp ?? '—'}°C · RAM ${pt.ram ?? '—'}% · SSD ${pt.ssdTemp ?? '—'}°C`);
-      } else {
-        agent.lastError = 'листинг AIDA64 загружен, но значения не распознаны — нажмите «Проверить листинг» в карточке агента';
-        console.log(`[pluto] AIDA «${agent.name}» [${via}]: страница получена (${html.length} байт), значения не распознаны`);
-      }
-    } catch (e) {
-      agent.lastError = 'AIDA64: ' + (e.message || 'ошибка запроса');
-      console.log(`[pluto] AIDA «${agent.name}»: ${agent.lastError}`);
-    }
-  }
-
-  // 3) пинги устройств через relay (внутри VLAN агента)
-  if (agent.relayUrl && (agent.pingTargets || []).length) {
-    const out = [];
-    for (const tgt of agent.pingTargets) {
-      const ips = expandIps(tgt);
-      const results = await relayPing(agent, ips);
-      out.push({ target: tgt, results, lastCheck: Date.now() });
-    }
-    agent.targets = out;
-  }
-
+  conn.acc = {};
   saveDb();
 }
 
-// ─── Glances (Bars): удалённый опрос веб-страниц, хранение 30 дней ──────────
-// Ядро само ходит по HTTP на страницу Glances (агент не нужен — удобно для
-// Rocky Linux и любых машин, где Glances запущен в веб-режиме, порт 61208).
-// Разбираются столбцы: CPU (+user/system/iowait/idle/irq/nice/steal),
-// MEM (%, total/used/free), Rx/s, Tx/s и строка Package (температура ЦП).
+function sseStart(agent) {
+  if (sseConnections.has(agent.id)) return;
+  const url = String(agent.aidaUrl || '').trim();
+  if (!url) return;
 
-const GLANCES_KEYS = ['cpu', 'user', 'system', 'iowait', 'idle', 'irq', 'nice', 'steal', 'mem', 'memTotal', 'memUsed', 'memFree', 'rx', 'tx', 'pkg'];
-const GLANCES_RETENTION_MS = 30 * 86400000; // 30 дней
-const GLANCES_MAX_POINTS = 20000;
-const GLANCES_RANGE_MS = {
-  '5m': 5 * 60000, '30m': 30 * 60000, '3h': 3 * 3600000, '24h': 24 * 3600000,
-  '7d': 7 * 86400000, '30d': 30 * 86400000,
-};
-let lastGlancesCleanup = 0;
+  let streamUrl;
+  let viaRelay = false;
+  if (isLoopbackUrl(url) && agent.relayUrl) {
+    streamUrl = String(agent.relayUrl).replace(/\/+$/, '') + '/sse-stream?url=' + encodeURIComponent(url);
+    viaRelay = true;
+  } else if (isLoopbackUrl(url)) {
+    return; // без relay loopback недостижим — работаем опросом страницы
+  } else {
+    try { streamUrl = new URL('/sse', url).toString(); } catch { return; }
+  }
 
-function fetchText(rawUrl, timeoutMs = 7000) {
-  return new Promise((resolve, reject) => {
+  const conn = { acc: {}, closed: false, req: null, retryTimer: null };
+  sseConnections.set(agent.id, conn);
+
+  const connect = () => {
+    if (conn.closed) return;
     let u;
-    try { u = new URL(rawUrl); } catch { return reject(new Error('некорректный адрес мониторинга')); }
+    try { u = new URL(streamUrl); } catch { return; }
     const lib = u.protocol === 'https:' ? https : http;
-    let done = false;
-    // Абсолютный таймер: сокетный timeout Node срабатывает только при отсутствии
-    // активности, а «тихое» открытое соединение (AIDA64 держит keep-alive) без
-    // него висело бы вечно и блокировало все дальнейшие опросы агента.
-    const kill = setTimeout(() => {
-      if (!done) r.destroy(new Error('таймаут запроса страницы (' + timeoutMs + ' мс)'));
-    }, timeoutMs);
-    const finish = (fn) => (v) => { if (done) return; done = true; clearTimeout(kill); fn(v); };
-    const r = lib.get(u, {
-      timeout: timeoutMs,
-      headers: { 'User-Agent': 'pluto-core', 'Accept': '*/*', 'Connection': 'close' },
-    }, (res) => {
-      if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
+    const req = lib.get(u, { headers: { 'User-Agent': 'pluto-core', Accept: 'text/event-stream', 'Connection': 'close' } }, (res) => {
+      if (res.statusCode !== 200) {
         res.resume();
-        return fetchText(new URL(res.headers.location, u).toString(), timeoutMs).then(finish(resolve), finish(reject));
+        scheduleRetry();
+        return;
       }
-      if (res.statusCode !== 200) { res.resume(); return finish(reject)(new Error(`HTTP ${res.statusCode}`)); }
-      let data = '';
+      agent.sseActive = true;
+      console.log(`[pluto] AIDA-SSE «${agent.name}»: подключено (${viaRelay ? 'через relay' : 'напрямую'})`);
       res.setEncoding('utf8');
-      res.on('data', (c) => (data += c));
-      res.on('end', () => finish(resolve)(data));
+      let buf = '';
+      res.on('data', (chunk) => {
+        buf += chunk;
+        let idx;
+        while ((idx = buf.indexOf('\n\n')) >= 0) {
+          const frame = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          for (const line of frame.split('\n')) {
+            if (line.startsWith('data:')) sseParseFrame(agent, line.slice(5).trim());
+          }
+        }
+      });
+      res.on('end', () => { agent.sseActive = false; scheduleRetry(); });
+      res.on('error', () => { agent.sseActive = false; scheduleRetry(); });
     });
-    r.on('timeout', () => r.destroy(new Error('таймаут ожидания ответа')));
-    r.on('error', (e) => finish(reject)(e));
-  });
+    req.on('error', () => { agent.sseActive = false; scheduleRetry(); });
+    conn.req = req;
+  };
+
+  const scheduleRetry = () => {
+    if (conn.closed || conn.retryTimer) return;
+    conn.retryTimer = setTimeout(() => { conn.retryTimer = null; connect(); }, 15000);
+  };
+
+  // запись точки раз в интервал «Датчик AIDA64» из накопленных SSE-значений
+  conn.flushTimer = setInterval(() => sseFlush(agent), Math.max(10, db.settings.intervals.aida || 10) * 1000);
+  connect();
 }
 
-/** HTML → плоский текст (теги, &nbsp;, сущности убираются) */
+function sseStop(agentId) {
+  const conn = sseConnections.get(agentId);
+  if (!conn) return;
+  conn.closed = true;
+  if (conn.flushTimer) clearInterval(conn.flushTimer);
+  if (conn.retryTimer) clearTimeout(conn.retryTimer);
+  if (conn.req) try { conn.req.destroy(); } catch { /* ignore */ }
+  sseConnections.delete(agentId);
+}
+
+function sseSync() {
+  // запускаем подписки для новых/изменённых агентов, останавливаем для удалённых
+  for (const a of db.agents) {
+    const want = !!(a.aidaUrl && (!isLoopbackUrl(a.aidaUrl) || a.relayUrl));
+    if (want && !sseConnections.has(a.id)) sseStart(a);
+    if (!want && sseConnections.has(a.id)) sseStop(a.id);
+  }
+  for (const id of [...sseConnections.keys()]) {
+    if (!db.agents.some((a) => a.id === id)) sseStop(id);
+  }
+}
+
+// ─── Парсер Glances (столбцы CPU/MEM/Rx/Tx/Package) ─────────────────────────
+
+const GLANCES_KEYS = ['cpu', 'user', 'system', 'iowait', 'idle', 'irq', 'nice', 'steal', 'mem', 'memTotal', 'memUsed', 'memFree', 'rx', 'tx', 'pkg'];
+
 function htmlToText(html) {
   return String(html)
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -848,10 +390,8 @@ function gSection(t, startRe, endRe) {
   const e = rest.slice(1).search(endRe);
   return e < 0 ? rest : rest.slice(0, e + 1);
 }
-
 const gNum = (s, re) => { const m = s.match(re); return m ? parseFloat(m[1]) : null; };
 
-/** total/used/free: "15.5G" → ГБ */
 function gValGB(s, label) {
   const m = s.match(new RegExp(label + ':?\\s*([0-9]+(?:\\.[0-9]+)?)\\s*([KMGT])?', 'i'));
   if (!m) return null;
@@ -863,7 +403,6 @@ function gValGB(s, label) {
   return Math.round((v / (1024 * 1024)) * 100) / 100;
 }
 
-/** Rx/s и Tx/s: сумма по всем интерфейсам; Glances отдаёт b/s с суффиксами K/M/G (SI) → КБ/с */
 function gNetKB(t, label) {
   const re = new RegExp(label + '/s:?\\s*([0-9]+(?:\\.[0-9]+)?)\\s*([KMGT])?', 'gi');
   let sum = 0, n = 0, m;
@@ -881,7 +420,7 @@ function parseGlances(html) {
   const t = htmlToText(html);
   const cpuS = gSection(t, /\bCPU\b/i, /\b(MEM|LOAD|PERCPU|SWAP)\b/i);
   const memS = gSection(t, /\bMEM\b/i, /\b(SWAP|LOAD|NETWORK|DISK|SENSORS|PROCESSES)\b/i);
-  const pt = {
+  return {
     cpu: gNum(cpuS, /\bCPU\s+([0-9]+(?:\.[0-9]+)?)\s*%/i),
     user: gNum(cpuS, /user:?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i),
     system: gNum(cpuS, /system:?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i),
@@ -898,171 +437,384 @@ function parseGlances(html) {
     tx: gNetKB(t, 'Tx'),
     pkg: gNum(t, /Package[^0-9°]{0,24}?([0-9]+(?:\.[0-9]+)?)\s*°?\s*C/i),
   };
-  const found = GLANCES_KEYS.filter((k) => pt[k] != null);
-  return { pt, found };
 }
 
-function mergeGlancesPoints(dst, src) {
-  for (const k of GLANCES_KEYS) {
-    if (src[k] == null) continue;
-    dst[k] = dst[k] == null ? src[k] : Math.round(((dst[k] + src[k]) / 2) * 10) / 10;
+// ─── Проверки устройств ─────────────────────────────────────────────────────
+
+function checkPing(addr, timeoutMs) {
+  return new Promise((resolve) => {
+    const secs = Math.max(1, Math.round(timeoutMs / 1000));
+    const t0 = Date.now();
+    execFile('ping', ['-c', '1', '-W', String(secs), addr], { timeout: timeoutMs + 2000 }, (err, stdout) => {
+      if (err) return resolve({ ok: false, latency: 0 });
+      const m = /time[=<]\s*([\d.]+)\s*ms/.exec(stdout || '');
+      resolve(m ? { ok: true, latency: Math.max(1, Math.round(parseFloat(m[1]))) } : { ok: true, latency: Date.now() - t0 });
+    });
+  });
+}
+
+async function checkHttp(addr, port, pth, method, body, timeoutMs) {
+  const t0 = Date.now();
+  let url;
+  try {
+    url = /^https?:\/\//.test(addr) ? addr : `http://${addr}${port ? ':' + port : ''}${pth ? (pth.startsWith('/') ? pth : '/' + pth) : '/'}`;
+  } catch { return { ok: false, latency: 0 }; }
+  try {
+    const opts = { method: method || 'GET', signal: AbortSignal.timeout(timeoutMs) };
+    if (body && method !== 'GET') opts.body = body;
+    const res = await fetch(url, opts);
+    return { ok: res.status < 500, latency: Math.max(1, Date.now() - t0) };
+  } catch { return { ok: false, latency: 0 }; }
+}
+
+function checkRtsp(addr, port, timeoutMs) {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    const host = addr.replace(/^rtsp:\/\//i, '').split('/')[0].split(':')[0];
+    const p = port || 554;
+    const sock = net.connect(p, host, () => {
+      sock.write(`OPTIONS rtsp://${host}:${p}/ RTSP/1.0\r\nCSeq: 1\r\n\r\n`);
+    });
+    const done = (ok) => { clearTimeout(to); sock.destroy(); resolve({ ok, latency: ok ? Math.max(1, Date.now() - t0) : 0 }); };
+    const to = setTimeout(() => done(false), timeoutMs);
+    sock.on('data', (d) => done(/RTSP\/1\.0\s+200/.test(String(d))));
+    sock.on('error', () => done(false));
+  });
+}
+
+function checkSip(addr, timeoutMs) {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    const m = /^sip:([^@]+)@([^:;]+)(?::(\d+))?/.exec(addr);
+    if (!m) return resolve({ ok: false, latency: 0 });
+    const host = m[2];
+    const p = parseInt(m[3] || '5060', 10);
+    const sock = dgram.createSocket('udp4');
+    const req = `OPTIONS sip:${m[1]}@${host}:${p} SIP/2.0\r\nVia: SIP/2.0/UDP pluto.local\r\nFrom: <sip:pluto@pluto.local>\r\nTo: <sip:${m[1]}@${host}>\r\nCall-ID: ${uid()}@pluto\r\nCSeq: 1 OPTIONS\r\nContact: <sip:pluto@pluto.local>\r\nContent-Length: 0\r\n\r\n`;
+    const done = (ok) => { clearTimeout(to); try { sock.close(); } catch { /* ignore */ } resolve({ ok, latency: ok ? Math.max(1, Date.now() - t0) : 0 }); };
+    const to = setTimeout(() => done(false), timeoutMs);
+    sock.on('message', (msg) => done(/SIP\/2\.0\s+200/.test(String(msg))));
+    sock.on('error', () => done(false));
+    sock.send(req, p, host, (e) => { if (e) done(false); });
+  });
+}
+
+async function runDeviceCheck(d) {
+  const tm = db.settings.timeoutMs || 3000;
+  if (d.type === 'ping') return checkPing(d.address, tm);
+  if (d.type === 'rtsp') return checkRtsp(d.address, d.port, tm);
+  if (d.type === 'sip') return checkSip(d.address, tm);
+  return checkHttp(d.address, d.port, d.path, d.method, d.body, tm);
+}
+
+function applyDeviceResult(d, r) {
+  const cfg = db.settings;
+  d.history = [...(d.history || []), r.ok ? r.latency : -1].slice(-48);
+  d.lastCheck = Date.now();
+  if (!r.ok) {
+    d.fails = (d.fails || 0) + 1;
+    if (d.fails >= cfg.failThreshold && d.status !== 'down') {
+      d.status = 'down'; d.latency = null; d.lastChange = Date.now();
+      pushEvent('crit', 'device', `${d.type.toUpperCase()} ${d.address} — потеря связи (${d.fails} сб. подряд)`);
+    }
+    return;
   }
-  dst.t = src.t;
+  const base = d.baseline || r.latency;
+  const degraded = r.latency > base * cfg.degradeFactor && r.latency > cfg.degradeMinMs;
+  const st = degraded ? 'degraded' : 'up';
+  if (d.status === 'down') pushEvent('ok', 'device', `${d.name} (${d.address}) — связь восстановлена`);
+  else if (degraded && d.status !== 'degraded') pushEvent('warn', 'device', `${d.name}: деградация — ${r.latency} мс при базовых ${Math.round(base)} мс`);
+  d.status = st; d.fails = 0; d.latency = r.latency;
+  d.baseline = Math.round(base * 0.9 + r.latency * 0.1);
+  if (st !== d.status) d.lastChange = Date.now();
+  saveDb();
 }
 
-function glancesAppend(dev, pt) {
-  if (!Array.isArray(dev.history)) dev.history = [];
-  const arr = dev.history;
-  const last = arr[arr.length - 1];
-  if (last) {
-    const age = pt.t - last.t;
-    const sameMin = Math.floor(last.t / 60000) === Math.floor(pt.t / 60000);
-    const sameHour = Math.floor(last.t / 3600000) === Math.floor(pt.t / 3600000);
-    // ярусное сжатие: > 7 дней — почасовые бакеты, > 1 суток — поминутные
-    if ((age > 7 * 86400000 && sameHour) || (age > 86400000 && sameMin)) mergeGlancesPoints(last, pt);
-    else arr.push(pt);
+// ─── Relay: пинги внутри VLAN агента ────────────────────────────────────────
+
+function expandIps(target) {
+  const t = String(target).trim();
+  if (!t) return [];
+  const range = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.)(\d{1,3})\s*-\s*(\d{1,3})$/.exec(t);
+  if (range) {
+    const out = [];
+    const a = parseInt(range[2], 10), b = parseInt(range[3], 10);
+    for (let i = Math.min(a, b); i <= Math.max(a, b) && out.length < 256; i++) out.push(range[1] + i);
+    return out;
+  }
+  const cidr = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.)\d{1,3}\/(\d{1,2})$/.exec(t);
+  if (cidr) {
+    if (parseInt(cidr[2], 10) < 24) return [];
+    const out = [];
+    for (let i = 1; i < 255; i++) out.push(cidr[1] + i);
+    return out;
+  }
+  return /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(t) ? [t] : [];
+}
+
+async function relayPing(agent, ips) {
+  if (!agent.relayUrl || !ips.length) return [];
+  const base = String(agent.relayUrl).replace(/\/+$/, '');
+  try {
+    const txt = await fetchText(base + '/ping?targets=' + encodeURIComponent(ips.join(',')), 15000);
+    const arr = JSON.parse(txt);
+    if (Array.isArray(arr)) {
+      return arr.map((r) => ({ ip: r.ip, alive: !!r.alive, latency: r.latencyMs != null ? r.latencyMs : (r.latency != null ? r.latency : null) }));
+    }
+  } catch { /* relay недоступен */ }
+  return [];
+}
+
+// ─── Опрос агента ───────────────────────────────────────────────────────────
+
+async function pollAgent(agent, force) {
+  const now = Date.now();
+
+  // 1) пинг до IP — доступность / uptime
+  const ping = await checkPing(agent.ip, db.settings.timeoutMs || 3000);
+  const wasOnline = agent.online;
+  agent.online = ping.ok;
+  agent.latency = ping.ok ? ping.latency : null;
+  agent.lastPoll = now;
+  if (!Array.isArray(agent.latHist)) agent.latHist = [];
+  agent.latHist.push({ t: now, ms: ping.ok ? ping.latency : null });
+  if (agent.latHist.length > 480) agent.latHist.splice(0, agent.latHist.length - 480);
+  if (ping.ok) {
+    agent.lastSeen = now;
+    if (!agent.onlineSince) agent.onlineSince = now;
   } else {
-    arr.push(pt);
+    agent.onlineSince = 0;
   }
-  if (arr.length > GLANCES_MAX_POINTS) arr.splice(0, arr.length - GLANCES_MAX_POINTS);
+  if (ping.ok && !wasOnline) pushEvent('ok', 'agent', `Агент «${agent.name}» (${agent.ip}) в сети`);
+  if (!ping.ok && wasOnline) pushEvent('warn', 'agent', `Агент «${agent.name}» (${agent.ip}) недоступен`);
+
+  // 2) AIDA64: если SSE-подписка жива — данные уже текут, страницу не дёргаем;
+  //    иначе резервный опрос HTML по интервалу «Датчик AIDA64»
+  const aidaIv = Math.max(10, (db.settings.intervals && db.settings.intervals.aida) || 10) * 1000;
+  const sseLive = !!agent.sseActive && now - (agent.lastAida || 0) < aidaIv * 3;
+  if (agent.aidaUrl && !sseLive && (force || now - (agent.lastAida || 0) >= aidaIv)) {
+    agent.lastAida = now;
+    try {
+      const { html, via } = await fetchListing(agent.aidaUrl, agent.relayUrl);
+      const pt = parseAidaLine(html);
+      pt.t = Date.now();
+      if (AGENT_AIDA_KEYS.some((k) => pt[k] != null)) {
+        agent.latest = pt;
+        seriesAppend(agent, 'aida', pt, AIDA_RETENTION_MS);
+        agent.lastError = null;
+        console.log(`[pluto] AIDA «${agent.name}» [${via}]: CPU ${pt.cpuUsage ?? '—'}% · ${pt.cpuTemp ?? '—'}°C · RAM ${pt.ram ?? '—'}%`);
+      } else {
+        agent.lastError = 'листинг AIDA64 загружен, но значения не распознаны — «Проверить листинг» в карточке';
+      }
+    } catch (e) {
+      agent.lastError = 'AIDA64: ' + (e.message || 'ошибка запроса');
+    }
+  }
+
+  // 3) Glances: веб-страница (порт 61208), свой интервал, хранение 30 дней
+  const glIv = Math.max(15, (db.settings.intervals && db.settings.intervals.glances) || 60) * 1000;
+  if (agent.glancesUrl && (force || now - (agent.lastGlances || 0) >= glIv)) {
+    agent.lastGlances = now;
+    try {
+      const { html, via } = await fetchListing(agent.glancesUrl, agent.relayUrl);
+      const pt = parseGlances(html);
+      pt.t = Date.now();
+      if (GLANCES_KEYS.some((k) => pt[k] != null)) {
+        agent.glancesLatest = pt;
+        seriesAppend(agent, 'glances', pt, GLANCES_RETENTION_MS);
+        agent.lastError = null;
+        console.log(`[pluto] Glances «${agent.name}» [${via}]: CPU ${pt.cpu ?? '—'}% · MEM ${pt.mem ?? '—'}% · ${pt.pkg ?? '—'}°C`);
+      } else {
+        agent.lastError = 'страница Glances загружена, но показатели не найдены — проверьте адрес (http://<IP>:61208)';
+      }
+    } catch (e) {
+      agent.lastError = 'Glances: ' + (e.message || 'ошибка запроса');
+    }
+  }
+
+  // 4) пинги устройств через relay (внутри VLAN агента)
+  if (agent.relayUrl && (agent.pingTargets || []).length) {
+    const out = [];
+    for (const tgt of agent.pingTargets) {
+      const ips = expandIps(tgt);
+      const results = await relayPing(agent, ips);
+      out.push({ target: tgt, results, lastCheck: Date.now() });
+    }
+    agent.targets = out;
+  }
+
+  saveDb();
 }
 
-async function scrapeGlances(dev) {
+// ─── Glances-устройства (вкладка Bars) ──────────────────────────────────────
+
+async function scrapeGlancesDev(dev, force) {
+  const giv = Math.max(15, (db.settings.intervals && db.settings.intervals.glances) || 60) * 1000;
+  if (!force && Date.now() - (dev.lastScrape || 0) < giv) return;
   const now = Date.now();
   try {
-    const html = await fetchText(dev.url);
-    const { pt, found } = parseGlances(html);
+    const html = await fetchText(dev.url, 7000);
+    const pt = parseGlances(html);
     pt.t = Date.now();
-    if (found.length === 0) {
-      dev.lastError = 'страница загружена, но показатели Glances не найдены — проверьте адрес мониторинга';
+    const found = GLANCES_KEYS.filter((k) => pt[k] != null);
+    dev.lastScrape = now;
+    if (!found.length) {
       dev.online = false;
-      dev.lastScrape = now;
+      dev.lastError = 'страница загружена, но показатели Glances не найдены';
       saveDb();
       return { point: null, error: dev.lastError };
     }
-    const missing = GLANCES_KEYS.filter((k) => pt[k] == null);
-    dev.lastError = missing.length ? `распознано ${found.length}/${GLANCES_KEYS.length} показателей (нет: ${missing.join(', ')})` : null;
     dev.online = true;
     dev.latest = pt;
-    dev.lastScrape = now;
-    glancesAppend(dev, pt);
+    dev.lastError = null;
+    if (!Array.isArray(dev.history)) dev.history = [];
+    dev.history.push(pt);
+    if (dev.history.length > MAX_POINTS) dev.history = compactSeries(dev.history, pt.t);
+    const cutoff = pt.t - GLANCES_RETENTION_MS;
+    let i = 0;
+    while (i < dev.history.length && dev.history[i].t < cutoff) i++;
+    if (i > 0) dev.history.splice(0, i);
     saveDb();
-    return { point: pt, error: dev.lastError };
+    return { point: pt, error: null };
   } catch (e) {
-    dev.lastError = e.message || 'ошибка запроса';
-    dev.online = false;
     dev.lastScrape = now;
+    dev.online = false;
+    dev.lastError = e.message || 'ошибка запроса';
     saveDb();
     return { point: null, error: dev.lastError };
   }
 }
 
-/** Плановая автоочистка: удаляет точки старше 30 дней (вызывается каждый час) */
-function glancesCleanup(now) {
-  const cutoff = now - GLANCES_RETENTION_MS;
-  let changed = false;
-  for (const g of db.glances || []) {
-    if (Array.isArray(g.history) && g.history.length && g.history[0].t < cutoff) {
-      let i = 0;
-      while (i < g.history.length && g.history[i].t < cutoff) i++;
-      g.history.splice(0, i);
-      changed = true;
+// ─── Планировщик ────────────────────────────────────────────────────────────
+
+let lastCleanup = 0;
+
+setInterval(() => {
+  const now = Date.now();
+
+  for (const d of db.devices) {
+    const iv = Math.max(5, d.interval || (db.settings.intervals && db.settings.intervals[d.type]) || 60) * 1000;
+    if (!d.checking && now - (d.lastCheck || 0) >= iv) {
+      d.checking = true;
+      runDeviceCheck(d).then((r) => applyDeviceResult(d, r)).finally(() => { d.checking = false; });
     }
   }
-  if (changed) saveDb();
-}
 
-const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, 'http://localhost');
-  const p = url.pathname;
-  const method = req.method;
-
-  if (method === 'OPTIONS') {
-    res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-    });
-    return res.end();
+  const aiv = Math.max(10, (db.settings.intervals && db.settings.intervals.agent) || 30) * 1000;
+  for (const a of db.agents) {
+    if (a.polling && a.pollStarted && now - a.pollStarted > 180000) {
+      console.log(`[pluto] опрос «${a.name}» завис — флаг сброшен`);
+      a.polling = false;
+    }
+    if (!a.polling && now - (a.lastPoll || 0) >= aiv) {
+      a.polling = true;
+      a.pollStarted = now;
+      pollAgent(a).finally(() => { a.polling = false; a.lastPoll = Date.now(); });
+    }
   }
 
+  for (const g of db.glances || []) {
+    if (!g.scraping) {
+      g.scraping = true;
+      scrapeGlancesDev(g).finally(() => { g.scraping = false; });
+    }
+  }
+
+  // автоочистка архивов по расписанию (раз в час): старше 60/30 дней
+  if (now - lastCleanup > 3600000) {
+    lastCleanup = now;
+    let changed = false;
+    for (const a of db.agents) {
+      for (const [key, ret] of [['aida', AIDA_RETENTION_MS], ['glances', GLANCES_RETENTION_MS]]) {
+        const arr = a[key];
+        if (Array.isArray(arr) && arr.length && arr[0].t < now - ret) {
+          let i = 0;
+          while (i < arr.length && arr[i].t < now - ret) i++;
+          arr.splice(0, i);
+          changed = true;
+        }
+      }
+    }
+    for (const g of db.glances || []) {
+      const arr = g.history;
+      if (Array.isArray(arr) && arr.length && arr[0].t < now - GLANCES_RETENTION_MS) {
+        let i = 0;
+        while (i < arr.length && arr[i].t < now - GLANCES_RETENTION_MS) i++;
+        arr.splice(0, i);
+        changed = true;
+      }
+    }
+    if (changed) saveDb();
+  }
+}, 1000);
+
+setInterval(sseSync, 5000);
+setTimeout(sseSync, 2000);
+
+// ─── HTTP-сервер ────────────────────────────────────────────────────────────
+
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const p = url.pathname;
+  const method = req.method || 'GET';
+
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (method === 'OPTIONS') { res.writeHead(204); return res.end(); }
+
   try {
-    // ── публичные (до авторизации) ──
+    // ── публичные маршруты ──
     if (p === '/api/health') return json(res, 200, { ok: true, name: 'pluto-core', version: VERSION, console: 'api' });
     if (p === '/api/version') return json(res, 200, { version: VERSION });
 
-    // ── раздача Windows-агента (публично: качает «голая» PowerShell) ──
-    if (p === '/agent/PlutoAgent.cs' && method === 'GET') {
-      const f = path.join(AGENT_DIR, 'PlutoAgent.cs');
-      if (!fs.existsSync(f)) return text(res, 404, 'PlutoAgent.cs не найден', 'text/plain; charset=utf-8');
-      return text(res, 200, '\uFEFF' + fs.readFileSync(f, 'utf8'), 'text/plain; charset=utf-8');
-    }
-    if (p === '/agent/install.ps1' && method === 'GET') {
-      const ip = hostIp(req);
-      const body = INSTALL_PS
-        .replace(/__HTTP_BASE__/g, `http://${ip}:${HTTP_PORT}`)
-        .replace(/__WS_URL__/g, `ws://${ip}:${AGENT_PORT}/ws`);
-      return text(res, 200, '\uFEFF' + body, 'text/plain; charset=utf-8');
-    }
-
-    if (p === '/api/auth/login' && method === 'POST') {
-      const { name, password } = await readBody(req);
-      const user = db.users.find((u) => u.name === name);
-      if (!user || !verifyPass(password || '', user.passHash)) return json(res, 401, { error: 'Неверный логин или пароль' });
-      pushEvent('info', 'system', `Вход в систему: ${user.name}`);
-      return json(res, 200, { token: issueSession(user.id), user: publicUser(user) });
-    }
-
-    // восстановление сессии по токену (консоль вызывает при каждой загрузке страницы)
-    if (p === '/api/auth/me' && method === 'GET') {
-      const u = authUser(req);
-      if (!u) return json(res, 401, { error: 'Сессия истекла' });
-      return json(res, 200, publicUser(u));
-    }
-
-    // неизвестные /agent/* — не отдаём HTML консоли
-    if (method === 'GET' && p.startsWith('/agent/')) return text(res, 404, 'not found', 'text/plain');
-
-    // ── статика веб-консоли (без авторизации) + подпись ядра ──
+    // ── статика веб-консоли (без авторизации) ──
     if (method === 'GET' && !p.startsWith('/api/')) {
       let file = path.normalize(path.join(WEB_DIR, p === '/' ? 'index.html' : p));
       if (!file.startsWith(WEB_DIR)) return json(res, 403, { error: 'forbidden' });
       if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(WEB_DIR, 'index.html');
       if (!fs.existsSync(file)) {
-        return text(res, 200, 'PLUTO Core работает. Веб-консоль не найдена: пересоберите образ (docker compose up -d --build).', 'text/plain; charset=utf-8');
+        return text(res, 200, 'PLUTO Core работает. Веб-консоль не найдена: пересоберите образ Docker.');
       }
       const ext = path.extname(file);
-      let body = fs.readFileSync(file);
-      if (ext === '.html') {
-        body = Buffer.from(String(body).replace('<head>', `<head><script>window.__PLUTO_CORE__={v:"${VERSION}"}</script>`));
+      if (ext === '.html' || !ext) {
+        // вшиваем подпись ядра — консоль по ней понимает, что работает с настоящим сервером
+        const html = fs.readFileSync(file, 'utf8').replace(
+          '<head>',
+          `<head><script>window.__PLUTO_CORE__={v:"${VERSION}"}</script>`,
+        );
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
-      } else {
-        res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': 'public, max-age=31536000, immutable' });
+        return res.end(html);
       }
-      return res.end(body);
+      res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': 'public, max-age=31536000, immutable' });
+      return fs.createReadStream(file).pipe(res);
     }
 
-    // ── всё остальное требует авторизации ──
+    // ── авторизация ──
+    if (p === '/api/auth/login' && method === 'POST') {
+      const b = await readBody(req);
+      const u = db.users.find((x) => x.login === String(b.login || '').trim());
+      if (!u || !verifyPass(String(b.password || ''), u.passHash)) return json(res, 401, { error: 'Неверный логин или пароль' });
+      pushEvent('info', 'system', `Вход в систему: ${u.name}`);
+      return json(res, 200, { token: issueSession(u.id), user: publicUser(u) });
+    }
+
     const user = authUser(req);
     if (!user) return json(res, 401, { error: 'Требуется авторизация' });
     const isAdmin = user.role === 'admin';
 
-    // ── состояние (полное для админа, фильтрованное для наблюдателя) ──
+    if (p === '/api/auth/me') return json(res, 200, publicUser(user));
+
+    // ── состояние ──
     if (p === '/api/state' && method === 'GET') {
-      const visible = isAdmin ? db.devices : db.devices.filter((d) => user.scope.includes(d.type));
+      const devices = isAdmin ? db.devices : db.devices.filter((d) => user.scope.includes(d.type));
       const agentsRaw = isAdmin || user.scope.includes('agent') ? db.agents : [];
-      // 60-дневная история AIDA64 отдаётся только отдельным эндпоинтом — не грузим её в каждый поллинг
-      const agents = agentsRaw.map((a) => ({ ...a, aida: undefined }));
-      // Glances: список отдаём без тяжёлой истории (она — в /api/glances/:id/history)
-      const glancesVisible = isAdmin || user.scope.includes('glances') ? db.glances : [];
-      const glances = glancesVisible.map((g) => ({ ...g, history: undefined, scraping: undefined }));
+      const agents = agentsRaw.map((a) => ({ ...a, aida: undefined, glances: undefined, polling: undefined, pollStarted: undefined, sseActive: undefined }));
+      const glancesRaw = isAdmin || user.scope.includes('glances') ? db.glances : [];
+      const glances = glancesRaw.map((g) => ({ ...g, history: undefined, scraping: undefined }));
       return json(res, 200, {
-        devices: visible,
-        agents,
-        glances,
-        tags: db.tags,
-        events: db.events,
-        settings: db.settings,
+        devices, agents, glances,
+        tags: db.tags, events: db.events, settings: db.settings,
         users: isAdmin ? db.users.map(publicUser) : undefined,
       });
     }
@@ -1070,16 +822,21 @@ const server = http.createServer(async (req, res) => {
     // ── устройства ──
     if (p === '/api/devices' && method === 'POST' && isAdmin) {
       const b = await readBody(req);
+      if (!b.address) return json(res, 400, { error: 'укажите адрес устройства' });
       const d = {
-        id: uid(), name: b.name || b.address, type: b.type || 'ping', address: b.address || '',
-        port: b.port ?? null, path: b.path || '', method: b.method || null, body: b.body || null,
-        interval: Math.max(5, Number(b.interval) || db.settings.intervals[b.type] || 60),
-        tags: b.tags || [], favorite: false, status: 'unknown', latency: null, baseline: null,
-        history: [], fails: 0, lastCheck: 0, lastChange: Date.now(), checking: false, approx: false, createdAt: Date.now(),
+        id: uid(), name: String(b.name || '').trim() || String(b.address), type: ['ping', 'http', 'api', 'rtsp', 'sip'].includes(b.type) ? b.type : 'ping',
+        address: String(b.address).trim(), port: b.port != null ? parseInt(b.port, 10) : null,
+        path: String(b.path || ''), method: b.method || null, body: b.body || null,
+        interval: Math.max(5, parseInt(b.interval, 10) || (db.settings.intervals[b.type] || 60)),
+        tags: Array.isArray(b.tags) ? b.tags : [], favorite: !!b.favorite,
+        status: 'unknown', latency: null, baseline: null, history: [], fails: 0,
+        lastCheck: 0, lastChange: Date.now(), checking: false, approx: false,
+        profile: { base: 20, failP: 0.03, spikeP: 0.02 }, spikeUntil: 0, createdAt: Date.now(),
       };
       db.devices.push(d);
-      pushEvent('info', 'device', `Добавлено устройство ${d.name} (${d.type.toUpperCase()})`);
+      pushEvent('info', 'device', `Добавлено устройство «${d.name}» (${d.type.toUpperCase()} ${d.address})`);
       saveDb();
+      runDeviceCheck(d).then((r) => applyDeviceResult(d, r));
       return json(res, 200, d);
     }
     let m = p.match(/^\/api\/devices\/([^/]+)$/);
@@ -1088,9 +845,9 @@ const server = http.createServer(async (req, res) => {
       if (!d) return json(res, 404, { error: 'устройство не найдено' });
       if (method === 'PUT' || method === 'PATCH') {
         const b = await readBody(req);
-        for (const k of ['name', 'type', 'address', 'port', 'path', 'method', 'body', 'interval', 'tags', 'favorite'])
+        for (const k of ['name', 'type', 'address', 'port', 'path', 'method', 'body', 'interval', 'tags', 'favorite']) {
           if (k in b) d[k] = b[k];
-        pushEvent('info', 'device', `Настройки «${d.name}» обновлены`);
+        }
         saveDb();
         return json(res, 200, d);
       }
@@ -1106,10 +863,11 @@ const server = http.createServer(async (req, res) => {
       const d = db.devices.find((x) => x.id === m[1]);
       if (!d) return json(res, 404, { error: 'устройство не найдено' });
       const r = await runDeviceCheck(d);
+      applyDeviceResult(d, r);
       return json(res, 200, { result: r });
     }
 
-    // ── агенты: IP + листинг AIDA64 + relay (без токенов) ──
+    // ── агенты ──
     if (p === '/api/agents' && method === 'POST' && isAdmin) {
       const b = await readBody(req);
       const ip = String(b.ip || '').trim();
@@ -1119,17 +877,19 @@ const server = http.createServer(async (req, res) => {
         name: String(b.name || '').trim() || ('ПК ' + ip),
         ip,
         aidaUrl: String(b.aidaUrl || '').trim(),
+        glancesUrl: String(b.glancesUrl || '').trim(),
         relayUrl: String(b.relayUrl || '').trim(),
         pingTargets: Array.isArray(b.pingTargets) ? b.pingTargets.map((x) => String(x).trim()).filter(Boolean) : [],
         online: false, latency: null, onlineSince: 0,
-        lastSeen: 0, lastPoll: 0, lastError: null,
-        latest: null, aida: [], targets: [],
+        lastSeen: 0, lastPoll: 0, lastAida: 0, lastGlances: 0, lastError: null,
+        latest: null, glancesLatest: null, aida: [], glances: [], latHist: [], targets: [],
         favorite: false, createdAt: Date.now(),
       };
       db.agents.push(a);
       pushEvent('info', 'agent', `Добавлен агент «${a.name}» (${a.ip})`);
       saveDb();
-      pollAgent(a); // первый опрос сразу
+      sseSync();
+      pollAgent(a, true);
       return json(res, 200, a);
     }
     m = p.match(/^\/api\/agents\/([^/]+)$/);
@@ -1138,19 +898,20 @@ const server = http.createServer(async (req, res) => {
       if (!a) return json(res, 404, { error: 'агент не найден' });
       if (method === 'PUT' || method === 'PATCH') {
         const b = await readBody(req);
-        for (const k of ['name', 'ip', 'aidaUrl', 'relayUrl', 'favorite']) if (k in b) a[k] = b[k];
+        for (const k of ['name', 'ip', 'aidaUrl', 'glancesUrl', 'relayUrl', 'favorite']) if (k in b) a[k] = b[k];
         if (Array.isArray(b.pingTargets)) a.pingTargets = b.pingTargets.map((x) => String(x).trim()).filter(Boolean);
         saveDb();
+        sseSync();
         return json(res, 200, a);
       }
       if (method === 'DELETE') {
+        sseStop(a.id);
         db.agents = db.agents.filter((x) => x.id !== a.id);
         pushEvent('info', 'agent', `Агент «${a.name}» удалён`);
         saveDb();
         return json(res, 200, { ok: true });
       }
     }
-    // принудительный опрос агента (forceAida — датчик обновляется сразу, вне интервала)
     m = p.match(/^\/api\/agents\/([^/]+)\/poll$/);
     if (m && method === 'POST' && isAdmin) {
       const a = db.agents.find((x) => x.id === m[1]);
@@ -1158,15 +919,30 @@ const server = http.createServer(async (req, res) => {
       await pollAgent(a, true);
       return json(res, 200, a);
     }
-    // диагностика источника AIDA64: что реально приходит со страницы
-    m = p.match(/^\/api\/agents\/([^/]+)\/test-aida$/);
+    // диагностика источников (AIDA64 / Glances)
+    m = p.match(/^\/api\/agents\/([^/]+)\/test-(aida|glances)$/);
     if (m && method === 'GET') {
       const a = db.agents.find((x) => x.id === m[1]);
       if (!a) return json(res, 404, { error: 'агент не найден' });
       if (!isAdmin && !user.scope.includes('agent')) return json(res, 403, { error: 'нет доступа к агентам' });
-      return json(res, 200, await testAidaSource(a));
+      const kind = m[2];
+      const srcUrl = kind === 'aida' ? a.aidaUrl : a.glancesUrl;
+      try {
+        const { html, via } = await fetchListing(srcUrl, a.relayUrl);
+        const parsed = kind === 'aida' ? parseAidaLine(html) : parseGlances(html);
+        const keys = kind === 'aida' ? AGENT_AIDA_KEYS : GLANCES_KEYS;
+        const recognized = keys.filter((k) => parsed[k] != null);
+        const plain = htmlToText(html);
+        return json(res, 200, {
+          ok: recognized.length > 0, url: srcUrl, via, bytes: html.length,
+          sample: plain.slice(0, 300), values: parsed, recognized,
+          missing: keys.filter((k) => parsed[k] == null),
+        });
+      } catch (e) {
+        return json(res, 200, { ok: false, url: srcUrl || '', via: null, error: e.message || String(e) });
+      }
     }
-    // ── история AIDA64 за выбранный период (5м…60д), прореженная до ≤1500 точек ──
+    // история AIDA64 (60 дней)
     m = p.match(/^\/api\/agents\/([^/]+)\/aida$/);
     if (m && method === 'GET') {
       const a = db.agents.find((x) => x.id === m[1]);
@@ -1174,134 +950,94 @@ const server = http.createServer(async (req, res) => {
       if (!isAdmin && !user.scope.includes('agent')) return json(res, 403, { error: 'нет доступа к агентам' });
       const rq = url.searchParams.get('range');
       const range = AIDA_RANGE_MS[rq] ? rq : '5m';
-      const cutoff = Date.now() - AIDA_RANGE_MS[range];
-      let pts = (a.aida || []).filter((x) => x.t >= cutoff);
-      if (pts.length > 1500) {
-        const bw = AIDA_RANGE_MS[range] / 1500;
-        const out = [];
-        let cur = null, bi = -1;
-        for (const pt of pts) {
-          const idx = Math.floor((pt.t - cutoff) / bw);
-          if (idx !== bi) { if (cur) out.push(cur); cur = { ...pt }; bi = idx; }
-          else mergeAidaPoints(cur, pt);
-        }
-        if (cur) out.push(cur);
-        pts = out;
-      }
-      return json(res, 200, { range, retentionDays: 60, points: pts });
+      const out = rangePoints(a.aida, AIDA_RANGE_MS[range], range);
+      out.retentionDays = 60;
+      return json(res, 200, out);
     }
-    m = p.match(/^\/api\/agents\/([^/]+)\/retoken$/);
-    if (m && method === 'POST' && isAdmin) {
+    // история Glances агента (30 дней)
+    m = p.match(/^\/api\/agents\/([^/]+)\/glances$/);
+    if (m && method === 'GET') {
       const a = db.agents.find((x) => x.id === m[1]);
       if (!a) return json(res, 404, { error: 'агент не найден' });
-      a.token = uid() + uid();
-      pushEvent('info', 'agent', `Токен агента «${a.name}» перевыпущен`);
-      saveDb();
-      return json(res, 200, { token: a.token });
+      if (!isAdmin && !user.scope.includes('agent')) return json(res, 403, { error: 'нет доступа к агентам' });
+      const rq = url.searchParams.get('range');
+      const range = GLANCES_RANGE_MS[rq] ? rq : '5m';
+      const out = rangePoints(a.glances, GLANCES_RANGE_MS[range], range);
+      out.retentionDays = 30;
+      return json(res, 200, out);
     }
 
-    // ── Glances (Bars): веб-страницы серверов, агент не нужен ──
-    const canGlances = isAdmin || user.scope.includes('glances');
-    if (p === '/api/glances' && method === 'GET' && canGlances) {
-      return json(res, 200, { devices: db.glances.map((g) => ({ ...g, history: undefined, scraping: undefined })) });
-    }
+    // ── Glances-устройства (Bars) ──
     if (p === '/api/glances' && method === 'POST' && isAdmin) {
       const b = await readBody(req);
-      const name = String(b.name || '').trim();
-      const url = String(b.url || '').trim();
-      if (!name) return json(res, 400, { error: 'укажите имя сервера' });
-      if (!/^https?:\/\//i.test(url)) return json(res, 400, { error: 'адрес мониторинга должен начинаться с http:// или https://' });
+      if (!b.url) return json(res, 400, { error: 'укажите адрес мониторинга' });
       const g = {
-        id: uid(), name, url, serverLink: String(b.serverLink || '').trim(),
-        createdAt: Date.now(), lastScrape: 0, lastError: null, online: false, latest: null, history: [],
+        id: uid(), name: String(b.name || '').trim() || 'Glances-сервер', url: String(b.url).trim(),
+        serverLink: String(b.serverLink || '').trim(), createdAt: Date.now(),
+        lastScrape: 0, lastError: null, online: false, latest: null, history: [],
       };
       db.glances.push(g);
-      pushEvent('info', 'system', `Добавлен сервер Glances «${name}» (${url})`);
       saveDb();
-      scrapeGlances(g); // первый опрос — сразу, чтобы данные появились без ожидания интервала
+      scrapeGlancesDev(g, true);
       return json(res, 200, g);
     }
     m = p.match(/^\/api\/glances\/([^/]+)$/);
-    if (m && isAdmin) {
-      const g = db.glances.find((x) => x.id === m[1]);
-      if (!g) return json(res, 404, { error: 'сервер Glances не найден' });
-      if (method === 'PUT' || method === 'PATCH') {
-        const b = await readBody(req);
-        for (const k of ['name', 'url', 'serverLink']) if (k in b) g[k] = String(b[k] ?? '').trim();
-        pushEvent('info', 'system', `Настройки Glances «${g.name}» обновлены`);
-        saveDb();
-        return json(res, 200, g);
-      }
-      if (method === 'DELETE') {
-        db.glances = db.glances.filter((x) => x.id !== g.id);
-        pushEvent('info', 'system', `Сервер Glances «${g.name}» удалён (архив очищен)`);
-        saveDb();
-        return json(res, 200, { ok: true });
-      }
+    if (m && isAdmin && method === 'DELETE') {
+      db.glances = db.glances.filter((x) => x.id !== m[1]);
+      saveDb();
+      return json(res, 200, { ok: true });
     }
     m = p.match(/^\/api\/glances\/([^/]+)\/scrape$/);
     if (m && method === 'POST' && isAdmin) {
       const g = db.glances.find((x) => x.id === m[1]);
-      if (!g) return json(res, 404, { error: 'сервер Glances не найден' });
-      const r = await scrapeGlances(g);
-      return json(res, 200, r);
+      if (!g) return json(res, 404, { error: 'устройство не найдено' });
+      return json(res, 200, await scrapeGlancesDev(g, true));
     }
     m = p.match(/^\/api\/glances\/([^/]+)\/history$/);
-    if (m && method === 'GET' && canGlances) {
+    if (m && method === 'GET') {
       const g = db.glances.find((x) => x.id === m[1]);
-      if (!g) return json(res, 404, { error: 'сервер Glances не найден' });
+      if (!g) return json(res, 404, { error: 'устройство не найдено' });
+      if (!isAdmin && !user.scope.includes('glances')) return json(res, 403, { error: 'нет доступа' });
       const rq = url.searchParams.get('range');
       const range = GLANCES_RANGE_MS[rq] ? rq : '5m';
-      const cutoff = Date.now() - GLANCES_RANGE_MS[range];
-      let pts = (g.history || []).filter((x) => x.t >= cutoff);
-      if (pts.length > 1500) { // прореживание для графика
-        const bw = GLANCES_RANGE_MS[range] / 1500;
-        const out = [];
-        let cur = null, bi = -1;
-        for (const pt of pts) {
-          const idx = Math.floor((pt.t - cutoff) / bw);
-          if (idx !== bi) { if (cur) out.push(cur); cur = { ...pt }; bi = idx; }
-          else mergeGlancesPoints(cur, pt);
-        }
-        if (cur) out.push(cur);
-        pts = out;
-      }
-      return json(res, 200, { range, retentionDays: 30, points: pts });
+      const out = rangePoints(g.history, GLANCES_RANGE_MS[range], range);
+      out.retentionDays = 30;
+      return json(res, 200, out);
     }
 
     // ── теги ──
     if (p === '/api/tags' && method === 'POST' && isAdmin) {
       const b = await readBody(req);
-      const t = { id: uid(), label: b.label || 'тег', color: b.color || '#9a8cfa' };
+      const label = String(b.label || '').trim();
+      if (!label) return json(res, 400, { error: 'укажите название тега' });
+      if (db.tags.some((t) => t.label.toLowerCase() === label.toLowerCase())) return json(res, 400, { error: 'такой тег уже есть' });
+      const t = { id: uid(), label, color: String(b.color || '#9a8cfa') };
       db.tags.push(t);
       saveDb();
       return json(res, 200, t);
     }
     m = p.match(/^\/api\/tags\/([^/]+)$/);
-    if (m && method === 'DELETE' && isAdmin) {
+    if (m && isAdmin && method === 'DELETE') {
+      const t = db.tags.find((x) => x.id === m[1]);
       db.tags = db.tags.filter((x) => x.id !== m[1]);
-      db.devices.forEach((d) => (d.tags = (d.tags || []).filter((t) => t !== m[1])));
+      for (const d of db.devices) d.tags = (d.tags || []).filter((x) => x !== m[1]);
+      if (t) pushEvent('info', 'system', `Тег «${t.label}» удалён`);
       saveDb();
       return json(res, 200, { ok: true });
-    }
-
-    // ── настройки ──
-    if (p === '/api/settings' && method === 'PUT' && isAdmin) {
-      const b = await readBody(req);
-      db.settings = { ...db.settings, ...b, intervals: { ...db.settings.intervals, ...(b.intervals || {}) }, notifications: { ...db.settings.notifications, ...(b.notifications || {}) } };
-      pushEvent('info', 'system', 'Системные настройки сохранены');
-      saveDb();
-      return json(res, 200, db.settings);
     }
 
     // ── пользователи ──
     if (p === '/api/users' && method === 'POST' && isAdmin) {
       const b = await readBody(req);
-      if (!b.name || !b.password) return json(res, 400, { error: 'нужны name и password' });
-      if (db.users.some((u) => u.name === b.name)) return json(res, 400, { error: 'такой логин уже есть' });
-      const u = { id: uid(), name: b.name, role: b.role || 'viewer', scope: b.scope || [], passHash: hashPass(b.password), builtIn: false, createdAt: Date.now() };
+      const login = String(b.login || '').trim();
+      if (!login || !String(b.name || '').trim()) return json(res, 400, { error: 'заполните логин и имя' });
+      if (db.users.some((x) => x.login === login)) return json(res, 400, { error: 'такой логин уже есть' });
+      const u = {
+        id: uid(), name: String(b.name).trim(), login, role: b.role === 'admin' ? 'admin' : 'viewer',
+        scope: Array.isArray(b.scope) ? b.scope : [], builtIn: false,
+        passHash: hashPass(String(b.password || 'pluto')), createdAt: Date.now(),
+      };
       db.users.push(u);
-      pushEvent('info', 'system', `Создан пользователь ${u.name} (${u.role})`);
       saveDb();
       return json(res, 200, publicUser(u));
     }
@@ -1312,8 +1048,8 @@ const server = http.createServer(async (req, res) => {
       if (method === 'PUT' || method === 'PATCH') {
         const b = await readBody(req);
         if (b.role) u.role = b.role;
-        if (b.scope) u.scope = b.scope;
-        if (b.password) u.passHash = hashPass(b.password);
+        if (Array.isArray(b.scope)) u.scope = b.scope;
+        if (b.password) u.passHash = hashPass(String(b.password));
         saveDb();
         return json(res, 200, publicUser(u));
       }
@@ -1325,11 +1061,36 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // ── настройки ──
+    if (p === '/api/settings' && method === 'PUT' && isAdmin) {
+      const b = await readBody(req);
+      db.settings = {
+        ...db.settings, ...b,
+        intervals: { ...db.settings.intervals, ...(b.intervals || {}) },
+        notifications: { ...db.settings.notifications, ...(b.notifications || {}) },
+      };
+      pushEvent('info', 'system', 'Системные настройки сохранены');
+      saveDb();
+      return json(res, 200, db.settings);
+    }
+
     return json(res, 404, { error: 'Маршрут не найден' });
   } catch (e) {
     console.error('[pluto] ошибка запроса:', e);
     return json(res, 500, { error: 'внутренняя ошибка' });
   }
+});
+
+// ─── Шлюз агентов (WebSocket, порт 8443) — зарезервирован под будущие расширения ──
+const agentServer = http.createServer((req, res) => {
+  text(res, 200, 'pluto agent gateway');
+});
+attachWs(agentServer, (conn, url, ip) => {
+  console.log(`[pluto] шлюз: подключение от ${ip} (${url})`);
+  conn.onClose(() => {});
+});
+agentServer.listen(AGENT_PORT, () => {
+  console.log(`[pluto] шлюз агентов: :${AGENT_PORT}`);
 });
 
 server.listen(HTTP_PORT, () => {

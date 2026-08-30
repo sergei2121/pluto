@@ -1,7 +1,6 @@
 // ─── PLUTO: утилиты ─────────────────────────────────────────────────────────
 
-/** Версия консоли (запекается в сборку). Должна совпадать с VERSION в корне. */
-export const CONSOLE_VERSION = '1.9.4';
+export const CONSOLE_VERSION = '1.10.0';
 
 export function hashStr(s: string): number {
   let h = 2166136261;
@@ -71,19 +70,8 @@ export function fmtClock(ts: number): string {
 }
 
 export function fmtDate(ts: number): string {
-  return new Date(ts).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
-}
-
-export function fmtBytes(n: number): string {
-  if (n < 1024) return `${Math.round(n)} Б`;
-  if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} КБ`;
-  if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} МБ`;
-  if (n < 1024 ** 4) return `${(n / 1024 ** 3).toFixed(2)} ГБ`;
-  return `${(n / 1024 ** 4).toFixed(2)} ТБ`;
-}
-
-export function fmtGb(bytes: number): string {
-  return `${(bytes / 1024 ** 3).toFixed(0)} ГБ`;
+  return new Date(ts).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) +
+    ' ' + new Date(ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 }
 
 export function fmtMs(n: number | null): string {
@@ -99,8 +87,20 @@ export function fmtNet(kbs: number | null): string {
   return `${Math.round(kbs)} КБ/с`;
 }
 
-export function pct(used: number, total: number): number {
-  return total > 0 ? Math.round((used / total) * 100) : 0;
+export function fmtUp(ms: number): string {
+  if (!ms || ms < 0) return '—';
+  const m = Math.floor(ms / 60000);
+  if (m < 1) return '< 1 мин';
+  if (m < 60) return `${m} мин`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} ч ${m % 60} мин`;
+  const d = Math.floor(h / 24);
+  return `${d} д ${h % 24} ч`;
+}
+
+export function fmtUpSec(sec: number | null): string {
+  if (sec == null) return '—';
+  return fmtUp(sec * 1000);
 }
 
 // ─── Палитра тегов (10 цветов) ───────────────────────────────────────────────
@@ -110,8 +110,4 @@ export const TAG_COLORS = [
   '#e0b65e', '#e0945e', '#e07a80', '#d98bb0', '#98a4c8',
 ];
 
-export function macFrom(seedStr: string): string {
-  const rng = mulberry32(hashStr(seedStr));
-  const b = () => Math.floor(rng() * 256).toString(16).padStart(2, '0').toUpperCase();
-  return `${b()}:${b()}:${b()}:${b()}:${b()}:${b()}`;
-}
+export const LINE_COLORS = ['#8f7df0', '#7ba4e6', '#5fc6d8', '#55c795', '#dfa65e', '#e07a80', '#d98bb0', '#98a4c8', '#8bc46a', '#e0945e'];

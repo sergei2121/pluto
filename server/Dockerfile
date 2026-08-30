@@ -8,7 +8,7 @@ COPY package.json package-lock.json tsconfig.json vite.config.js index.html ./
 COPY src ./src
 RUN npm ci && npm run build
 
-# Этап 2: ядро мониторинга
+# Этап 2: ядро мониторинга (зависимостей нет — только встроенные модули Node)
 FROM node:20-alpine
 # iputils — бинарь ping для ICMP-проверок; wget — для healthcheck
 RUN apk add --no-cache iputils iproute2 tzdata wget
@@ -19,10 +19,7 @@ ENV NODE_ENV=production \
     AGENT_PORT=8443
 
 COPY server/package.json ./package.json
-# зависимостей у ядра нет — только встроенные модули Node
-
 COPY server/src ./src
-COPY agent ./agent
 COPY --from=web /app/dist ./web
 
 VOLUME /data

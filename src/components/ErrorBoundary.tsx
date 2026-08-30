@@ -1,5 +1,4 @@
-// ─── PLUTO: граница ошибок — любая ошибка рендера показывает диагностику,
-// ─── а не пустой белый экран с «Uncaught TypeError» в консоли ───────────────
+// ─── PLUTO: граница ошибок — диагностика вместо белого экрана ───────────────
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 
 interface Props {
@@ -29,7 +28,7 @@ export default class ErrorBoundary extends Component<Props, State> {
 
     return (
       <div className="flex h-screen items-center justify-center bg-[#0b0e1a] p-6 text-[#dfe3f5]">
-        <div className="w-full max-w-lg rounded-xl border border-[#2a3050] bg-[#12162a] p-7 shadow-[0_30px_80px_-20px_rgba(0,0,0,.8)]">
+        <div className="w-full max-w-lg rounded-xl border border-[#242b4a] bg-[#12162a] p-7 shadow-[0_30px_80px_-20px_rgba(0,0,0,.8)]">
           <div className="flex items-center gap-3">
             <svg viewBox="0 0 24 24" className="h-8 w-8 text-[#e07a80]" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 3 2.5 20h19Z" />
@@ -43,11 +42,11 @@ export default class ErrorBoundary extends Component<Props, State> {
 
           <p className="mt-5 text-[13px] leading-relaxed text-[#aeb6d8]">
             {stale
-              ? 'Похоже, браузер загрузил устаревший пакет интерфейса. Нажмите Ctrl+Shift+R — если не поможет, пересоберите образ на сервере: git pull && docker compose up -d --build.'
-              : 'Компонент консоли упал с ошибкой. Перезагрузите страницу; если ошибка повторяется — пересоберите образ (git pull && docker compose up -d --build) и пришлите текст ниже.'}
+              ? 'Похоже, браузер загрузил устаревший пакет интерфейса. Нажмите Ctrl+Shift+R; если не поможет — пересоберите образ: git pull && docker compose up -d --build.'
+              : 'Компонент консоли упал с ошибкой. Перезагрузите страницу; если ошибка повторяется — пересоберите образ и пришлите текст ниже.'}
           </p>
 
-          <div className="mt-4 max-h-40 overflow-auto rounded-lg border border-[#2a3050] bg-[#0b0e1a] p-3 font-mono text-[11.5px] leading-relaxed text-[#e07a80]">
+          <div className="mt-4 max-h-40 overflow-auto rounded-lg border border-[#242b4a] bg-[#0b0e1a] p-3 font-mono text-[11.5px] leading-relaxed text-[#e07a80]">
             {msg}
           </div>
 
@@ -63,7 +62,7 @@ export default class ErrorBoundary extends Component<Props, State> {
                 localStorage.removeItem('pluto_token');
                 location.reload();
               }}
-              className="rounded-lg border border-[#2a3050] bg-[#181d36] px-4 py-2 text-[13px] font-semibold text-[#aeb6d8] transition-colors hover:text-[#dfe3f5]"
+              className="rounded-lg border border-[#242b4a] bg-[#181d36] px-4 py-2 text-[13px] font-semibold text-[#aeb6d8] transition-colors hover:text-[#dfe3f5]"
             >
               Сбросить сессию
             </button>
