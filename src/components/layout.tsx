@@ -78,7 +78,7 @@ export function Sidebar() {
   });
 
   return (
-    <aside className="relative z-10 flex h-screen w-[228px] shrink-0 flex-col border-r border-line bg-deep/95">
+    <aside className="relative z-10 hidden h-screen w-[228px] shrink-0 flex-col border-r border-line bg-deep/95 md:flex">
       <div className="flex items-center gap-3 px-5 pb-5 pt-6">
         <span className="text-vio drop-shadow-[0_0_12px_rgba(143,125,240,.45)]">
           <Orbit className="h-9 w-9" strokeWidth={1.6} />
@@ -235,10 +235,14 @@ export function Topbar() {
   const hasResults = results.devs.length > 0 || results.ags.length > 0 || results.gls.length > 0;
 
   return (
-    <header className="relative z-10 flex h-[60px] shrink-0 items-center gap-4 border-b border-line bg-deep/80 px-6">
-      <h1 className="truncate font-display text-[15px] font-semibold tracking-wide text-ink">{TITLES[route]}</h1>
+    <header className="relative z-10 flex h-[60px] shrink-0 items-center gap-3 border-b border-line bg-deep/80 px-4 md:gap-4 md:px-6">
+      <span className="flex shrink-0 items-center gap-2 md:hidden">
+        <Orbit className="h-5 w-5 text-vio" />
+        <span className="font-display text-[13px] font-bold tracking-[0.18em] text-ink">PLUTO</span>
+      </span>
+      <h1 className="hidden truncate font-display text-[15px] font-semibold tracking-wide text-ink md:block">{TITLES[route]}</h1>
 
-      <div ref={boxRef} className="relative ml-auto w-[340px] max-w-[44vw]">
+      <div ref={boxRef} className="relative ml-auto hidden w-[340px] max-w-[44vw] sm:block">
         <div className={cls('flex items-center gap-2 rounded-lg border bg-raised/70 px-3 py-2 transition-all duration-200', focus ? 'border-vio/60 shadow-[0_0_0_3px_rgba(143,125,240,.12)]' : 'border-line')}>
           <Search className="h-4 w-4 shrink-0 text-dim" />
           <input
@@ -329,6 +333,50 @@ function EmuBanner() {
   );
 }
 
+// ─── Нижняя навигация для мобильных ─────────────────────────────────────────
+
+export function MobileNav() {
+  const route = usePluto((s) => s.route);
+  const user = useCurrentUser();
+  const critCount = usePluto((s) => s.devices.filter((d) => d.status === 'down').length + s.agents.filter((a) => !a.online).length);
+
+  const items = NAV.filter((n) => {
+    if (!user) return false;
+    if (n.adminOnly && user.role !== 'admin') return false;
+    if (n.needAgent && user.role !== 'admin' && !user.scope.includes('agent')) return false;
+    if (n.needGlances && user.role !== 'admin' && !user.scope.includes('glances')) return false;
+    return true;
+  });
+
+  return (
+    <nav className="fixed inset-x-0 bottom-0 z-40 flex items-stretch justify-around border-t border-line bg-deep/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden">
+      {items.map((n) => {
+        const active = route === n.route;
+        const isDash = n.route === 'dashboard';
+        return (
+          <button
+            key={n.route}
+            onClick={() => store.nav(n.route)}
+            className={cls(
+              'relative flex min-w-0 flex-1 flex-col items-center gap-1 py-2.5 transition-colors',
+              active ? 'text-vio' : 'text-dim hover:text-mut',
+            )}
+          >
+            {isDash && critCount > 0 && (
+              <span className="absolute right-1/2 top-1.5 translate-x-4 rounded-full bg-crit px-1.5 py-px font-mono text-[9px] font-bold leading-tight text-void">
+                {critCount}
+              </span>
+            )}
+            <span className={cls('transition-transform', active && 'scale-110')}>{n.icon}</span>
+            <span className="max-w-full truncate px-1 text-[9.5px] font-semibold leading-none">{n.label}</span>
+            <span className={cls('absolute top-0 h-[2.5px] w-8 rounded-b-full bg-vio transition-opacity', active ? 'opacity-100' : 'opacity-0')} />
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
 // ─── Оболочка страниц ────────────────────────────────────────────────────────
 
 export function Shell({ children }: { children: ReactNode }) {
@@ -339,10 +387,11 @@ export function Shell({ children }: { children: ReactNode }) {
       <div className="relative z-10 flex min-w-0 flex-1 flex-col">
         <Topbar />
         <EmuBanner />
-        <main className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-[1500px] p-6">{children}</div>
+        <main className="scroll-thin min-h-0 flex-1 overflow-y-auto pb-[72px] md:pb-0">
+          <div className="mx-auto max-w-[1500px] p-4 md:p-6">{children}</div>
         </main>
       </div>
+      <MobileNav />
       <ToastHost />
     </div>
   );
