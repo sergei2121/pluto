@@ -147,10 +147,6 @@ function seriesAppend(agent, key, pt, retentionMs) {
   if (i > 0) agent[key].splice(0, i);
 }
 
-const AIDA_RANGE_MS = {
-  '5m': 5 * 60000, '30m': 30 * 60000, '3h': 3 * 3600000, '24h': 24 * 3600000,
-  '7d': 7 * 86400000, '30d': 30 * 86400000, '60d': 60 * 86400000,
-};
 const GLANCES_RANGE_MS = {
   '5m': 5 * 60000, '30m': 30 * 60000, '3h': 3 * 3600000, '24h': 24 * 3600000,
   '7d': 7 * 86400000, '30d': 30 * 86400000,
@@ -329,9 +325,13 @@ function glancesFromApi(data) {
     }
   }
 
+  // ── SENSORS: все датчики (t°C, RPM) + температура Package ──
+  let sensorsList = [];
   const sensors = data && data.sensors;
   if (Array.isArray(sensors)) {
-    // Package — температура процессора (label «Package id 0» / «coretemp … Package …»)
+    sensorsList = sensors
+      .filter((s) => s && typeof s.value === 'number')
+      .map((s) => ({ label: String(s.label || '?'), unit: String(s.unit || ''), value: n2(s.value) }));
     const pkg = sensors.find((s) => s && /package/i.test(String(s.label || '')) && s.unit === 'C')
       || sensors.find((s) => s && /package/i.test(String(s.label || '')));
     if (pkg && typeof pkg.value === 'number') pt.pkg = n2(pkg.value);
@@ -340,7 +340,13 @@ function glancesFromApi(data) {
       if (anyTemp) pt.pkg = n2(anyTemp.value); // нет package — берём первый температурный датчик
     }
   }
-  return { pt, disks, netIface };
+
+  // ── PER-CPU: загрузка каждого ядра ──
+  let cores = [];
+  const percpu = data && data.percpu;
+  if (Array.isArray(percpu)) cores = percpu.map((c) => n2(c && c.total)).filter((v) => v != null);
+
+  return { pt, disks, netIface, sensors: sensorsList, cores };
 }
 
 /** Возвращает { pt, source: 'api4'|'api3'|'html', via } или бросает ошибку с причиной. */
@@ -354,9 +360,9 @@ async function collectGlances(rawUrl, relayUrl) {
       const txt = await fetchListing(apiUrl, relayUrl).then((r) => r.html);
       if (!txt || txt.trim().startsWith('<')) continue; // это HTML, а не JSON — пробуем другую версию
       const data = JSON.parse(txt);
-      const { pt, disks, netIface } = glancesFromApi(data);
+      const { pt, disks, netIface, sensors, cores } = glancesFromApi(data);
       if (GLANCES_KEYS.some((k) => pt[k] != null)) {
-        return { pt, disks, netIface, source: ver === 4 ? 'api4' : 'api3', via: 'direct' };
+        return { pt, disks, netIface, sensors, cores, source: ver === 4 ? 'api4' : 'api3', via: 'direct' };
       }
     } catch { /* версия API недоступна — пробуем следующую */ }
   }
@@ -364,7 +370,7 @@ async function collectGlances(rawUrl, relayUrl) {
   // запасной вариант: разбор HTML (старый Glances без REST API)
   const { html } = await fetchListing(base, relayUrl);
   const pt = parseGlances(html);
-  if (GLANCES_KEYS.some((k) => pt[k] != null)) return { pt, disks: [], netIface: null, source: 'html', via: 'direct' };
+  if (GLANCES_KEYS.some((k) => pt[k] != null)) return { pt, disks: [], netIface: null, sensors: [], cores: [], source: 'html', via: 'direct' };
 
   throw new Error('Glances отвечает, но данные не получены: REST API (/api/4/all и /api/3/all) и HTML-разбор не дали показателей. Проверьте, что это именно Glances (glances -w)');
 }
@@ -518,39 +524,18 @@ async function pollAgent(agent, force) {
   if (ping.ok && !wasOnline) pushEvent('ok', 'agent', `Агент «${agent.name}» (${agent.ip}) в сети`);
   if (!ping.ok && wasOnline) pushEvent('warn', 'agent', `Агент «${agent.name}» (${agent.ip}) недоступен`);
 
-  // 2) AIDA64: если SSE-подписка жива — данные уже текут, страницу не дёргаем;
-  //    иначе резервный опрос HTML по интервалу «Датчик AIDA64»
-  const aidaIv = Math.max(10, (db.settings.intervals && db.settings.intervals.aida) || 10) * 1000;
-  const sseLive = !!agent.sseActive && now - (agent.lastAida || 0) < aidaIv * 3;
-  if (agent.aidaUrl && !sseLive && (force || now - (agent.lastAida || 0) >= aidaIv)) {
-    agent.lastAida = now;
-    try {
-      const { html, via } = await fetchListing(agent.aidaUrl, agent.relayUrl);
-      const pt = parseAidaLine(html);
-      pt.t = Date.now();
-      if (AGENT_AIDA_KEYS.some((k) => pt[k] != null)) {
-        agent.latest = pt;
-        seriesAppend(agent, 'aida', pt, AIDA_RETENTION_MS);
-        agent.lastError = null;
-        console.log(`[pluto] AIDA «${agent.name}» [${via}]: CPU ${pt.cpuUsage ?? '—'}% · ${pt.cpuTemp ?? '—'}°C · RAM ${pt.ram ?? '—'}%`);
-      } else {
-        agent.lastError = 'листинг AIDA64 загружен, но значения не распознаны — «Проверить листинг» в карточке';
-      }
-    } catch (e) {
-      agent.lastError = 'AIDA64: ' + (e.message || 'ошибка запроса');
-    }
-  }
-
-  // 3) Glances: веб-страница (порт 61208), свой интервал, хранение 30 дней
+  // 2) Glances: REST API (порт 61208), свой интервал, хранение 30 дней
   const glIv = Math.max(15, (db.settings.intervals && db.settings.intervals.glances) || 60) * 1000;
   if (agent.glancesUrl && (force || now - (agent.lastGlances || 0) >= glIv)) {
     agent.lastGlances = now;
     try {
-      const { pt, disks, netIface, source } = await collectGlances(agent.glancesUrl, agent.relayUrl);
+      const { pt, disks, netIface, sensors, cores, source } = await collectGlances(agent.glancesUrl, agent.relayUrl);
       pt.t = Date.now();
       agent.glancesLatest = pt;
       agent.glancesDisks = Array.isArray(disks) ? disks : [];
       agent.glancesNetIface = netIface || null;
+      agent.glancesSensors = Array.isArray(sensors) ? sensors : [];
+      agent.glancesCores = Array.isArray(cores) ? cores : [];
       seriesAppend(agent, 'glances', pt, GLANCES_RETENTION_MS);
       agent.lastError = null;
       console.log(`[pluto] Glances «${agent.name}» [${source}]: CPU ${pt.cpu ?? '—'}% · MEM ${pt.mem ?? '—'}% · FS ${pt.diskCount ?? '—'} шт (${pt.diskUsed ?? '—'}%) · net ${netIface ?? '—'}`);
@@ -560,7 +545,7 @@ async function pollAgent(agent, force) {
     }
   }
 
-  // 4) пинги устройств через relay (внутри VLAN агента)
+  // 3) пинги устройств через relay (внутри VLAN агента)
   if (agent.relayUrl && (agent.pingTargets || []).length) {
     const out = [];
     for (const tgt of agent.pingTargets) {
@@ -647,7 +632,7 @@ setInterval(() => {
     lastCleanup = now;
     let changed = false;
     for (const a of db.agents) {
-      for (const [key, ret] of [['aida', AIDA_RETENTION_MS], ['glances', GLANCES_RETENTION_MS]]) {
+      for (const [key, ret] of [['glances', GLANCES_RETENTION_MS]]) {
         const arr = a[key];
         if (Array.isArray(arr) && arr.length && arr[0].t < now - ret) {
           let i = 0;
@@ -669,9 +654,6 @@ setInterval(() => {
     if (changed) saveDb();
   }
 }, 1000);
-
-setInterval(sseSync, 5000);
-setTimeout(sseSync, 2000);
 
 // ─── HTTP-сервер ────────────────────────────────────────────────────────────
 
@@ -731,7 +713,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/state' && method === 'GET') {
       const devices = isAdmin ? db.devices : db.devices.filter((d) => user.scope.includes(d.type));
       const agentsRaw = isAdmin || user.scope.includes('agent') ? db.agents : [];
-      const agents = agentsRaw.map((a) => ({ ...a, aida: undefined, glances: undefined, polling: undefined, pollStarted: undefined, sseActive: undefined }));
+      const agents = agentsRaw.map((a) => ({ ...a, glances: undefined, polling: undefined, pollStarted: undefined }));
       const glancesRaw = isAdmin || user.scope.includes('glances') ? db.glances : [];
       const glances = glancesRaw.map((g) => ({ ...g, history: undefined, scraping: undefined }));
       return json(res, 200, {
@@ -798,20 +780,18 @@ const server = http.createServer(async (req, res) => {
         id: uid(),
         name: String(b.name || '').trim() || ('ПК ' + ip),
         ip,
-        aidaUrl: String(b.aidaUrl || '').trim(),
         glancesUrl: String(b.glancesUrl || '').trim(),
         relayUrl: String(b.relayUrl || '').trim(),
         pingTargets: Array.isArray(b.pingTargets) ? b.pingTargets.map((x) => String(x).trim()).filter(Boolean) : [],
         online: false, latency: null, onlineSince: 0,
-        lastSeen: 0, lastPoll: 0, lastAida: 0, lastGlances: 0, lastError: null,
-        latest: null, glancesLatest: null, glancesDisks: [], glancesNetIface: null,
-        aida: [], glances: [], latHist: [], targets: [],
+        lastSeen: 0, lastPoll: 0, lastGlances: 0, lastError: null,
+        glancesLatest: null, glancesDisks: [], glancesNetIface: null,
+        glancesSensors: [], glancesCores: [], glances: [], latHist: [], targets: [],
         favorite: false, createdAt: Date.now(),
       };
       db.agents.push(a);
       pushEvent('info', 'agent', `Добавлен агент «${a.name}» (${a.ip})`);
       saveDb();
-      sseSync();
       pollAgent(a, true);
       return json(res, 200, a);
     }
@@ -821,14 +801,12 @@ const server = http.createServer(async (req, res) => {
       if (!a) return json(res, 404, { error: 'агент не найден' });
       if (method === 'PUT' || method === 'PATCH') {
         const b = await readBody(req);
-        for (const k of ['name', 'ip', 'aidaUrl', 'glancesUrl', 'relayUrl', 'favorite']) if (k in b) a[k] = b[k];
+        for (const k of ['name', 'ip', 'glancesUrl', 'relayUrl', 'favorite']) if (k in b) a[k] = b[k];
         if (Array.isArray(b.pingTargets)) a.pingTargets = b.pingTargets.map((x) => String(x).trim()).filter(Boolean);
         saveDb();
-        sseSync();
         return json(res, 200, a);
       }
       if (method === 'DELETE') {
-        sseStop(a.id);
         db.agents = db.agents.filter((x) => x.id !== a.id);
         pushEvent('info', 'agent', `Агент «${a.name}» удалён`);
         saveDb();
@@ -842,57 +820,29 @@ const server = http.createServer(async (req, res) => {
       await pollAgent(a, true);
       return json(res, 200, a);
     }
-    // диагностика источников (AIDA64 / Glances)
-    m = p.match(/^\/api\/agents\/([^/]+)\/test-(aida|glances)$/);
+    // диагностика источника (Glances)
+    m = p.match(/^\/api\/agents\/([^/]+)\/test-glances$/);
     if (m && method === 'GET') {
       const a = db.agents.find((x) => x.id === m[1]);
       if (!a) return json(res, 404, { error: 'агент не найден' });
       if (!isAdmin && !user.scope.includes('agent')) return json(res, 403, { error: 'нет доступа к агентам' });
-      const kind = m[2];
-      const srcUrl = kind === 'aida' ? a.aidaUrl : a.glancesUrl;
-      if (kind === 'glances') {
-        // Glances: пробуем REST API (/api/4/all → /api/3/all), затем HTML
-        try {
-          const { pt, disks, netIface, source } = await collectGlances(srcUrl, a.relayUrl);
-          const recognized = GLANCES_KEYS.filter((k) => pt[k] != null);
-          const viaText = source === 'html'
-            ? 'разбор HTML-страницы'
-            : 'REST API Glances, ' + (source === 'api4' ? '/api/4' : '/api/3');
-          return json(res, 200, {
-            ok: recognized.length > 0, url: srcUrl, via: source,
-            sample: viaText + (netIface ? ' · адаптер: ' + netIface : '') + (disks.length ? ' · ФС: ' + disks.length + ' шт' : ''),
-            values: pt, recognized, disks, netIface,
-            missing: GLANCES_KEYS.filter((k) => pt[k] == null),
-          });
-        } catch (e) {
-          return json(res, 200, { ok: false, url: srcUrl || '', via: null, error: e.message || String(e) });
-        }
-      }
+      const srcUrl = a.glancesUrl;
+      // Glances: пробуем REST API (/api/4/all → /api/3/all), затем HTML
       try {
-        const { html, via } = await fetchListing(srcUrl, a.relayUrl);
-        const parsed = parseAidaLine(html);
-        const recognized = AGENT_AIDA_KEYS.filter((k) => parsed[k] != null);
-        const plain = htmlToText(html);
+        const { pt, disks, netIface, source } = await collectGlances(srcUrl, a.relayUrl);
+        const recognized = GLANCES_KEYS.filter((k) => pt[k] != null);
+        const viaText = source === 'html'
+          ? 'разбор HTML-страницы'
+          : 'REST API Glances, ' + (source === 'api4' ? '/api/4' : '/api/3');
         return json(res, 200, {
-          ok: recognized.length > 0, url: srcUrl, via, bytes: html.length,
-          sample: plain.slice(0, 300), values: parsed, recognized,
-          missing: AGENT_AIDA_KEYS.filter((k) => parsed[k] == null),
+          ok: recognized.length > 0, url: srcUrl, via: source,
+          sample: viaText + (netIface ? ' · адаптер: ' + netIface : '') + (disks.length ? ' · ФС: ' + disks.length + ' шт' : ''),
+          values: pt, recognized, disks, netIface,
+          missing: GLANCES_KEYS.filter((k) => pt[k] == null),
         });
       } catch (e) {
         return json(res, 200, { ok: false, url: srcUrl || '', via: null, error: e.message || String(e) });
       }
-    }
-    // история AIDA64 (60 дней)
-    m = p.match(/^\/api\/agents\/([^/]+)\/aida$/);
-    if (m && method === 'GET') {
-      const a = db.agents.find((x) => x.id === m[1]);
-      if (!a) return json(res, 404, { error: 'агент не найден' });
-      if (!isAdmin && !user.scope.includes('agent')) return json(res, 403, { error: 'нет доступа к агентам' });
-      const rq = url.searchParams.get('range');
-      const range = AIDA_RANGE_MS[rq] ? rq : '5m';
-      const out = rangePoints(a.aida, AIDA_RANGE_MS[range], range);
-      out.retentionDays = 60;
-      return json(res, 200, out);
     }
     // история Glances агента (30 дней)
     m = p.match(/^\/api\/agents\/([^/]+)\/glances$/);
