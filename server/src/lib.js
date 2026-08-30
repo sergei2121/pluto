@@ -71,10 +71,12 @@ export function loadDb() {
     relayUrl: a.relayUrl || '',
     latest: a.latest || null,
     glancesLatest: a.glancesLatest || null,
+    glancesDisks: Array.isArray(a.glancesDisks) ? a.glancesDisks : [],
+    glancesNetIface: a.glancesNetIface || null,
     lastAida: a.lastAida || 0,
     lastGlances: a.lastGlances || 0,
   }));
-  db.glances = (db.glances || []).map((g) => ({ ...g, history: Array.isArray(g.history) ? g.history : [], scraping: false }));
+  db.glances = (db.glances || []).map((g) => ({ ...g, history: Array.isArray(g.history) ? g.history : [], disks: Array.isArray(g.disks) ? g.disks : [], netIface: g.netIface || null, scraping: false }));
 
   // первый запуск: администратор по умолчанию
   if (!db.users.length) {

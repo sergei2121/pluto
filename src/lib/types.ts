@@ -100,9 +100,19 @@ export interface GlancesPoint {
   memTotal: number | null; // ГБ
   memUsed: number | null; // ГБ
   memFree: number | null; // ГБ
-  rx: number | null; // КБ/с
-  tx: number | null; // КБ/с
+  rx: number | null; // КБ/с (реальный адаптер)
+  tx: number | null; // КБ/с (реальный адаптер)
   pkg: number | null; // Package — температура ЦП, °C
+  diskCount: number | null; // секция FILE SYS — количество файловых систем
+  diskUsed: number | null; // заполненность основной ФС (корень / диск C:), %
+}
+
+/** Снимок файловой системы из плагина fs (не хранится в истории — только последний). */
+export interface GlancesDisk {
+  mnt: string;
+  percent: number | null;
+  usedGB: number | null;
+  sizeGB: number | null;
 }
 
 export type GlancesRange = '5m' | '30m' | '3h' | '24h' | '7d' | '30d';
@@ -124,6 +134,8 @@ export const GLANCES_FIELDS: { k: keyof GlancesPoint; label: string; unit: strin
   { k: 'rx', label: 'Rx/s', unit: 'КБ/с' },
   { k: 'tx', label: 'Tx/s', unit: 'КБ/с' },
   { k: 'pkg', label: 'Package', unit: '°C' },
+  { k: 'diskCount', label: 'FILE SYS', unit: 'шт' },
+  { k: 'diskUsed', label: 'FS занято', unit: '%' },
 ];
 
 // ─── Агент: IP + AIDA64 + Glances + relay (без токенов и установки ПО) ──────
@@ -159,6 +171,8 @@ export interface Agent {
   lastError: string | null;
   latest: AidaPoint | null;
   glancesLatest: GlancesPoint | null;
+  glancesDisks: GlancesDisk[]; // снимок ФС (FILE SYS)
+  glancesNetIface: string | null; // имя реального адаптера
   aida: AidaPoint[]; // 60 дней
   glances: GlancesPoint[]; // 30 дней
   latHist: { t: number; ms: number | null }[];
@@ -173,6 +187,8 @@ export interface GlancesDevice {
   name: string;
   url: string;
   serverLink: string;
+  disks: GlancesDisk[];
+  netIface: string | null;
   createdAt: number;
   lastScrape: number;
   lastError: string | null;

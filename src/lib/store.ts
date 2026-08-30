@@ -213,6 +213,8 @@ export const store = {
       glances: Array.isArray(a.glances) ? a.glances : [],
       latest: a.latest ?? null,
       glancesLatest: a.glancesLatest ?? null,
+      glancesDisks: Array.isArray(a.glancesDisks) ? a.glancesDisks : [],
+      glancesNetIface: a.glancesNetIface ?? null,
       latency: a.latency ?? null,
       lastError: a.lastError ?? null,
       aidaUrl: a.aidaUrl ?? '',
@@ -222,7 +224,7 @@ export const store = {
     const patch: Partial<PlutoState> = {
       devices: (st.devices || []).map((d) => ({ ...d, history: Array.isArray(d.history) ? d.history : [], checking: false })),
       agents: (st.agents || []).map(safeAgent),
-      glances: st.glances ?? [],
+      glances: (st.glances ?? []).map((g) => ({ ...g, history: Array.isArray(g.history) ? g.history : [], disks: Array.isArray(g.disks) ? g.disks : [], netIface: g.netIface ?? null })),
       events: st.events || [],
     };
     if (JSON.stringify(st.settings) !== JSON.stringify(cur.settings)) patch.settings = st.settings;
@@ -304,6 +306,7 @@ export const store = {
       id: uid('ag'), name: d.name, ip: d.ip, aidaUrl: d.aidaUrl, glancesUrl: d.glancesUrl || '', relayUrl: d.relayUrl || '',
       pingTargets: d.pingTargets || [], favorite: false, online: false, latency: null, onlineSince: 0,
       lastSeen: 0, lastPoll: 0, lastAida: 0, lastGlances: 0, lastError: null, latest: null, glancesLatest: null,
+      glancesDisks: [], glancesNetIface: null,
       aida: [], glances: [], latHist: [], targets: [], createdAt: Date.now(),
     };
     set({ agents: [...getState().agents, a] });
@@ -371,6 +374,7 @@ export const store = {
     const g: GlancesDevice = {
       id: uid('gl'), name: d.name, url: d.url, serverLink: d.serverLink, createdAt: Date.now(),
       lastScrape: 0, lastError: null, online: false, latest: null, history: [],
+      disks: [], netIface: null,
     };
     set({ glances: [...getState().glances, g] });
     return null;

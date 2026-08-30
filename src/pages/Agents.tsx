@@ -4,7 +4,7 @@ import {
   Plus, Star, Trash2, Pencil, Activity, Cpu, Thermometer, MemoryStick, HardDrive,
   Network, RefreshCw, ExternalLink, Radar, Search, AlertTriangle, Gauge, BarChart3,
 } from 'lucide-react';
-import { Drawer, EmptyState, Field, Modal, Panel, StatusDot, TimeAgo } from '../components/ui';
+import { Bar, Drawer, EmptyState, Field, Modal, Panel, StatusDot, TimeAgo } from '../components/ui';
 import { store, useCurrentUser, usePluto, visibleAgents } from '../lib/store';
 import { api } from '../lib/api';
 import { cls, fmtNet, fmtUp, fmtUpSec, LINE_COLORS } from '../lib/util';
@@ -451,6 +451,26 @@ function AgentDrawer({ agent, onClose, onEdit, isAdmin }: { agent: Agent | null;
             )}
             {gl?.pkg != null && (
               <p className="mt-1.5 font-mono text-[11px] text-dim">Package (t°C ЦП): <span className={gl.pkg > 78 ? 'text-crit' : 'text-warn'}>{gl.pkg}°C</span></p>
+            )}
+            {(agent.glancesDisks.length > 0 || agent.glancesNetIface) && (
+              <div className="mt-2 space-y-1.5 rounded-lg border border-line bg-raised/30 p-2.5">
+                {agent.glancesNetIface && (
+                  <div className="flex items-center gap-1.5 font-mono text-[10.5px] text-dim">
+                    <Network className="h-3 w-3 text-mint" />
+                    <span>реальный адаптер:</span>
+                    <span className="max-w-[180px] truncate rounded bg-raised/60 px-1.5 py-px text-mint">{agent.glancesNetIface}</span>
+                  </div>
+                )}
+                {agent.glancesDisks.map((d) => (
+                  <div key={d.mnt} className="flex items-center gap-2">
+                    <span className="w-20 shrink-0 truncate font-mono text-[10.5px] text-dim" title={d.mnt}>{d.mnt}</span>
+                    <Bar value={d.percent ?? 0} color="#8f7df0" className="flex-1" />
+                    <span className={cls('w-11 shrink-0 text-right font-mono text-[10.5px] font-bold tabular-nums', (d.percent ?? 0) > 85 ? 'text-crit' : (d.percent ?? 0) > 65 ? 'text-warn' : 'text-mut')}>
+                      {d.percent != null ? `${d.percent}%` : '—'}
+                    </span>
+                  </div>
+                ))}
+              </div>
             )}
             {isAdmin && <div className="mt-2"><TestSourcePanel agent={agent} kind="glances" /></div>}
           </div>

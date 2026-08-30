@@ -1,7 +1,7 @@
 // ─── PLUTO: Журнал телеметрии Bars — Glances-серверы (Rocky Linux и др.) ────
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BarChart3, Download, ExternalLink, Plus, RefreshCw, Trash2 } from 'lucide-react';
-import { EmptyState, Field, Modal, Panel, StatusDot, TimeAgo } from '../components/ui';
+import { BarChart3, Download, ExternalLink, Network, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Bar, EmptyState, Field, Modal, Panel, StatusDot, TimeAgo } from '../components/ui';
 import { store, useCurrentUser, usePluto, useToasts, visibleGlances } from '../lib/store';
 import { api } from '../lib/api';
 import { cls, fmtDate, LINE_COLORS } from '../lib/util';
@@ -278,6 +278,27 @@ export default function Bars() {
                       </div>
                     ))}
                   </div>
+
+                  {(g.disks.length > 0 || g.netIface) && (
+                    <div className="mt-2.5 space-y-1.5">
+                      {g.netIface && (
+                        <div className="flex items-center gap-1.5 font-mono text-[10px] text-dim">
+                          <Network className="h-3 w-3 text-mint" />
+                          <span>адаптер:</span>
+                          <span className="max-w-[150px] truncate rounded bg-raised/60 px-1.5 py-px text-mint">{g.netIface}</span>
+                        </div>
+                      )}
+                      {g.disks.map((d) => (
+                        <div key={d.mnt} className="flex items-center gap-2">
+                          <span className="w-16 shrink-0 truncate font-mono text-[10px] text-dim" title={d.mnt}>{d.mnt}</span>
+                          <Bar value={d.percent ?? 0} color="#8f7df0" className="flex-1" />
+                          <span className={cls('w-10 shrink-0 text-right font-mono text-[10px] font-bold tabular-nums', (d.percent ?? 0) > 85 ? 'text-crit' : (d.percent ?? 0) > 65 ? 'text-warn' : 'text-mut')}>
+                            {d.percent != null ? `${d.percent}%` : '—'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   <div className="mt-2.5">
                     <MiniSpark points={(g.history || []).length ? (g.history as GlancesPoint[]) : (l ? [{ ...l } as GlancesPoint] : [])} metric="cpu" color="#7ba4e6" />
