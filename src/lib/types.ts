@@ -2,7 +2,7 @@
 
 export type DeviceType = 'ping' | 'http' | 'api' | 'rtsp' | 'sip';
 export type DeviceStatus = 'up' | 'down' | 'degraded' | 'unknown';
-export type Route = 'dashboard' | 'devices' | 'agents' | 'settings' | 'deploy';
+export type Route = 'dashboard' | 'devices' | 'agents' | 'showcase' | 'settings' | 'deploy';
 export type Severity = 'ok' | 'warn' | 'crit' | 'info';
 export type Role = 'admin' | 'viewer';
 
