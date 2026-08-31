@@ -1,16 +1,16 @@
 // ─── PLUTO: настройки системы ───────────────────────────────────────────────
 import { useEffect, useState } from 'react';
 import {
-  Send, Tag as TagIcon, Bell, Users, Database, Plus, Trash2, Monitor, Server, BarChart3,
+  Send, Tag as TagIcon, Bell, Users, Database, Plus, Trash2, Monitor, Server, BarChart3, Radio, RefreshCw,
 } from 'lucide-react';
-import { Field, Panel, Toggle } from '../components/ui';
+import { Field, Panel, Toggle, TimeAgo } from '../components/ui';
 import { store, useCurrentUser, usePluto, useToasts } from '../lib/store';
 import { sendTestNotification, requestPushPermission } from '../lib/engine';
 import { api } from '../lib/api';
-import { cls, TAG_COLORS } from '../lib/util';
+import { cls, TAG_COLORS, timeAgo } from '../lib/util';
 import { DEVICE_TYPES, DEVICE_TYPE_META, type DeviceType, type Settings as TSettings, type User } from '../lib/types';
 
-type Tab = 'polling' | 'tags' | 'notify' | 'users' | 'database';
+type Tab = 'polling' | 'tags' | 'notify' | 'users' | 'database' | 'mirror';
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>('polling');
@@ -20,6 +20,7 @@ export default function SettingsPage() {
     { id: 'notify', label: 'Уведомления', icon: <Bell className="h-3.5 w-3.5" /> },
     { id: 'users', label: 'Пользователи', icon: <Users className="h-3.5 w-3.5" /> },
     { id: 'database', label: 'База данных', icon: <Database className="h-3.5 w-3.5" /> },
+    { id: 'mirror', label: 'Зеркало', icon: <Radio className="h-3.5 w-3.5" /> },
   ];
 
   return (
@@ -38,6 +39,7 @@ export default function SettingsPage() {
       {tab === 'notify' && <NotifyTab />}
       {tab === 'users' && <UsersTab />}
       {tab === 'database' && <DatabaseTab />}
+      {tab === 'mirror' && <MirrorTab />}
     </div>
   );
 }
@@ -428,6 +430,111 @@ function DatabaseTab() {
           </ul>
         )}
       </Panel>
+    </div>
+  );
+}
+
+// ─── Зеркало-ретранслятор ───────────────────────────────────────────────────
+
+function MirrorTab() {
+  const settings = usePluto((s) => s.settings);
+  const mirror = usePluto((s) => s.mirror);
+  const mirrorLast = usePluto((s) => s.mirrorLast);
+  const syncedAt = usePluto((s) => s.mirrorSyncedAt);
+  const [draft, setDraft] = useState<TSettings['mirror']>(settings.mirror);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => { setDraft(settings.mirror); }, [settings.mirror]);
+
+  const save = () => {
+    store.saveSettings({ ...settings, mirror: { ...draft, url: draft.url.trim().replace(/\/+$/, ''), interval: Math.min(3600, Math.max(30, draft.interval)) } });
+  };
+
+  const sendNow = async () => {
+    setBusy(true);
+    await store.syncMirrorNow();
+    setBusy(false);
+  };
+
+  // Если мы на зеркале — показываем состояние приёма, а не отправку
+  if (mirror) {
+    return (
+      <Panel title="Режим зеркала" icon={<Radio className="h-4 w-4" />}>
+        <div className="rounded-lg border border-warn/30 bg-warn/10 px-4 py-3.5">
+          <p className="text-[13px] font-semibold text-warn">Этот экземпляр — зеркало-ретранслятор (только чтение).</p>
+          <p className="mt-1.5 text-[12.5px] leading-relaxed text-mut">
+            Данные получены от основного сервера {syncedAt ? timeAgo(syncedAt) : 'ещё не синхронизированы'}.
+            Здесь нельзя добавлять устройства, агентов или менять настройки — все изменения делайте на основном сервере в локальной сети.
+            Зеркало не опрашивает устройства, а лишь показывает последнюю копию состояния.
+          </p>
+        </div>
+      </Panel>
+    );
+  }
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+      <Panel title="Отправка копии на ретранслятор" icon={<Radio className="h-4 w-4" />}>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-line bg-raised/40 px-4 py-3">
+            <div>
+              <p className="text-[13px] font-semibold text-ink">Отправлять снапшот состояния</p>
+              <p className="mt-0.5 text-[11.5px] text-dim">Устройства, агенты, события — без паролей и настроек</p>
+            </div>
+            <Toggle checked={draft.enabled} onChange={(v) => setDraft({ ...draft, enabled: v })} />
+          </div>
+
+          <Field label="Адрес зеркала" hint="Публичный URL ретранслятора с HTTPS, например https://pluto.example.com">
+            <input className="inp font-mono" value={draft.url} onChange={(e) => setDraft({ ...draft, url: e.target.value })} placeholder="https://pluto.example.com" disabled={!draft.enabled} />
+          </Field>
+
+          <Field label="Секрет (MIRROR_SECRET)" hint="Должен совпадать с переменной MIRROR_SECRET в docker-compose зеркала. Минимум 32 символа.">
+            <input className="inp font-mono" type="password" value={draft.secret} onChange={(e) => setDraft({ ...draft, secret: e.target.value })} disabled={!draft.enabled} />
+          </Field>
+
+          <Field label="Интервал синхронизации" hint="Как часто отправлять снапшот, сек (30–3600). По умолчанию 60.">
+            <div className="flex items-center gap-2">
+              <input className="inp font-mono" type="number" min={30} max={3600} value={draft.interval} onChange={(e) => setDraft({ ...draft, interval: parseInt(e.target.value, 10) || 60 })} disabled={!draft.enabled} />
+              <span className="shrink-0 font-mono text-[11px] text-dim">сек</span>
+            </div>
+          </Field>
+
+          <div className="flex items-center gap-2 pt-1">
+            <button className="btn-acc" onClick={save}><RefreshCw className="h-4 w-4" /> Сохранить</button>
+            <button className="btn-ghost" onClick={sendNow} disabled={busy || !draft.enabled || !draft.url || !draft.secret}>
+              <RefreshCw className={cls('h-4 w-4', busy && 'animate-spin')} /> Отправить сейчас
+            </button>
+          </div>
+        </div>
+      </Panel>
+
+      <div className="space-y-4">
+        <Panel title="Статус" icon={<Radio className="h-4 w-4" />}>
+          {mirrorLast ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[12px] text-dim">Последняя отправка</span>
+                <span className="font-mono text-[12px] text-mut">{timeAgo(mirrorLast.t)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[12px] text-dim">Результат</span>
+                <span className={cls('font-mono text-[12px] font-semibold', mirrorLast.ok ? 'text-ok' : 'text-crit')}>{mirrorLast.ok ? 'успешно' : 'ошибка'}</span>
+              </div>
+              {mirrorLast.error && <p className="rounded border border-crit/30 bg-crit/10 px-2.5 py-1.5 text-[11px] text-crit">{mirrorLast.error}</p>}
+            </div>
+          ) : (
+            <p className="text-[12px] text-dim">Отправок ещё не было. Сохраните настройки и нажмите «Отправить сейчас».</p>
+          )}
+        </Panel>
+
+        <Panel title="Как это работает" icon={<Radio className="h-4 w-4" />}>
+          <p className="text-[12px] leading-relaxed text-dim">
+            Основной сервер (в локальной сети) каждые N секунд собирает снапшот состояния и отправляет его по HTTPS на публичный
+            read-only экземпляр. Зеркало не опрашивает устройства и не принимает изменений — даже при его компрометации
+            злоумышленник получит только витрину статусов, без паролей, сессий и настроек. Управление — только через локальную сеть.
+          </p>
+        </Panel>
+      </div>
     </div>
   );
 }

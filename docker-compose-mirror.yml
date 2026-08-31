@@ -1,0 +1,35 @@
+# ─── PLUTO: зеркало-ретранслятор (read-only витрина в интернете) ─────────────
+# Разворачивается на ОТДЕЛЬНОЙ машине с публичным IP (VPS).
+# Основной сервер в локальной сети сам push-ит сюда снапшот состояния;
+# зеркало ничего не опрашивает и не принимает изменений.
+#
+#   cp .env.mirror.example .env && nano .env
+#   docker compose -f docker-compose-mirror.yml up -d --build
+#
+# Для HTTPS поставьте перед ним Caddy (см. DEPLOY.md, раздел «Зеркало»):
+#   pluto.example.com { reverse_proxy 127.0.0.1:8080 }
+
+services:
+  core:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: pluto/core:1.11.0
+    restart: unless-stopped
+    ports:
+      - "${PLUTO_HTTP_PORT:-8080}:8080"
+    environment:
+      - PLUTO_MIRROR=1
+      - MIRROR_SECRET=${MIRROR_SECRET:?задайте MIRROR_SECRET в .env — тот же, что во вкладке «Зеркало» основного сервера}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-pluto}
+      - TZ=${TZ:-Europe/Moscow}
+    volumes:
+      - pluto-mirror-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/health"]
+      interval: 15s
+      timeout: 4s
+      retries: 3
+
+volumes:
+  pluto-mirror-data:

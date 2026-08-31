@@ -11,9 +11,13 @@ import {
   loadDb, saveDb, uid, pushEvent, hashPass, verifyPass, issueSession, authUser, attachWs,
 } from './lib.js';
 
-const VERSION = '1.10.2';
+const VERSION = '1.11.0';
 const HTTP_PORT = parseInt(process.env.HTTP_PORT || '8080', 10);
 const AGENT_PORT = parseInt(process.env.AGENT_PORT || '8443', 10);
+// Зеркало-ретранслятор: PLUTO_MIRROR=1 запускает экземпляр в режиме «витрина»
+// (read-only, не опрашивает ничего), MIRROR_SECRET защищает приём снапшотов.
+const IS_MIRROR = process.env.PLUTO_MIRROR === '1';
+const MIRROR_SECRET = (process.env.MIRROR_SECRET || '').trim();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.join(__dirname, '..', 'web');
 
@@ -592,12 +596,82 @@ async function scrapeGlancesDev(dev, force) {
   }
 }
 
+// ─── Зеркало-ретранслятор (push-синхронизация) ──────────────────────────────
+// Основной сервер периодически собирает снапшот состояния (без паролей, сессий
+// и настроек) и отправляет его на публичный read-only экземпляр. Зеркало не
+// опрашивает устройства — оно лишь показывает последнюю копию.
+
+function buildSnapshot() {
+  return {
+    version: VERSION,
+    syncedAt: Date.now(),
+    devices: db.devices.map((d) => ({ ...d, profile: undefined, checking: undefined })),
+    agents: db.agents.map((a) => ({ ...a, polling: undefined, pollStarted: undefined })),
+    glances: (db.glances || []).map((g) => ({ ...g, scraping: undefined })),
+    events: db.events.slice(0, 120),
+    tags: db.tags,
+  };
+}
+
+let mirrorBusy = false;
+async function syncMirror(force) {
+  const m = db.settings.mirror;
+  if (IS_MIRROR || mirrorBusy || !m || !m.enabled || !m.url || !m.secret) return;
+  const iv = Math.max(30, m.interval || 60) * 1000;
+  if (!force && Date.now() - ((db.mirrorLast && db.mirrorLast.t) || 0) < iv) return;
+  mirrorBusy = true;
+  const endpoint = String(m.url).replace(/\/+$/, '') + '/api/mirror/ingest';
+  try {
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 15000);
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      signal: ctrl.signal,
+      headers: { 'Content-Type': 'application/json', 'X-Mirror-Secret': m.secret },
+      body: JSON.stringify(buildSnapshot()),
+    });
+    clearTimeout(to);
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
+    db.mirrorLast = { t: Date.now(), ok: true, error: null };
+    console.log(`[pluto] зеркало: снапшот отправлен (${db.devices.length} устр., ${db.agents.length} аг.)`);
+  } catch (e) {
+    db.mirrorLast = { t: Date.now(), ok: false, error: e.message || 'ошибка отправки' };
+    console.log(`[pluto] зеркало: не удалось отправить — ${db.mirrorLast.error}`);
+  } finally {
+    mirrorBusy = false;
+    saveDb();
+  }
+}
+
+// Приём снапшота на зеркале. Вызывается до авторизации, защищён общим секретом.
+function applySnapshot(snap) {
+  if (!snap || typeof snap !== 'object') throw new Error('некорректный снапшот');
+  db.devices = Array.isArray(snap.devices) ? snap.devices : [];
+  db.agents = Array.isArray(snap.agents) ? snap.agents : [];
+  db.glances = Array.isArray(snap.glances) ? snap.glances : [];
+  db.events = Array.isArray(snap.events) ? snap.events : [];
+  db.tags = Array.isArray(snap.tags) ? snap.tags : [];
+  db.mirrorSyncedAt = Date.now();
+  db.mirrorVersion = snap.version || null;
+  saveDb();
+}
+
 // ─── Планировщик ────────────────────────────────────────────────────────────
 
 let lastCleanup = 0;
 
 setInterval(() => {
   const now = Date.now();
+
+  // Основной сервер: push снапшота на зеркало-ретранслятор
+  if (!IS_MIRROR) void syncMirror(false);
+
+  // Зеркало ничего не опрашивает — только показывает последнюю копию
+  if (IS_MIRROR) {
+    if (now - lastCleanup > 3600000) { lastCleanup = now; /* зеркала чистит основной */ }
+    return;
+  }
 
   for (const d of db.devices) {
     const iv = Math.max(5, d.interval || (db.settings.intervals && db.settings.intervals[d.type]) || 60) * 1000;
@@ -669,8 +743,23 @@ const server = http.createServer(async (req, res) => {
 
   try {
     // ── публичные маршруты ──
-    if (p === '/api/health') return json(res, 200, { ok: true, name: 'pluto-core', version: VERSION, console: 'api' });
-    if (p === '/api/version') return json(res, 200, { version: VERSION });
+    if (p === '/api/health') return json(res, 200, { ok: true, name: 'pluto-core', version: VERSION, console: 'api', mirror: IS_MIRROR });
+    if (p === '/api/version') return json(res, 200, { version: VERSION, mirror: IS_MIRROR });
+
+    // Приём снапшота на зеркале. До авторизации, но с общим секретом.
+    if (p === '/api/mirror/ingest' && method === 'POST') {
+      if (!IS_MIRROR) return json(res, 404, { error: 'not found' });
+      if (!MIRROR_SECRET) return json(res, 500, { error: 'зеркало не настроено: задайте MIRROR_SECRET' });
+      const got = String(req.headers['x-mirror-secret'] || '');
+      if (!got || got !== MIRROR_SECRET) return json(res, 403, { error: 'неверный секрет зеркала' });
+      try {
+        const snap = await readBody(req);
+        applySnapshot(snap);
+        return json(res, 200, { ok: true, syncedAt: db.mirrorSyncedAt });
+      } catch (e) {
+        return json(res, 400, { error: e.message || 'снапшот отклонён' });
+      }
+    }
 
     // ── статика веб-консоли (без авторизации) ──
     if (method === 'GET' && !p.startsWith('/api/')) {
@@ -709,6 +798,11 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/auth/me') return json(res, 200, publicUser(user));
 
+    // Зеркало — только чтение: любые изменения запрещены
+    if (IS_MIRROR && method !== 'GET' && p !== '/api/auth/login' && p !== '/api/auth/me') {
+      return json(res, 403, { error: 'зеркало: только чтение — изменения делайте на основном сервере' });
+    }
+
     // ── состояние ──
     if (p === '/api/state' && method === 'GET') {
       const devices = isAdmin ? db.devices : db.devices.filter((d) => user.scope.includes(d.type));
@@ -720,7 +814,18 @@ const server = http.createServer(async (req, res) => {
         devices, agents, glances,
         tags: db.tags, events: db.events, settings: db.settings,
         users: isAdmin ? db.users.map(publicUser) : undefined,
+        mirror: IS_MIRROR,
+        mirrorLast: db.mirrorLast || null,
+        mirrorSyncedAt: db.mirrorSyncedAt || null,
+        mirrorVersion: db.mirrorVersion || null,
       });
+    }
+
+    // ручная отправка снапшота на зеркало (только основной сервер, админ)
+    if (p === '/api/mirror/sync-now' && method === 'POST' && isAdmin) {
+      if (IS_MIRROR) return json(res, 400, { error: 'это зеркало — отправлять некуда' });
+      await syncMirror(true);
+      return json(res, 200, db.mirrorLast || { ok: false, error: 'не настроено' });
     }
 
     // ── устройства ──
@@ -732,7 +837,7 @@ const server = http.createServer(async (req, res) => {
         address: String(b.address).trim(), port: b.port != null ? parseInt(b.port, 10) : null,
         path: String(b.path || ''), method: b.method || null, body: b.body || null,
         interval: Math.max(5, parseInt(b.interval, 10) || (db.settings.intervals[b.type] || 60)),
-        tags: Array.isArray(b.tags) ? b.tags : [], favorite: !!b.favorite,
+        tags: Array.isArray(b.tags) ? b.tags : [], favorite: !!b.favorite, showcase: !!b.showcase,
         status: 'unknown', latency: null, baseline: null, history: [], fails: 0,
         lastCheck: 0, lastChange: Date.now(), checking: false, approx: false,
         profile: { base: 20, failP: 0.03, spikeP: 0.02 }, spikeUntil: 0, createdAt: Date.now(),
@@ -749,7 +854,7 @@ const server = http.createServer(async (req, res) => {
       if (!d) return json(res, 404, { error: 'устройство не найдено' });
       if (method === 'PUT' || method === 'PATCH') {
         const b = await readBody(req);
-        for (const k of ['name', 'type', 'address', 'port', 'path', 'method', 'body', 'interval', 'tags', 'favorite']) {
+        for (const k of ['name', 'type', 'address', 'port', 'path', 'method', 'body', 'interval', 'tags', 'favorite', 'showcase']) {
           if (k in b) d[k] = b[k];
         }
         saveDb();
