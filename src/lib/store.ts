@@ -52,6 +52,10 @@ interface PlutoState {
   routeParam: string;
   apiMode: ApiMode;
   coreVersion: string | null;
+  mirror: boolean;
+  mirrorLast: { t: number; ok: boolean; error: string | null } | null;
+  mirrorSyncedAt: number | null;
+  mirrorVersion: string | null;
 }
 
 const INJECTED_CORE: string | null =
@@ -66,6 +70,7 @@ function defaultSettings(): Settings {
     failThreshold: 3,
     degradeFactor: 10,
     degradeMinMs: 250,
+    mirror: { enabled: false, url: '', secret: '', interval: 60 },
     notifications: {
       telegram: { enabled: false, botToken: '', chatId: '' },
       email: { enabled: false, smtp: '', from: '', to: '' },
@@ -96,6 +101,10 @@ let state: PlutoState = {
   routeParam: '',
   apiMode: INJECTED_CORE ? 'server' : 'embedded',
   coreVersion: INJECTED_CORE,
+  mirror: false,
+  mirrorLast: null,
+  mirrorSyncedAt: null,
+  mirrorVersion: null,
 };
 
 const listeners = new Set<() => void>();
@@ -202,7 +211,7 @@ export const store = {
   },
 
   // ── синхронизация с ядром ──
-  applyServerState(st: { devices: Device[]; agents: Agent[]; glances?: GlancesDevice[]; tags: Tag[]; events: EventItem[]; settings: Settings; users?: User[] }) {
+  applyServerState(st: { devices: Device[]; agents: Agent[]; glances?: GlancesDevice[]; tags: Tag[]; events: EventItem[]; settings: Settings; users?: User[]; mirror?: boolean; mirrorLast?: { t: number; ok: boolean; error: string | null } | null; mirrorSyncedAt?: number | null; mirrorVersion?: string | null }) {
     const cur = getState();
     const safeAgent = (a: Agent): Agent => ({
       ...a,
@@ -229,6 +238,10 @@ export const store = {
     if (JSON.stringify(st.settings) !== JSON.stringify(cur.settings)) patch.settings = st.settings;
     if (JSON.stringify(st.tags) !== JSON.stringify(cur.tags)) patch.tags = st.tags;
     if (st.users && JSON.stringify(st.users) !== JSON.stringify(cur.users)) patch.users = st.users;
+    patch.mirror = !!st.mirror;
+    patch.mirrorLast = st.mirrorLast ?? null;
+    patch.mirrorSyncedAt = st.mirrorSyncedAt ?? null;
+    patch.mirrorVersion = st.mirrorVersion ?? null;
     set(patch);
   },
 
@@ -470,6 +483,21 @@ export const store = {
     set({ settings });
     get().pushEvent('info', 'system', 'Системные настройки сохранены');
     toast('ok', 'Настройки сохранены');
+  },
+
+  async syncMirrorNow() {
+    if (getState().apiMode !== 'server') {
+      toast('warn', 'Синхронизация доступна только при работе с серверным ядром');
+      return;
+    }
+    try {
+      const r = await api.mirrorSyncNow();
+      await syncAll();
+      if (r.ok) toast('ok', 'Снапшот отправлен на зеркало');
+      else toast('warn', r.error || 'Не удалось отправить снапшот');
+    } catch (e) {
+      toast('warn', e instanceof Error ? e.message : 'Не удалось отправить снапшот');
+    }
   },
 
   setSettingsRaw(settings: Settings) {

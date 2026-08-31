@@ -201,8 +201,16 @@ export interface User {
   createdAt: number;
 }
 
+export interface MirrorSettings {
+  enabled: boolean; // отправка снапшотов на ретранслятор (только для основного сервера)
+  url: string; // публичный адрес зеркала, https://pluto.example.com
+  secret: string; // должен совпадать с MIRROR_SECRET зеркала
+  interval: number; // сек, 30…3600
+}
+
 export interface Settings {
   intervals: Record<DeviceType | 'glances' | 'agent', number>;
+  mirror: MirrorSettings;
   timeoutMs: number;
   failThreshold: number;
   degradeFactor: number;

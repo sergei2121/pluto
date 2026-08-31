@@ -12,6 +12,9 @@ export const DEFAULT_SETTINGS = {
   failThreshold: 3,
   degradeFactor: 10,
   degradeMinMs: 250,
+  // Зеркало-ретранслятор: основной сервер push-ит снапшот состояния на публичный
+  // read-only экземпляр (см. docker-compose-mirror.yml).
+  mirror: { enabled: false, url: '', secret: '', interval: 60 },
   notifications: {
     telegram: { enabled: false, botToken: '', chatId: '' },
     email: { enabled: false, smtp: '', from: '', to: '' },
@@ -48,6 +51,7 @@ export function loadDb() {
     ...(db.settings || {}),
     intervals: { ...DEFAULT_SETTINGS.intervals, ...((db.settings || {}).intervals || {}) },
     notifications: { ...DEFAULT_SETTINGS.notifications, ...((db.settings || {}).notifications || {}) },
+    mirror: { ...DEFAULT_SETTINGS.mirror, ...((db.settings || {}).mirror || {}) },
   };
 
   // Нормализация записей: db.json живёт между версиями ядра, старые записи

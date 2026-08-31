@@ -72,6 +72,10 @@ export interface ServerState {
   events: EventItem[];
   settings: Settings;
   users?: User[];
+  mirror?: boolean;
+  mirrorLast?: { t: number; ok: boolean; error: string | null } | null;
+  mirrorSyncedAt?: number | null;
+  mirrorVersion?: string | null;
 }
 
 export const api = {
@@ -119,6 +123,7 @@ export const api = {
 
   // настройки
   saveSettings: (s: Settings) => req<Settings>('PUT', '/api/settings', s),
+  mirrorSyncNow: () => req<{ ok: boolean; error?: string | null }>('POST', '/api/mirror/sync-now'),
 };
 
 export async function apiMe(): Promise<User> {
