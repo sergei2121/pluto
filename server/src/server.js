@@ -837,7 +837,7 @@ const server = http.createServer(async (req, res) => {
         address: String(b.address).trim(), port: b.port != null ? parseInt(b.port, 10) : null,
         path: String(b.path || ''), method: b.method || null, body: b.body || null,
         interval: Math.max(5, parseInt(b.interval, 10) || (db.settings.intervals[b.type] || 60)),
-        tags: Array.isArray(b.tags) ? b.tags : [], favorite: !!b.favorite,
+        tags: Array.isArray(b.tags) ? b.tags : [], favorite: !!b.favorite, showcase: !!b.showcase,
         status: 'unknown', latency: null, baseline: null, history: [], fails: 0,
         lastCheck: 0, lastChange: Date.now(), checking: false, approx: false,
         profile: { base: 20, failP: 0.03, spikeP: 0.02 }, spikeUntil: 0, createdAt: Date.now(),
@@ -854,7 +854,7 @@ const server = http.createServer(async (req, res) => {
       if (!d) return json(res, 404, { error: 'устройство не найдено' });
       if (method === 'PUT' || method === 'PATCH') {
         const b = await readBody(req);
-        for (const k of ['name', 'type', 'address', 'port', 'path', 'method', 'body', 'interval', 'tags', 'favorite']) {
+        for (const k of ['name', 'type', 'address', 'port', 'path', 'method', 'body', 'interval', 'tags', 'favorite', 'showcase']) {
           if (k in b) d[k] = b[k];
         }
         saveDb();

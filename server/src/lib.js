@@ -60,6 +60,7 @@ export function loadDb() {
     ...d,
     tags: Array.isArray(d.tags) ? d.tags : [],
     history: Array.isArray(d.history) ? d.history : [],
+    showcase: !!d.showcase,
     checking: false,
     profile: d.profile || { base: 20, failP: 0.03, spikeP: 0.02 },
   }));
