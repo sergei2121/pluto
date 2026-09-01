@@ -99,6 +99,7 @@ export interface Agent {
   glancesUrl: string; // адрес Glances (glances -w), напр. http://192.168.1.10:61208
   pingTargets: string[]; // цели, доступные только этому ПК
   targets: RelayTargetResult[];
+  tags: string[]; // присвоенные теги (редактируются в «Изменить»)
   favorite: boolean; // избранное на главной
   stats: boolean; // явно добавлен в «Статистику Bars/WS»
   online: boolean;

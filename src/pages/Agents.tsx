@@ -7,11 +7,13 @@ import { cls, fmtMs, fmtUp, fmtNet, isIp, isTarget } from '../lib/util';
 import type { Agent, RelayTargetResult } from '../lib/types';
 
 function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => void; initial: Agent | null }) {
+  const tags = usePluto((s) => s.tags);
   const [name, setName] = useState('');
   const [ip, setIp] = useState('');
   const [relayUrl, setRelayUrl] = useState('');
   const [glancesUrl, setGlancesUrl] = useState('');
   const [targetsText, setTargetsText] = useState('');
+  const [selTags, setSelTags] = useState<string[]>([]);
   const [err, setErr] = useState('');
 
   useEffect(() => {
@@ -19,9 +21,9 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
     setErr('');
     if (initial) {
       setName(initial.name); setIp(initial.ip); setRelayUrl(initial.relayUrl); setGlancesUrl(initial.glancesUrl || '');
-      setTargetsText(initial.pingTargets.join('\n'));
+      setTargetsText(initial.pingTargets.join('\n')); setSelTags(initial.tags);
     } else {
-      setName(''); setIp(''); setRelayUrl(''); setGlancesUrl(''); setTargetsText('');
+      setName(''); setIp(''); setRelayUrl(''); setGlancesUrl(''); setTargetsText(''); setSelTags([]);
     }
   }, [open, initial]);
 
@@ -32,7 +34,7 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
     const targets = targetsText.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
     const bad = targets.find((t) => !isTarget(t));
     if (bad) return setErr(`Некорректная цель: «${bad}». Форматы: 10.0.0.5, 10.0.0.1-20, 10.0.0.0/24`);
-    const body = { name: name.trim(), ip: ip.trim(), relayUrl: relayUrl.trim(), glancesUrl: glancesUrl.trim(), pingTargets: targets };
+    const body = { name: name.trim(), ip: ip.trim(), relayUrl: relayUrl.trim(), glancesUrl: glancesUrl.trim(), pingTargets: targets, tags: selTags };
     try {
       if (initial) await store.updateAgent(initial.id, body);
       else await store.addAgent(body);
@@ -70,6 +72,26 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
           <textarea className="inp font-mono" rows={5} value={targetsText} onChange={(e) => setTargetsText(e.target.value)}
             placeholder={'10.0.0.5\n10.0.0.1-20'} />
         </Field>
+
+        <div>
+          <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Теги</span>
+          {tags.length === 0 ? (
+            <p className="text-[11.5px] text-dim">Тегов пока нет — создайте их в «Настройки → Теги», затем присвойте здесь.</p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {tags.map((t) => {
+                const on = selTags.includes(t.id);
+                return (
+                  <button key={t.id} onClick={() => setSelTags((s) => on ? s.filter((x) => x !== t.id) : [...s, t.id])}
+                    className={cls('rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-all', on ? 'text-void' : 'text-mut')}
+                    style={{ borderColor: t.color, background: on ? t.color : 'transparent' }}>
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
         {err && <p className="rounded-lg border border-crit/40 bg-crit/10 px-3 py-2 text-[12.5px] text-crit">{err}</p>}
 
@@ -120,6 +142,23 @@ function MiniCell({ value, label, color }: { value: string; label: string; color
   );
 }
 
+/** Компактные чипы присвоенных тегов. */
+function TagChips({ ids }: { ids: string[] }) {
+  const tags = usePluto((s) => s.tags);
+  const list = tags.filter((t) => ids.includes(t.id));
+  if (!list.length) return null;
+  return (
+    <div className="mt-1 flex flex-wrap gap-1">
+      {list.map((t) => (
+        <span key={t.id} className="rounded-full border px-1.5 py-px text-[9.5px] font-semibold"
+          style={{ borderColor: t.color, color: t.color }}>
+          {t.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function AgentCard({ a, onEdit, onOpen }: { a: Agent; onEdit: (a: Agent) => void; onOpen: (a: Agent) => void }) {
   const g = a.glancesLatest;
   const off = !a.online;
@@ -135,6 +174,7 @@ function AgentCard({ a, onEdit, onOpen }: { a: Agent; onEdit: (a: Agent) => void
               {g && <span className="rounded border border-blu/40 bg-blu/10 px-1 py-px text-[8px] font-bold text-blu" title="Телеметрия Glances">GL</span>}
             </div>
             <div className="font-mono text-[11px] text-dim">{a.ip}{g?.mainAdapter ? ` · ${g.mainAdapter}` : ''}</div>
+            {a.tags.length > 0 && <TagChips ids={a.tags} />}
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -339,6 +379,7 @@ function AgentDrawer({ id, onClose, onEdit }: { id: string | null; onClose: () =
 export default function Agents() {
   const user = useCurrentUser();
   const agents = usePluto((s) => visibleAgents(s, user));
+  const tags = usePluto((s) => s.tags);
   const isAdmin = user?.role === 'admin';
   const routeParam = usePluto((s) => s.routeParam);
 
@@ -353,8 +394,9 @@ export default function Agents() {
   const list = useMemo(() => {
     const query = q.trim().toLowerCase();
     if (!query) return agents;
-    return agents.filter((a) => a.name.toLowerCase().includes(query) || a.ip.includes(query));
-  }, [agents, q]);
+    const tagIds = tags.filter((t) => t.label.toLowerCase().includes(query)).map((t) => t.id);
+    return agents.filter((a) => a.name.toLowerCase().includes(query) || a.ip.includes(query) || a.tags.some((t) => tagIds.includes(t)));
+  }, [agents, q, tags]);
 
   return (
     <div className="space-y-4">

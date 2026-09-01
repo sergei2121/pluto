@@ -195,6 +195,7 @@ export const store = {
         ...a,
         pingTargets: Array.isArray(a.pingTargets) ? a.pingTargets : [],
         targets: Array.isArray(a.targets) ? a.targets : [],
+        tags: Array.isArray(a.tags) ? a.tags : [],
         latHist: Array.isArray(a.latHist) ? a.latHist : [],
         glances: Array.isArray(a.glances) ? a.glances : [],
         glancesLatest: a.glancesLatest ?? null,
@@ -286,7 +287,7 @@ export const store = {
     }
     const a: Agent = {
       id: uid('ag'), name: d.name, ip: d.ip, relayUrl: d.relayUrl, glancesUrl: d.glancesUrl ?? '',
-      pingTargets: d.pingTargets ?? [], targets: [], favorite: false, stats: false,
+      pingTargets: d.pingTargets ?? [], targets: [], tags: [], favorite: false, stats: false,
       online: false, latency: null, onlineSince: 0, lastSeen: 0, lastPoll: 0, lastGlances: 0,
       latHist: [], glances: [], glancesLatest: null, glancesError: null, createdAt: Date.now(),
     };

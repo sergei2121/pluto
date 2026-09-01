@@ -63,6 +63,7 @@ export function loadDb() {
     ...a,
     pingTargets: Array.isArray(a.pingTargets) ? a.pingTargets : [],
     targets: Array.isArray(a.targets) ? a.targets : [],
+    tags: Array.isArray(a.tags) ? a.tags : [],
     latHist: Array.isArray(a.latHist) ? a.latHist : [],
     glances: Array.isArray(a.glances) ? a.glances : [],
     glancesLatest: a.glancesLatest || null,
