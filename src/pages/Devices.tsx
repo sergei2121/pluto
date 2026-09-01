@@ -1,11 +1,11 @@
 // ─── PLUTO: устройства ───────────────────────────────────────────────────────
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, Search, Star, Trash2, LayoutGrid, RefreshCw, X } from 'lucide-react';
 import { Panel, StatusDot, STATUS_META, Sparkbar, TypeBadge, Modal, Field, Toggle, EmptyState, TimeAgo } from '../components/ui';
 import { store, useCurrentUser, usePluto, useToasts, visibleDevices } from '../lib/store';
 import { forceCheck } from '../lib/engine';
 import { cls, expandTargets, isTarget, TAG_COLORS } from '../lib/util';
-import { DEVICE_TYPES, DEVICE_TYPE_META, type Device, type DeviceType } from '../lib/types';
+import { DEVICE_TYPES, DEVICE_TYPE_META, type Device, type DeviceType, type Tag } from '../lib/types';
 
 function DeviceModal({ open, onClose, initial }: { open: boolean; onClose: () => void; initial: Device | null }) {
   const tags = usePluto((s) => s.tags);
@@ -138,6 +138,81 @@ function DeviceModal({ open, onClose, initial }: { open: boolean; onClose: () =>
   );
 }
 
+const PAGE_SIZE = 100;
+
+// Мемоизированная строка: не перерисовывается на каждый поллинг, если данные
+// устройства не изменились. При тысячах устройств это главный выигрыш.
+const DeviceRow = memo(function DeviceRow({ d, isAdmin, tagById, onEdit }: {
+  d: Device; isAdmin: boolean; tagById: Record<string, Tag>; onEdit: (d: Device) => void;
+}) {
+  const m = STATUS_META[d.status];
+  return (
+    <tr className="border-b border-line/30 transition-colors hover:bg-raised/40">
+      <td className="py-2.5 pr-3">
+        <div className="flex items-center gap-2">
+          <button onClick={() => store.toggleDeviceFav(d.id)} title="В избранное"
+            className={cls('transition-transform hover:scale-110', d.favorite ? 'text-warn' : 'text-dim/40 hover:text-dim')}>
+            <Star className={cls('h-4 w-4', d.favorite && 'fill-warn')} strokeWidth={1.5} />
+          </button>
+          <div>
+            <div className="flex items-center gap-1.5 text-[13px] font-semibold text-ink">
+              {d.name}
+              {d.showcase && <span className="rounded border border-mint/40 bg-mint/10 px-1 py-px text-[8.5px] font-bold text-mint" title="На публичной витрине">ВИТРИНА</span>}
+            </div>
+            <div className="font-mono text-[11px] text-dim">{d.address}{d.port ? `:${d.port}` : ''}{d.path || ''}</div>
+          </div>
+        </div>
+      </td>
+      <td className="py-2.5 pr-3"><TypeBadge t={d.type} /></td>
+      <td className="py-2.5 pr-3">
+        <span className="flex items-center gap-2">
+          <StatusDot status={d.status} />
+          <span className={cls('text-[12px] font-semibold', m.text)}>{m.label}</span>
+        </span>
+      </td>
+      <td className="py-2.5 pr-3 font-mono text-[13px] tabular-nums text-mut">{d.status === 'down' ? '—' : `${d.latency ?? '—'}${d.latency != null ? ' мс' : ''}`}</td>
+      <td className="hidden py-2.5 pr-3 lg:table-cell"><Sparkbar data={d.history} /></td>
+      <td className="hidden py-2.5 pr-3 xl:table-cell">
+        <div className="flex flex-wrap gap-1">
+          {d.tags.map((tid) => tagById[tid] && (
+            <span key={tid} className="rounded-full border px-2 py-0.5 text-[10px] font-semibold"
+              style={{ borderColor: tagById[tid].color, color: tagById[tid].color }}>
+              {tagById[tid].label}
+            </span>
+          ))}
+        </div>
+      </td>
+      <td className="hidden py-2.5 pr-3 font-mono text-[11px] text-dim md:table-cell">
+        <TimeAgo ts={d.lastCheck} />
+      </td>
+      <td className="py-2.5 text-right">
+        <div className="inline-flex items-center gap-1">
+          <button onClick={() => void forceCheck(d.id)} title="Проверить сейчас"
+            className="rounded-md p-1.5 text-dim transition-colors hover:bg-raised hover:text-vio">
+            <RefreshCw className={cls('h-4 w-4', d.checking && 'animate-spin')} />
+          </button>
+          {isAdmin && (
+            <>
+              <button onClick={() => store.toggleDeviceShowcase(d.id)} title={d.showcase ? 'Убрать с витрины' : 'На витрину'}
+                className={cls('rounded-md p-1.5 transition-colors hover:bg-raised', d.showcase ? 'text-mint' : 'text-dim hover:text-mint')}>
+                <LayoutGrid className="h-4 w-4" />
+              </button>
+              <button onClick={() => onEdit(d)} title="Изменить"
+                className="rounded-md px-2 py-1 text-[11px] font-semibold text-dim transition-colors hover:bg-raised hover:text-ink">
+                Изм.
+              </button>
+              <button onClick={() => { if (window.confirm(`Удалить «${d.name}»?`)) void store.removeDevice(d.id); }} title="Удалить"
+                className="rounded-md p-1.5 text-dim transition-colors hover:bg-raised hover:text-crit">
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </>
+          )}
+        </div>
+      </td>
+    </tr>
+  );
+});
+
 export default function Devices() {
   const user = useCurrentUser();
   const devices = usePluto((s) => visibleDevices(s, user));
@@ -147,7 +222,10 @@ export default function Devices() {
 
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<'all' | Device['status']>('all');
+  const [page, setPage] = useState(0);
   const [modal, setModal] = useState<{ open: boolean; initial: Device | null }>({ open: false, initial: null });
+
+  const onEdit = useCallback((d: Device) => setModal({ open: true, initial: d }), []);
 
   useEffect(() => {
     if (routeParam === 'new') { setModal({ open: true, initial: null }); store.nav('devices'); }
@@ -165,6 +243,13 @@ export default function Devices() {
       return d.name.toLowerCase().includes(query) || d.address.toLowerCase().includes(query) || d.tags.some((t) => tagIds.includes(t));
     });
   }, [devices, q, filter, tags]);
+
+  // Пагинация: при тысячах устройств рендерим только одну страницу,
+  // а мемоизированные строки не пересоздаются на каждый поллинг.
+  const pageCount = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount - 1);
+  useEffect(() => { setPage(0); }, [q, filter]);
+  const pageItems = useMemo(() => list.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE), [list, safePage]);
 
   const counts = useMemo(() => ({
     all: devices.length,
@@ -227,76 +312,30 @@ export default function Devices() {
                 </tr>
               </thead>
               <tbody>
-                {list.map((d) => {
-                  const m = STATUS_META[d.status];
-                  return (
-                    <tr key={d.id} className="border-b border-line/30 transition-colors hover:bg-raised/40">
-                      <td className="py-2.5 pr-3">
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => store.toggleDeviceFav(d.id)} title="В избранное"
-                            className={cls('transition-transform hover:scale-110', d.favorite ? 'text-warn' : 'text-dim/40 hover:text-dim')}>
-                            <Star className={cls('h-4 w-4', d.favorite && 'fill-warn')} strokeWidth={1.5} />
-                          </button>
-                          <div>
-                            <div className="flex items-center gap-1.5 text-[13px] font-semibold text-ink">
-                              {d.name}
-                              {d.showcase && <span className="rounded border border-mint/40 bg-mint/10 px-1 py-px text-[8.5px] font-bold text-mint" title="На публичной витрине">ВИТРИНА</span>}
-                            </div>
-                            <div className="font-mono text-[11px] text-dim">{d.address}{d.port ? `:${d.port}` : ''}{d.path || ''}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="py-2.5 pr-3"><TypeBadge t={d.type} /></td>
-                      <td className="py-2.5 pr-3">
-                        <span className="flex items-center gap-2">
-                          <StatusDot status={d.status} />
-                          <span className={cls('text-[12px] font-semibold', m.text)}>{m.label}</span>
-                        </span>
-                      </td>
-                      <td className="py-2.5 pr-3 font-mono text-[13px] tabular-nums text-mut">{d.status === 'down' ? '—' : `${d.latency ?? '—'}${d.latency != null ? ' мс' : ''}`}</td>
-                      <td className="hidden py-2.5 pr-3 lg:table-cell"><Sparkbar data={d.history} /></td>
-                      <td className="hidden py-2.5 pr-3 xl:table-cell">
-                        <div className="flex flex-wrap gap-1">
-                          {d.tags.map((tid) => tagById[tid] && (
-                            <span key={tid} className="rounded-full border px-2 py-0.5 text-[10px] font-semibold"
-                              style={{ borderColor: tagById[tid].color, color: tagById[tid].color }}>
-                              {tagById[tid].label}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="hidden py-2.5 pr-3 font-mono text-[11px] text-dim md:table-cell">
-                        <TimeAgo ts={d.lastCheck} />
-                      </td>
-                      <td className="py-2.5 text-right">
-                        <div className="inline-flex items-center gap-1">
-                          <button onClick={() => void forceCheck(d.id)} title="Проверить сейчас"
-                            className="rounded-md p-1.5 text-dim transition-colors hover:bg-raised hover:text-vio">
-                            <RefreshCw className={cls('h-4 w-4', d.checking && 'animate-spin')} />
-                          </button>
-                          {isAdmin && (
-                            <>
-                              <button onClick={() => store.toggleDeviceShowcase(d.id)} title={d.showcase ? 'Убрать с витрины' : 'На витрину'}
-                                className={cls('rounded-md p-1.5 transition-colors hover:bg-raised', d.showcase ? 'text-mint' : 'text-dim hover:text-mint')}>
-                                <LayoutGrid className="h-4 w-4" />
-                              </button>
-                              <button onClick={() => setModal({ open: true, initial: d })} title="Изменить"
-                                className="rounded-md px-2 py-1 text-[11px] font-semibold text-dim transition-colors hover:bg-raised hover:text-ink">
-                                Изм.
-                              </button>
-                              <button onClick={() => { if (window.confirm(`Удалить «${d.name}»?`)) void store.removeDevice(d.id); }} title="Удалить"
-                                className="rounded-md p-1.5 text-dim transition-colors hover:bg-raised hover:text-crit">
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {pageItems.map((d) => (
+                  <DeviceRow key={d.id} d={d} isAdmin={!!isAdmin} tagById={tagById} onEdit={onEdit} />
+                ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {list.length > PAGE_SIZE && (
+          <div className="mt-3 flex items-center justify-between border-t border-line/40 pt-3">
+            <span className="font-mono text-[11px] text-dim">
+              {safePage * PAGE_SIZE + 1}–{Math.min((safePage + 1) * PAGE_SIZE, list.length)} из {list.length}
+            </span>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setPage(Math.max(0, safePage - 1))} disabled={safePage === 0}
+                className="rounded-md border border-line bg-raised/50 px-2.5 py-1 text-[11.5px] font-semibold text-mut transition-all hover:text-ink disabled:opacity-40">
+                ←
+              </button>
+              <span className="px-2 font-mono text-[11.5px] text-mut">{safePage + 1} / {pageCount}</span>
+              <button onClick={() => setPage(Math.min(pageCount - 1, safePage + 1))} disabled={safePage >= pageCount - 1}
+                className="rounded-md border border-line bg-raised/50 px-2.5 py-1 text-[11.5px] font-semibold text-mut transition-all hover:text-ink disabled:opacity-40">
+                →
+              </button>
+            </div>
           </div>
         )}
       </Panel>
