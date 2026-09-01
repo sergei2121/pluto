@@ -203,6 +203,8 @@ export const store = {
         relayUrl: a.relayUrl ?? '',
         glancesUrl: a.glancesUrl ?? '',
         lastGlances: a.lastGlances ?? 0,
+        favorite: !!a.favorite,
+        stats: !!a.stats,
       })),
       tags: st.tags || [],
       events: st.events || [],
@@ -284,7 +286,7 @@ export const store = {
     }
     const a: Agent = {
       id: uid('ag'), name: d.name, ip: d.ip, relayUrl: d.relayUrl, glancesUrl: d.glancesUrl ?? '',
-      pingTargets: d.pingTargets ?? [], targets: [], favorite: false,
+      pingTargets: d.pingTargets ?? [], targets: [], favorite: false, stats: false,
       online: false, latency: null, onlineSince: 0, lastSeen: 0, lastPoll: 0, lastGlances: 0,
       latHist: [], glances: [], glancesLatest: null, glancesError: null, createdAt: Date.now(),
     };
@@ -323,6 +325,13 @@ export const store = {
     const a = state.agents.find((x) => x.id === id);
     if (!a) return;
     void store.updateAgent(id, { favorite: !a.favorite });
+  },
+
+  toggleAgentStats(id: string) {
+    const a = state.agents.find((x) => x.id === id);
+    if (!a) return;
+    void store.updateAgent(id, { stats: !a.stats });
+    get().pushEvent('info', 'agent', `«${a.name}» ${a.stats ? 'убран из статистики' : 'добавлен в статистику'}`);
   },
 
   async pollAgentNow(id: string): Promise<void> {

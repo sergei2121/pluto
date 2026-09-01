@@ -107,53 +107,6 @@ function WaveChart({ points, metric, range, height = 150 }: { points: GlancesPoi
   );
 }
 
-/** Столбчатый график выбранной метрики. */
-function BarsChart({ points, metric, range }: { points: GlancesPoint[]; metric: MetricKey; range: StatsRange }) {
-  const meta = METRICS.find((m) => m.k === metric)!;
-  const [hover, setHover] = useState<number | null>(null);
-  const W = 720, H = 180;
-  const pad = { l: 40, r: 12, t: 12, b: 22 };
-  const nums = points.map((p) => val(p, metric)).filter((v): v is number => v != null);
-  const maxV = nums.length ? Math.max(...nums, 1) * 1.08 : 100;
-  const bw = (W - pad.l - pad.r) / Math.max(1, points.length);
-
-  return (
-    <div className="relative">
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }} onMouseLeave={() => setHover(null)}>
-        {[0.25, 0.5, 0.75, 1].map((f) => (
-          <g key={f}>
-            <line x1={pad.l} x2={W - pad.r} y1={pad.t + (1 - f) * (H - pad.t - pad.b)} y2={pad.t + (1 - f) * (H - pad.t - pad.b)} stroke="#242b4a" strokeDasharray="3 5" strokeWidth="0.6" />
-            <text x={pad.l - 6} y={pad.t + (1 - f) * (H - pad.t - pad.b) + 3} textAnchor="end" fontSize="8" fill="#8b93b8" fontFamily="JetBrains Mono">{Math.round(maxV * f)}</text>
-          </g>
-        ))}
-        {points.map((p, i) => {
-          const v = val(p, metric);
-          const x = pad.l + i * bw;
-          const h = v == null ? 0 : (v / maxV) * (H - pad.t - pad.b);
-          return (
-            <g key={i} onMouseEnter={() => setHover(i)}>
-              <rect x={x} y={pad.t} width={bw} height={H - pad.t - pad.b} fill={hover === i ? '#181d36' : 'transparent'} />
-              {v == null ? (
-                <rect x={x + bw * 0.2} y={H - pad.b - 2} width={bw * 0.6} height={2} rx={1} fill="#e07a80" opacity={hover === i ? 0.9 : 0.5} />
-              ) : (
-                <rect x={x + bw * 0.14} y={H - pad.b - h} width={bw * 0.72} height={Math.max(1.5, h)} rx={1.5}
-                  fill={meta.color} opacity={hover === i ? 1 : 0.72} className="transition-opacity" />
-              )}
-            </g>
-          );
-        })}
-      </svg>
-      {hover != null && points[hover] && (
-        <div className="pointer-events-none absolute top-1 z-10 rounded-md border border-line bg-deep/95 px-2.5 py-1.5 font-mono text-[10.5px] shadow-lg"
-          style={{ left: `${((pad.l + hover * bw) / W) * 100}%`, transform: `translateX(${hover > points.length / 2 ? '-110%' : '10%'})` }}>
-          <div className="text-dim">{timeLabel(points[hover].t, range)}</div>
-          <div style={{ color: meta.color }}>{meta.label}: <b>{fmtVal(val(points[hover], metric), meta.unit)}</b></div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 /** Сводная панель текущих значений (последняя точка). */
 function CurrentStrip({ points }: { points: GlancesPoint[] }) {
   const last = points[points.length - 1];
@@ -176,10 +129,11 @@ function CurrentStrip({ points }: { points: GlancesPoint[] }) {
 
 export default function Stats({ mode }: { mode: 'bars' | 'ws' }) {
   const user = useCurrentUser();
-  const agents = usePluto((s) => visibleAgents(s, user));
+  const all = usePluto((s) => visibleAgents(s, user));
+  // в статистику попадают только явно добавленные агенты (кнопка «в статистику» на странице Агентов)
+  const agents = useMemo(() => all.filter((a) => a.stats), [all]);
   const [agentId, setAgentId] = useState<string | null>(null);
   const [range, setRange] = useState<StatsRange>('3h');
-  const [metric, setMetric] = useState<MetricKey>('cpu');
   const [points, setPoints] = useState<GlancesPoint[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -205,32 +159,37 @@ export default function Stats({ mode }: { mode: 'bars' | 'ws' }) {
 
   const hasGlances = agents.filter((a) => a.glancesUrl);
 
+  // нет ни одного агента, добавленного в статистику
+  if (!agents.length) {
+    return (
+      <div className="space-y-4">
+        <Header mode={mode} />
+        <Panel title="В статистике пока пусто">
+          <EmptyState icon={<Waves className="h-6 w-6" />} title="Агенты не добавлены в статистику"
+            text="На странице «Агенты» нажмите значок волны у нужного агента, чтобы он появился здесь. В статистику попадают только явно добавленные агенты."
+            action={<button onClick={() => store.nav('agents')} className="rounded-lg border border-vio/50 bg-vio/20 px-4 py-2 text-[13px] font-bold text-ink hover:bg-vio/30">К агентам</button>} />
+        </Panel>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
-      {/* панель управления */}
-      <div className="rise flex flex-wrap items-center gap-3 rounded-xl border border-line bg-panel/90 px-4 py-3">
-        <span className="flex items-center gap-2 text-vio">{mode === 'bars' ? <BarChart3 className="h-5 w-5" /> : <Waves className="h-5 w-5" />}</span>
-        <div>
-          <div className="font-display text-[14px] font-bold text-ink">{mode === 'bars' ? 'Статистика Bars' : 'Статистика WS'}</div>
-          <div className="text-[10.5px] text-dim">телеметрия Glances · хранение 30 дней</div>
-        </div>
+      <Header mode={mode}>
+        <select className="inp w-auto font-mono text-[12px]" value={agent?.id ?? ''} onChange={(e) => setAgentId(e.target.value)}>
+          {hasGlances.map((a) => <option key={a.id} value={a.id}>{a.name} · {a.ip}</option>)}
+          {!hasGlances.length && <option value="">нет агентов с Glances</option>}
+        </select>
 
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          <select className="inp w-auto font-mono text-[12px]" value={agent?.id ?? ''} onChange={(e) => setAgentId(e.target.value)}>
-            {hasGlances.map((a) => <option key={a.id} value={a.id}>{a.name} · {a.ip}</option>)}
-            {!hasGlances.length && <option value="">нет агентов с Glances</option>}
-          </select>
-
-          <div className="flex overflow-hidden rounded-lg border border-line bg-raised/50">
-            {RANGES.map((r) => (
-              <button key={r.v} onClick={() => setRange(r.v)}
-                className={cls('px-2.5 py-1.5 text-[11.5px] font-semibold transition-all', range === r.v ? 'bg-vio/25 text-ink' : 'text-dim hover:text-mut')}>
-                {r.label}
-              </button>
-            ))}
-          </div>
+        <div className="flex overflow-hidden rounded-lg border border-line bg-raised/50">
+          {RANGES.map((r) => (
+            <button key={r.v} onClick={() => setRange(r.v)}
+              className={cls('px-2.5 py-1.5 text-[11.5px] font-semibold transition-all', range === r.v ? 'bg-vio/25 text-ink' : 'text-dim hover:text-mut')}>
+              {r.label}
+            </button>
+          ))}
         </div>
-      </div>
+      </Header>
 
       {!agent || !agent.glancesUrl ? (
         <Panel title="Нет источника данных">
@@ -242,33 +201,31 @@ export default function Stats({ mode }: { mode: 'bars' | 'ws' }) {
         <>
           <CurrentStrip points={points} />
 
-          {mode === 'bars' ? (
-            <Panel title={`Столбцы · ${METRICS.find((m) => m.k === metric)?.label}`} icon={<BarChart3 className="h-4 w-4" />}
-              right={<span className="font-mono text-[10.5px] text-dim">{points.length} точек{loading ? ' · загрузка…' : ''}</span>}>
-              <div className="mb-3 flex flex-wrap gap-1.5">
-                {METRICS.map((m) => (
-                  <button key={m.k} onClick={() => setMetric(m.k)}
-                    className={cls('flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11.5px] font-semibold transition-all',
-                      metric === m.k ? 'border-vio/60 bg-vio/20 text-ink' : 'border-line bg-raised/50 text-dim hover:text-mut')}>
-                    <span style={{ color: m.color }}>{m.icon}</span>{m.label}
-                  </button>
-                ))}
-              </div>
-              {points.length ? <BarsChart points={points} metric={metric} range={range} />
-                : <div className="flex h-[180px] items-center justify-center font-mono text-[11px] text-dim">нет данных за период</div>}
-            </Panel>
-          ) : (
-            <div className="grid gap-4 lg:grid-cols-2">
-              {METRICS.map((m) => (
-                <Panel key={m.k} title={`${m.label} · ${m.unit}`} icon={<span style={{ color: m.color }}>{m.icon}</span>}>
-                  {points.length ? <WaveChart points={points} metric={m.k} range={range} height={130} />
-                    : <div className="flex h-[130px] items-center justify-center font-mono text-[11px] text-dim">нет данных</div>}
-                </Panel>
-              ))}
-            </div>
-          )}
+          <div className="grid gap-4 lg:grid-cols-2">
+            {METRICS.map((m) => (
+              <Panel key={m.k} title={`${m.label} · ${m.unit}`} icon={<span style={{ color: m.color }}>{m.icon}</span>}
+                right={m.k === 'cpu' ? <span className="font-mono text-[10.5px] text-dim">{points.length} точек{loading ? ' · загрузка…' : ''}</span> : undefined}>
+                {points.length ? <WaveChart points={points} metric={m.k} range={range} height={130} />
+                  : <div className="flex h-[130px] items-center justify-center font-mono text-[11px] text-dim">нет данных</div>}
+              </Panel>
+            ))}
+          </div>
         </>
       )}
+    </div>
+  );
+}
+
+/** Шапка страницы статистики (единый вид для Bars и WS). */
+function Header({ mode, children }: { mode: 'bars' | 'ws'; children?: React.ReactNode }) {
+  return (
+    <div className="rise flex flex-wrap items-center gap-3 rounded-xl border border-line bg-panel/90 px-4 py-3">
+      <span className="flex items-center gap-2 text-vio">{mode === 'bars' ? <BarChart3 className="h-5 w-5" /> : <Waves className="h-5 w-5" />}</span>
+      <div>
+        <div className="font-display text-[14px] font-bold text-ink">{mode === 'bars' ? 'Статистика Bars' : 'Статистика WS'}</div>
+        <div className="text-[10.5px] text-dim">телеметрия Glances · хранение 30 дней · только добавленные агенты</div>
+      </div>
+      <div className="ml-auto flex flex-wrap items-center gap-2">{children}</div>
     </div>
   );
 }

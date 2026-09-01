@@ -1,6 +1,6 @@
 // ─── PLUTO: relay-агенты (пинг через ПК) ─────────────────────────────────────
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Star, Trash2, RefreshCw, Monitor, Search, X, Check, Minus, Cpu, Thermometer, HardDrive, Network, Gauge, BarChart3 } from 'lucide-react';
+import { Plus, Star, Trash2, RefreshCw, Monitor, Search, X, Check, Minus, Cpu, Thermometer, HardDrive, Network, Gauge, BarChart3, Waves } from 'lucide-react';
 import { Panel, StatusDot, Modal, Drawer, Field, EmptyState, TimeAgo } from '../components/ui';
 import { store, useCurrentUser, usePluto, useToasts, visibleAgents } from '../lib/store';
 import { cls, fmtMs, fmtUp, fmtNet, isIp, isTarget } from '../lib/util';
@@ -142,6 +142,10 @@ function AgentCard({ a, onEdit, onOpen }: { a: Agent; onEdit: (a: Agent) => void
             className={cls('rounded-md p-1.5 transition-all hover:bg-raised', a.favorite ? 'text-warn' : 'text-dim/40 hover:text-dim')}>
             <Star className={cls('h-4 w-4', a.favorite && 'fill-warn')} strokeWidth={1.5} />
           </button>
+          <button onClick={() => store.toggleAgentStats(a.id)} title="Показывать в «Статистике Bars/WS»"
+            className={cls('rounded-md p-1.5 transition-all hover:bg-raised', a.stats ? 'text-blu' : 'text-dim/40 hover:text-dim')}>
+            <Waves className={cls('h-4 w-4', a.stats && 'fill-blu/30')} strokeWidth={1.5} />
+          </button>
           <button onClick={() => void store.pollAgentNow(a.id)} title="Опросить сейчас"
             className="rounded-md p-1.5 text-dim transition-colors hover:bg-raised hover:text-vio">
             <RefreshCw className="h-4 w-4" />
@@ -209,7 +213,9 @@ function AgentDrawer({ id, onClose, onEdit }: { id: string | null; onClose: () =
           <button onClick={() => store.toggleAgentFav(a.id)} className={cls('btn-ghost text-[12px]', a.favorite && 'text-warn')}>
             <Star className={cls('h-3.5 w-3.5', a.favorite && 'fill-warn')} /> {a.favorite ? 'В избранном' : 'В избранное'}
           </button>
-          <button onClick={() => store.nav('stats-ws')} className="btn-ghost text-[12px]"><BarChart3 className="h-3.5 w-3.5" /> Статистика</button>
+          <button onClick={() => store.toggleAgentStats(a.id)} className={cls('btn-ghost text-[12px]', a.stats && 'text-blu')}>
+            <Waves className={cls('h-3.5 w-3.5', a.stats && 'fill-blu/30')} /> {a.stats ? 'В статистике' : 'Добавить в статистику'}
+          </button>
         </div>
 
         {a.glancesError && (
