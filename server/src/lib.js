@@ -72,7 +72,8 @@ export function loadDb() {
     glancesUrl: a.glancesUrl || '',
     lastGlances: a.lastGlances || 0,
     favorite: !!a.favorite,
-    stats: !!a.stats,
+    // совместимость со старым булевым stats: true → 'ws'
+    statsView: a.statsView === 'bars' || a.statsView === 'ws' ? a.statsView : (a.stats ? 'ws' : ''),
   }));
 
   if (!db.users.length) {

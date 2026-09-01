@@ -574,7 +574,9 @@ const server = http.createServer(async (req, res) => {
       const agents = agentsRaw.map((a) => ({
         id: a.id, name: a.name, ip: a.ip, relayUrl: a.relayUrl || '', glancesUrl: a.glancesUrl || '',
         pingTargets: a.pingTargets || [], targets: a.targets || [], tags: a.tags || [],
-        favorite: !!a.favorite, stats: !!a.stats,
+        favorite: !!a.favorite,
+        // совместимость: старое булево stats=true → 'ws'
+        statsView: a.statsView === 'bars' || a.statsView === 'ws' ? a.statsView : (a.stats ? 'ws' : ''),
         online: !!a.online, latency: a.latency ?? null,
         onlineSince: a.onlineSince || 0, lastSeen: a.lastSeen || 0, lastPoll: a.lastPoll || 0,
         lastGlances: a.lastGlances || 0, glancesError: a.glancesError || null,
@@ -645,7 +647,9 @@ const server = http.createServer(async (req, res) => {
         glancesUrl: String(b.glancesUrl || '').trim(),
         pingTargets: Array.isArray(b.pingTargets) ? b.pingTargets.map(String) : [],
         tags: Array.isArray(b.tags) ? b.tags.map(String) : [],
-        targets: [], favorite: !!b.favorite, stats: !!b.stats, online: false, latency: null,
+        targets: [], favorite: !!b.favorite,
+        statsView: b.statsView === 'bars' || b.statsView === 'ws' ? b.statsView : '',
+        online: false, latency: null,
         onlineSince: 0, lastSeen: 0, lastPoll: 0, lastGlances: 0,
         latHist: [], glances: [], glancesLatest: null, glancesError: null, createdAt: Date.now(),
       };
@@ -661,7 +665,12 @@ const server = http.createServer(async (req, res) => {
       if (!a) return json(res, 404, { error: 'агент не найден' });
       if (method === 'PUT' || method === 'PATCH') {
         const b = await readBody(req);
-        for (const k of ['name', 'ip', 'relayUrl', 'glancesUrl', 'favorite', 'stats']) if (k in b) a[k] = b[k];
+        for (const k of ['name', 'ip', 'relayUrl', 'glancesUrl', 'favorite']) if (k in b) a[k] = b[k];
+        // представление статистики: 'bars' | 'ws' | '' (ни в какую)
+        if ('statsView' in b) {
+          const v = String(b.statsView);
+          a.statsView = v === 'bars' || v === 'ws' ? v : '';
+        }
         if (Array.isArray(b.pingTargets)) a.pingTargets = b.pingTargets.map(String);
         if (Array.isArray(b.tags)) a.tags = b.tags.map(String);
         saveDb();
