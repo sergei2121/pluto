@@ -130,11 +130,11 @@ function CurrentStrip({ points }: { points: GlancesPoint[] }) {
 export default function Stats({ mode }: { mode: 'bars' | 'ws' }) {
   const user = useCurrentUser();
   const all = usePluto((s) => visibleAgents(s, user));
-  // в статистику попадают только явно добавленные агенты (кнопка «в статистику» на странице Агентов);
+  // в каждую вкладку попадают только агенты, назначенные именно в неё (statsView = mode);
   // список всегда отсортирован по имени (имена английские — простая регистронезависимая сортировка)
   const agents = useMemo(
-    () => all.filter((a) => a.stats).sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' })),
-    [all],
+    () => all.filter((a) => a.statsView === mode).sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' })),
+    [all, mode],
   );
   const [agentId, setAgentId] = useState<string | null>(null);
   const [range, setRange] = useState<StatsRange>('3h');

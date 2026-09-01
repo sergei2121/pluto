@@ -4,7 +4,7 @@ import { Plus, Star, Trash2, RefreshCw, Monitor, Search, X, Check, Minus, Cpu, T
 import { Panel, StatusDot, Modal, Drawer, Field, EmptyState, TimeAgo } from '../components/ui';
 import { store, useCurrentUser, usePluto, useToasts, visibleAgents } from '../lib/store';
 import { cls, fmtMs, fmtUp, fmtNet, isIp, isTarget } from '../lib/util';
-import type { Agent, RelayTargetResult } from '../lib/types';
+import type { Agent, RelayTargetResult, StatsView } from '../lib/types';
 
 function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => void; initial: Agent | null }) {
   const tags = usePluto((s) => s.tags);
@@ -14,6 +14,7 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
   const [glancesUrl, setGlancesUrl] = useState('');
   const [targetsText, setTargetsText] = useState('');
   const [selTags, setSelTags] = useState<string[]>([]);
+  const [statsView, setStatsView] = useState<StatsView>('');
   const [err, setErr] = useState('');
 
   useEffect(() => {
@@ -22,8 +23,9 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
     if (initial) {
       setName(initial.name); setIp(initial.ip); setRelayUrl(initial.relayUrl); setGlancesUrl(initial.glancesUrl || '');
       setTargetsText(initial.pingTargets.join('\n')); setSelTags(initial.tags);
+      setStatsView(initial.statsView ?? '');
     } else {
-      setName(''); setIp(''); setRelayUrl(''); setGlancesUrl(''); setTargetsText(''); setSelTags([]);
+      setName(''); setIp(''); setRelayUrl(''); setGlancesUrl(''); setTargetsText(''); setSelTags([]); setStatsView('');
     }
   }, [open, initial]);
 
@@ -34,7 +36,7 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
     const targets = targetsText.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
     const bad = targets.find((t) => !isTarget(t));
     if (bad) return setErr(`Некорректная цель: «${bad}». Форматы: 10.0.0.5, 10.0.0.1-20, 10.0.0.0/24`);
-    const body = { name: name.trim(), ip: ip.trim(), relayUrl: relayUrl.trim(), glancesUrl: glancesUrl.trim(), pingTargets: targets, tags: selTags };
+    const body = { name: name.trim(), ip: ip.trim(), relayUrl: relayUrl.trim(), glancesUrl: glancesUrl.trim(), pingTargets: targets, tags: selTags, statsView };
     try {
       if (initial) await store.updateAgent(initial.id, body);
       else await store.addAgent(body);
@@ -67,6 +69,30 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
         <Field label="Адрес Glances (телеметрия)" hint="«glances -w», порт по умолчанию 61208. CPU, GPU, RAM, диски, сеть, температуры — в «Статистика Bars/WS» и карточке агента">
           <input className="inp font-mono" value={glancesUrl} onChange={(e) => setGlancesUrl(e.target.value)} placeholder="http://192.168.1.10:61208" />
         </Field>
+
+        <div>
+          <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Показывать в статистике</span>
+          <div className="flex items-center gap-2">
+            {([
+              { v: 'bars' as StatsView, label: 'Статистика Bars', icon: <BarChart3 className="h-4 w-4" /> },
+              { v: 'ws' as StatsView, label: 'Статистика WS', icon: <Waves className="h-4 w-4" /> },
+            ]).map((o) => {
+              const on = statsView === o.v;
+              return (
+                <button key={o.v} type="button" onClick={() => setStatsView(on ? '' : o.v)}
+                  title={on ? `Убрать из «${o.label}»` : `Показывать в «${o.label}»`}
+                  className={cls('flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-semibold transition-all',
+                    on ? 'border-vio/60 bg-vio/25 text-ink' : 'border-line bg-raised/50 text-dim hover:text-mut')}>
+                  <span className={on ? 'text-vio' : ''}>{o.icon}</span>{o.label}
+                  {on && <Check className="h-3.5 w-3.5 text-vio" />}
+                </button>
+              );
+            })}
+            <span className="text-[11px] leading-tight text-dim">
+              {statsView ? `агент появится в «${statsView === 'bars' ? 'Статистика Bars' : 'Статистика WS'}»` : 'не выбрано — агент останется только в «Агентах»'}
+            </span>
+          </div>
+        </div>
 
         <Field label="Цели для пинга (по одной в строке)" hint="IP, диапазон 10.0.0.1-20 или подсеть 10.0.0.0/24 — устройства, доступные только этому ПК">
           <textarea className="inp font-mono" rows={5} value={targetsText} onChange={(e) => setTargetsText(e.target.value)}
@@ -182,9 +208,15 @@ function AgentCard({ a, onEdit, onOpen }: { a: Agent; onEdit: (a: Agent) => void
             className={cls('rounded-md p-1.5 transition-all hover:bg-raised', a.favorite ? 'text-warn' : 'text-dim/40 hover:text-dim')}>
             <Star className={cls('h-4 w-4', a.favorite && 'fill-warn')} strokeWidth={1.5} />
           </button>
-          <button onClick={() => store.toggleAgentStats(a.id)} title="Показывать в «Статистике Bars/WS»"
-            className={cls('rounded-md p-1.5 transition-all hover:bg-raised', a.stats ? 'text-blu' : 'text-dim/40 hover:text-dim')}>
-            <Waves className={cls('h-4 w-4', a.stats && 'fill-blu/30')} strokeWidth={1.5} />
+          <button onClick={() => store.setAgentStatsView(a.id, a.statsView === 'bars' ? '' : 'bars')}
+            title={a.statsView === 'bars' ? 'Убрать из «Статистика Bars»' : 'Показывать в «Статистика Bars»'}
+            className={cls('rounded-md p-1.5 transition-all hover:bg-raised', a.statsView === 'bars' ? 'text-vio' : 'text-dim/40 hover:text-dim')}>
+            <BarChart3 className={cls('h-4 w-4', a.statsView === 'bars' && 'fill-vio/30')} strokeWidth={1.5} />
+          </button>
+          <button onClick={() => store.setAgentStatsView(a.id, a.statsView === 'ws' ? '' : 'ws')}
+            title={a.statsView === 'ws' ? 'Убрать из «Статистика WS»' : 'Показывать в «Статистика WS»'}
+            className={cls('rounded-md p-1.5 transition-all hover:bg-raised', a.statsView === 'ws' ? 'text-blu' : 'text-dim/40 hover:text-dim')}>
+            <Waves className={cls('h-4 w-4', a.statsView === 'ws' && 'fill-blu/30')} strokeWidth={1.5} />
           </button>
           <button onClick={() => void store.pollAgentNow(a.id)} title="Опросить сейчас"
             className="rounded-md p-1.5 text-dim transition-colors hover:bg-raised hover:text-vio">
@@ -253,8 +285,13 @@ function AgentDrawer({ id, onClose, onEdit }: { id: string | null; onClose: () =
           <button onClick={() => store.toggleAgentFav(a.id)} className={cls('btn-ghost text-[12px]', a.favorite && 'text-warn')}>
             <Star className={cls('h-3.5 w-3.5', a.favorite && 'fill-warn')} /> {a.favorite ? 'В избранном' : 'В избранное'}
           </button>
-          <button onClick={() => store.toggleAgentStats(a.id)} className={cls('btn-ghost text-[12px]', a.stats && 'text-blu')}>
-            <Waves className={cls('h-3.5 w-3.5', a.stats && 'fill-blu/30')} /> {a.stats ? 'В статистике' : 'Добавить в статистику'}
+          <button onClick={() => store.setAgentStatsView(a.id, a.statsView === 'bars' ? '' : 'bars')}
+            className={cls('btn-ghost text-[12px]', a.statsView === 'bars' && 'text-vio')}>
+            <BarChart3 className={cls('h-3.5 w-3.5', a.statsView === 'bars' && 'fill-vio/30')} /> Bars
+          </button>
+          <button onClick={() => store.setAgentStatsView(a.id, a.statsView === 'ws' ? '' : 'ws')}
+            className={cls('btn-ghost text-[12px]', a.statsView === 'ws' && 'text-blu')}>
+            <Waves className={cls('h-3.5 w-3.5', a.statsView === 'ws' && 'fill-blu/30')} /> WS
           </button>
         </div>
 
