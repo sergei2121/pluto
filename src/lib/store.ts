@@ -1,6 +1,6 @@
 // ─── PLUTO: хранилище состояния (pub/sub + useSyncExternalStore) ─────────────
 import { useRef, useSyncExternalStore } from 'react';
-import type { Agent, Device, EventItem, Route, Settings, Severity, Tag, User } from './types';
+import type { Agent, Device, EventItem, Route, Settings, Severity, StatsView, Tag, User } from './types';
 import { uid } from './util';
 
 export type ApiMode = 'embedded' | 'server';
@@ -205,7 +205,9 @@ export const store = {
         glancesUrl: a.glancesUrl ?? '',
         lastGlances: a.lastGlances ?? 0,
         favorite: !!a.favorite,
-        stats: !!a.stats,
+        // совместимость со старым булевым stats: true → 'ws'
+        statsView: (a as Agent & { statsView?: StatsView; stats?: boolean }).statsView ??
+          (((a as Agent & { stats?: boolean }).stats) ? 'ws' : ''),
       })),
       tags: st.tags || [],
       events: st.events || [],
@@ -277,7 +279,7 @@ export const store = {
   },
 
   // ── агенты (relay + Glances) ──
-  async addAgent(d: { name: string; ip: string; relayUrl: string; glancesUrl?: string; pingTargets?: string[] }): Promise<void> {
+  async addAgent(d: { name: string; ip: string; relayUrl: string; glancesUrl?: string; statsView?: StatsView; pingTargets?: string[] }): Promise<void> {
     if (getState().apiMode === 'server') {
       const { api } = await import('./api');
       await api.addAgent(d as never);
@@ -287,7 +289,7 @@ export const store = {
     }
     const a: Agent = {
       id: uid('ag'), name: d.name, ip: d.ip, relayUrl: d.relayUrl, glancesUrl: d.glancesUrl ?? '',
-      pingTargets: d.pingTargets ?? [], targets: [], tags: [], favorite: false, stats: false,
+      pingTargets: d.pingTargets ?? [], targets: [], tags: [], favorite: false, statsView: d.statsView ?? '',
       online: false, latency: null, onlineSince: 0, lastSeen: 0, lastPoll: 0, lastGlances: 0,
       latHist: [], glances: [], glancesLatest: null, glancesError: null, createdAt: Date.now(),
     };
@@ -328,11 +330,13 @@ export const store = {
     void store.updateAgent(id, { favorite: !a.favorite });
   },
 
-  toggleAgentStats(id: string) {
+  /** Назначить агента во вкладку статистики: 'bars' | 'ws' | '' (ни в какую). */
+  setAgentStatsView(id: string, view: StatsView) {
     const a = state.agents.find((x) => x.id === id);
     if (!a) return;
-    void store.updateAgent(id, { stats: !a.stats });
-    get().pushEvent('info', 'agent', `«${a.name}» ${a.stats ? 'убран из статистики' : 'добавлен в статистику'}`);
+    void store.updateAgent(id, { statsView: view });
+    const label = view === 'bars' ? 'в «Статистика Bars»' : view === 'ws' ? 'в «Статистика WS»' : 'убран из статистики';
+    get().pushEvent('info', 'agent', `«${a.name}» ${label}`);
   },
 
   async pollAgentNow(id: string): Promise<void> {
