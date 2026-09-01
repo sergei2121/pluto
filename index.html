@@ -15,6 +15,36 @@
     <style>
       html, body { margin: 0; padding: 0; background-color: #0b0e1a; }
     </style>
+    <script>
+      // Диагностика запуска: если бандл упадёт, покажем точную ошибку вместо пустого фона.
+      (function () {
+        function show(title, msg) {
+          var el = document.getElementById('__pluto_diag');
+          if (!el) {
+            el = document.createElement('div');
+            el.id = '__pluto_diag';
+            el.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#0b0e1a;color:#e07a80;' +
+              'font:12px/1.6 "JetBrains Mono",monospace;padding:24px;overflow:auto;white-space:pre-wrap;';
+            document.body.appendChild(el);
+          }
+          el.textContent = '[PLUTO] ' + title + '\n\n' + msg + '\n\nПришлите этот текст разработчику.';
+        }
+        window.addEventListener('error', function (e) {
+          show('Ошибка при запуске', (e.message || 'unknown') + '\n' + (e.filename || '') + ':' + (e.lineno || ''));
+        });
+        window.addEventListener('unhandledrejection', function (e) {
+          show('Необработанный промис', (e.reason && (e.reason.stack || e.reason.message || String(e.reason))) || 'unknown');
+        });
+        window.addEventListener('load', function () {
+          setTimeout(function () {
+            var root = document.getElementById('root');
+            if (root && !root.childElementCount && !document.getElementById('__pluto_diag')) {
+              show('Интерфейс не смонтировался', 'Скрипт загрузился, но React-дерево пустое.\nОткройте консоль браузера (F12) и пришлите красные ошибки.');
+            }
+          }, 6000);
+        });
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
