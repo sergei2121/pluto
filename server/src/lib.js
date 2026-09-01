@@ -79,6 +79,8 @@ export function loadDb() {
 }
 
 export function saveDb() {
+  // Дебаунс: при тысячах устройств проверки идут непрерывно, и сериализация
+  // базы на каждый чих блокировала бы event loop. 2 с — безопасный компромисс.
   if (saveTimer) return;
   saveTimer = setTimeout(() => {
     saveTimer = null;
@@ -90,7 +92,7 @@ export function saveDb() {
     } catch (e) {
       console.error('[pluto] ошибка записи БД:', e.message);
     }
-  }, 250);
+  }, 2000);
 }
 
 export function getDb() {

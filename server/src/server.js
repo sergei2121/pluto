@@ -11,7 +11,7 @@ import {
   issueSession, authUser, publicUser, DEFAULT_SETTINGS,
 } from './lib.js';
 
-const VERSION = '1.12.0';
+const VERSION = '1.13.0';
 const HTTP_PORT = parseInt(process.env.HTTP_PORT || '8080', 10);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.join(__dirname, '..', 'web');
@@ -248,7 +248,10 @@ tick();setInterval(tick,10000);
 let showcaseServer = null;
 function startShowcase() {
   stopShowcase();
-  const port = db.settings.showcase.port || 8081;
+  // Порт витрины: переменная окружения (из docker-compose / .env) — единая точка
+  // конфигурации, т.к. проброс порта в контейнере фиксирован. Если не задана —
+  // берём значение из настроек (по умолчанию 8081).
+  const port = parseInt(process.env.SHOWCASE_PORT, 10) || db.settings.showcase.port || 8081;
   showcaseServer = http.createServer((req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     if (url.pathname === '/api/showcase') {
@@ -267,21 +270,43 @@ function stopShowcase() {
 }
 
 // ─── Планировщик ────────────────────────────────────────────────────────────
+// Ограничение параллельных проверок: при тысячах устройств иначе одновременно
+// стартуют сотни процессов ping, ядро захлёбывается и интерфейс перестаёт отвечать.
 
+const MAX_CONCURRENT_CHECKS = 24;
+let activeChecks = 0;
+
+function scheduleDeviceCheck(d) {
+  if (activeChecks >= MAX_CONCURRENT_CHECKS) return; // допроверим на следующем тике
+  activeChecks++;
+  d.checking = true;
+  runDeviceCheck(d)
+    .then((r) => applyDeviceResult(d, r))
+    .catch(() => {})
+    .finally(() => { d.checking = false; activeChecks--; });
+}
+
+// Стартуем проверки постепенно, а не все сразу: устройства со сроком опроса
+// размазываются по первым тикам (fair-очередь по давности последней проверки).
 setInterval(() => {
   const now = Date.now();
-  for (const d of db.devices) {
-    const iv = Math.max(5, d.interval || db.settings.intervals[d.type] || 60) * 1000;
-    if (!d.checking && now - (d.lastCheck || 0) >= iv) {
-      d.checking = true;
-      runDeviceCheck(d).then((r) => applyDeviceResult(d, r)).finally(() => { d.checking = false; });
+  if (activeChecks < MAX_CONCURRENT_CHECKS) {
+    const due = [];
+    for (const d of db.devices) {
+      const iv = Math.max(5, d.interval || db.settings.intervals[d.type] || 60) * 1000;
+      if (!d.checking && now - (d.lastCheck || 0) >= iv) due.push(d);
+    }
+    due.sort((x, y) => (x.lastCheck || 0) - (y.lastCheck || 0));
+    for (const d of due) {
+      if (activeChecks >= MAX_CONCURRENT_CHECKS) break;
+      scheduleDeviceCheck(d);
     }
   }
   const aiv = Math.max(10, db.settings.intervals.agent || 30) * 1000;
   for (const a of db.agents) {
     if (!a._polling && now - (a.lastPoll || 0) >= aiv) {
       a._polling = true;
-      pollAgent(a).finally(() => { a._polling = false; });
+      pollAgent(a).catch(() => {}).finally(() => { a._polling = false; });
     }
   }
 }, 1000);
@@ -331,10 +356,27 @@ const server = http.createServer(async (req, res) => {
 
     // ── состояние ──
     if (p === '/api/state' && method === 'GET') {
-      const devices = isAdmin ? db.devices : db.devices.filter((d) => user.scope.includes(d.type));
-      const agents = isAdmin || user.scope.includes('agent') ? db.agents : [];
+      const vis = isAdmin ? db.devices : db.devices.filter((d) => user.scope.includes(d.type));
+      // лёгкая проекция: историю режем до 16 точек (хватает для спарклайнов),
+      // тяжёлые поля не отдаём — иначе при тысячах устройств каждый поллинг
+      // гоняет мегабайты JSON и интерфейс тормозит
+      const devices = vis.map((d) => ({
+        id: d.id, name: d.name, type: d.type, address: d.address, port: d.port ?? null,
+        path: d.path || '', method: d.method ?? null, body: d.type === 'api' ? d.body ?? null : null,
+        interval: d.interval, tags: d.tags, favorite: d.favorite, showcase: !!d.showcase,
+        status: d.status, latency: d.latency ?? null, fails: d.fails || 0,
+        lastCheck: d.lastCheck || 0, lastChange: d.lastChange || 0, checking: !!d.checking,
+        history: (d.history || []).slice(-16),
+      }));
+      const agentsRaw = isAdmin || user.scope.includes('agent') ? db.agents : [];
+      const agents = agentsRaw.map((a) => ({
+        id: a.id, name: a.name, ip: a.ip, relayUrl: a.relayUrl || '', pingTargets: a.pingTargets || [],
+        targets: a.targets || [], favorite: !!a.favorite, online: !!a.online, latency: a.latency ?? null,
+        onlineSince: a.onlineSince || 0, lastSeen: a.lastSeen || 0, lastPoll: a.lastPoll || 0,
+        latHist: (a.latHist || []).slice(-120), createdAt: a.createdAt,
+      }));
       return json(res, 200, {
-        devices, agents, tags: db.tags, events: db.events, settings: db.settings,
+        devices, agents, tags: db.tags, events: (db.events || []).slice(0, 100), settings: db.settings,
         users: isAdmin ? db.users.map(publicUser) : undefined,
       });
     }

@@ -53,10 +53,11 @@ export default function App() {
     return () => stopEngine();
   }, [hasSession, apiMode]);
 
-  // Серверный режим: поллинг состояния ядра
+  // Серверный режим: поллинг состояния ядра (4 с — достаточно при интервалах
+  // опроса от 30 с и вдвое легче для больших парков устройств)
   useEffect(() => {
     if (!(hasSession && apiMode === 'server')) return;
-    const t = window.setInterval(() => void syncAll(), 2500);
+    const t = window.setInterval(() => void syncAll(), 4000);
     return () => window.clearInterval(t);
   }, [hasSession, apiMode]);
 
