@@ -1,310 +1,136 @@
-// ─── PLUTO: устройства (PING/HTTP/API/RTSP/SIP + диапазоны) ─────────────────
+// ─── PLUTO: устройства ───────────────────────────────────────────────────────
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Search, Star, Trash2, X, RefreshCw, Server } from 'lucide-react';
-import { Drawer, EmptyState, Field, Modal, Panel, Sparkbar, StatusDot, STATUS_META, TimeAgo, TypeBadge } from '../components/ui';
+import { Plus, Search, Star, Trash2, LayoutGrid, RefreshCw, X } from 'lucide-react';
+import { Panel, StatusDot, STATUS_META, Sparkbar, TypeBadge, Modal, Field, Toggle, EmptyState, TimeAgo } from '../components/ui';
 import { store, useCurrentUser, usePluto, useToasts, visibleDevices } from '../lib/store';
 import { forceCheck } from '../lib/engine';
-import { cls, fmtMs } from '../lib/util';
-import { DEVICE_TYPE_META, DEVICE_TYPES, type Device, type DeviceType } from '../lib/types';
+import { cls, expandTargets, isTarget, TAG_COLORS } from '../lib/util';
+import { DEVICE_TYPES, DEVICE_TYPE_META, type Device, type DeviceType } from '../lib/types';
 
-const isIp = (s: string) => /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(s);
-
-function ipNum(ip: string): number {
-  return ip.split('.').reduce((acc, o) => acc * 256 + parseInt(o, 10), 0);
-}
-
-const FILTERS: { v: 'all' | 'up' | 'down' | 'degraded'; label: string }[] = [
-  { v: 'all', label: 'Все' }, { v: 'up', label: 'В сети' }, { v: 'degraded', label: 'Деградация' }, { v: 'down', label: 'Авария' },
-];
-
-export default function Devices() {
-  const user = useCurrentUser();
-  const isAdmin = user?.role === 'admin';
-  const devices = usePluto((s) => visibleDevices(s, user));
+function DeviceModal({ open, onClose, initial }: { open: boolean; onClose: () => void; initial: Device | null }) {
   const tags = usePluto((s) => s.tags);
-  const routeParam = usePluto((s) => s.routeParam);
-
-  const [q, setQ] = useState('');
-  const [filter, setFilter] = useState<'all' | 'up' | 'down' | 'degraded'>('all');
-  const [tagFilter, setTagFilter] = useState('');
-  const [addOpen, setAddOpen] = useState(false);
-  const [detailId, setDetailId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (routeParam === 'new') { setAddOpen(true); store.nav('devices'); }
-    else if (routeParam === 'down') { setFilter('down'); store.nav('devices'); }
-    else if (routeParam) {
-      const d = devices.find((x) => x.address === routeParam);
-      if (d) setDetailId(d.id);
-      store.nav('devices');
-    }
-  }, [routeParam, devices]);
-
-  const list = useMemo(() => {
-    const query = q.trim().toLowerCase();
-    return devices.filter((d) => {
-      if (filter !== 'all' && d.status !== filter) return false;
-      if (tagFilter && !d.tags.includes(tagFilter)) return false;
-      if (query && !d.name.toLowerCase().includes(query) && !d.address.toLowerCase().includes(query)) return false;
-      return true;
-    });
-  }, [devices, q, filter, tagFilter]);
-
-  const detail = detailId ? devices.find((d) => d.id === detailId) ?? null : null;
-
-  return (
-    <div className="space-y-4">
-      <Panel
-        title="Устройства" icon={<Server className="h-4 w-4" />}
-        right={
-          isAdmin ? (
-            <button className="btn-acc" onClick={() => setAddOpen(true)}>
-              <Plus className="h-4 w-4" /> Добавить устройство
-            </button>
-          ) : undefined
-        }
-        bodyClass="p-0"
-      >
-        <div className="flex flex-wrap items-center gap-2 border-b border-line/60 px-4 py-3">
-          <div className="flex items-center gap-2 rounded-lg border border-line bg-raised/70 px-3 py-1.5">
-            <Search className="h-3.5 w-3.5 text-dim" />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Имя или IP…" className="w-44 bg-transparent text-[12.5px] text-ink outline-none placeholder:text-dim/80" />
-          </div>
-          <div className="flex gap-1">
-            {FILTERS.map((f) => (
-              <button key={f.v} onClick={() => setFilter(f.v)}
-                className={cls('rounded-md px-2.5 py-1.5 text-[11.5px] font-semibold transition-all', filter === f.v ? 'bg-vio/25 text-ink' : 'text-dim hover:text-mut')}>
-                {f.label}
-              </button>
-            ))}
-          </div>
-          {tags.length > 0 && (
-            <select value={tagFilter} onChange={(e) => setTagFilter(e.target.value)} className="inp !w-auto !py-1.5 text-[12px]">
-              <option value="">Все теги</option>
-              {tags.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
-            </select>
-          )}
-          <span className="ml-auto font-mono text-[11px] text-dim">{list.length} из {devices.length}</span>
-        </div>
-
-        {list.length === 0 ? (
-          <EmptyState
-            icon={<Server className="h-6 w-6" />}
-            title={devices.length === 0 ? 'Устройств пока нет' : 'Ничего не найдено'}
-            text={devices.length === 0 ? 'Добавьте первое устройство: одиночный адрес или целый диапазон IP для массового пинга.' : 'Попробуйте изменить фильтр или запрос.'}
-            action={isAdmin && devices.length === 0 ? <button className="btn-acc" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4" /> Добавить устройство</button> : undefined}
-          />
-        ) : (
-          <ul className="divide-y divide-line/50">
-            {list.map((d) => {
-              const m = STATUS_META[d.status];
-              return (
-                <li key={d.id} className="flex cursor-pointer items-center gap-3 px-4 py-2.5 transition-colors hover:bg-raised/40" onClick={() => setDetailId(d.id)}>
-                  <StatusDot status={d.status} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="truncate text-[13px] font-semibold text-ink">{d.name}</span>
-                      {d.favorite && <Star className="h-3.5 w-3.5 shrink-0 fill-warn text-warn" />}
-                      {d.tags.map((tid) => {
-                        const t = tags.find((x) => x.id === tid);
-                        return t ? <span key={tid} className="rounded px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide" style={{ background: `${t.color}22`, color: t.color }}>{t.label}</span> : null;
-                      })}
-                    </div>
-                    <div className="mt-0.5 flex items-center gap-2 font-mono text-[10.5px] text-dim">
-                      <TypeBadge t={d.type} />
-                      <span>{d.address}{d.port ? `:${d.port}` : ''}</span>
-                      <span>·</span>
-                      <TimeAgo ts={d.lastCheck} />
-                    </div>
-                  </div>
-                  <Sparkbar data={d.history} height={24} width={110} />
-                  <div className="w-[86px] text-right">
-                    <div className={cls('font-mono text-[15px] font-bold tabular-nums', m.text)}>
-                      {d.status === 'down' ? 'СБОЙ' : fmtMs(d.latency)}
-                      {d.approx && d.status !== 'down' && <span className="ml-0.5 text-[10px] text-dim">≈</span>}
-                    </div>
-                    <div className={cls('text-[9.5px] font-bold uppercase tracking-wider', m.text)}>{m.label}</div>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </Panel>
-
-      <AddDeviceModal open={addOpen} onClose={() => setAddOpen(false)} />
-      <DeviceDrawer device={detail} onClose={() => setDetailId(null)} isAdmin={isAdmin} />
-    </div>
-  );
-}
-
-// ─── Добавление: одно устройство или диапазон ───────────────────────────────
-
-function AddDeviceModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const tags = usePluto((s) => s.tags);
-  const settings = usePluto((s) => s.settings);
-
-  const [mode, setMode] = useState<'single' | 'range'>('single');
-  const [type, setType] = useState<DeviceType>('ping');
   const [name, setName] = useState('');
+  const [type, setType] = useState<DeviceType>('ping');
   const [address, setAddress] = useState('');
-  const [ipFrom, setIpFrom] = useState('');
-  const [ipTo, setIpTo] = useState('');
   const [port, setPort] = useState('');
   const [path, setPath] = useState('');
-  const [method, setMethod] = useState('GET');
-  const [body, setBody] = useState('');
-  const [interval, setInterval] = useState(60);
+  const [interval, setIntervalV] = useState(60);
+  const [showcase, setShowcase] = useState(false);
   const [selTags, setSelTags] = useState<string[]>([]);
   const [err, setErr] = useState('');
 
   useEffect(() => {
-    if (open) {
-      setMode('single'); setType('ping'); setName(''); setAddress(''); setIpFrom(''); setIpTo('');
-      setPort(''); setPath(''); setMethod('GET'); setBody(''); setInterval(settings.intervals.ping); setSelTags([]); setErr('');
-    }
-  }, [open, settings]);
-
-  const rangeCount = useMemo(() => {
-    if (!isIp(ipFrom) || !isIp(ipTo)) return null;
-    const a = ipNum(ipFrom), b = ipNum(ipTo);
-    if (a > b) return null;
-    const prefix = (ip: string) => ip.split('.').slice(0, 3).join('.');
-    if (prefix(ipFrom) !== prefix(ipTo)) return null;
-    return b - a + 1;
-  }, [ipFrom, ipTo]);
-
-  const submit = () => {
+    if (!open) return;
     setErr('');
-    if (mode === 'single') {
-      if (!address.trim()) return setErr('Укажите адрес устройства');
-      if ((type === 'http' || type === 'api') && !/^https?:\/\//i.test(address.trim()) && !address.trim()) return setErr('Укажите хост');
+    if (initial) {
+      setName(initial.name); setType(initial.type); setAddress(initial.address);
+      setPort(initial.port != null ? String(initial.port) : ''); setPath(initial.path || '');
+      setIntervalV(initial.interval); setShowcase(initial.showcase); setSelTags(initial.tags);
     } else {
-      if (!isIp(ipFrom) || !isIp(ipTo)) return setErr('Начальный и конечный IP — в формате 192.168.1.10');
-      if (rangeCount == null) return setErr('Диапазон должен быть в одной подсети /24, начало ≤ конца');
-      if (rangeCount > 254) return setErr('Не более 254 адресов за раз');
+      setName(''); setType('ping'); setAddress(''); setPort(''); setPath('');
+      setIntervalV(60); setShowcase(false); setSelTags([]);
     }
-    if (interval < 5 || interval > 86400) return setErr('Интервал — от 5 до 86400 секунд');
+  }, [open, initial]);
 
-    if (mode === 'single') {
-      store.addDevice({
-        name: name.trim() || address.trim(), type, address: address.trim(),
-        port: port ? parseInt(port, 10) : null, path, method: type === 'api' ? method : null,
-        body: type === 'api' ? body : null, interval, tags: selTags,
-      });
-    } else {
-      const a = ipNum(ipFrom);
-      for (let i = 0; i < (rangeCount as number); i++) {
-        const n = a + i;
-        const ip = `${(n >>> 24) & 255}.${(n >>> 16) & 255}.${(n >>> 8) & 255}.${n & 255}`;
-        store.addDevice({ name: `${name.trim() || 'Диапазон'} ${ip}`, type: 'ping', address: ip, interval, tags: selTags });
+  const save = async () => {
+    setErr('');
+    if (!address.trim()) return setErr('Укажите адрес');
+    if (type === 'ping' && !isTarget(address)) return setErr('Для PING: IP, диапазон 1.2.3.1-10 или подсеть 1.2.3.0/24');
+    const body: Partial<Device> = {
+      name: name.trim() || address.trim(), type, address: address.trim(),
+      port: port ? parseInt(port, 10) : null, path: path.trim(),
+      interval: Math.max(5, interval), showcase, tags: selTags,
+    };
+    try {
+      if (initial) await store.updateDevice(initial.id, body);
+      else {
+        // диапазон разворачиваем в отдельные PING-устройства
+        if (type === 'ping' && !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(address.trim())) {
+          const ips = expandTargets(address);
+          for (const ip of ips) {
+            await store.addDevice({ ...body, type, name: `${body.name} · ${ip}`, address: ip } as never);
+          }
+          useToasts.push('ok', `Добавлено ${ips.length} устройств из диапазона`);
+          onClose();
+          return;
+        }
+        await store.addDevice(body as never);
       }
-      useToasts.push('ok', `Добавлено ${rangeCount} устройств (${ipFrom} — ${ipTo})`);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Не удалось сохранить');
     }
-    onClose();
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Новое устройство">
+    <Modal open={open} onClose={onClose} title={initial ? 'Изменить устройство' : 'Новое устройство'}>
       <div className="space-y-4">
-        <div className="flex gap-2">
-          <button onClick={() => setMode('single')} className={cls('flex-1 rounded-lg border px-3 py-2 text-[12.5px] font-semibold transition-all', mode === 'single' ? 'border-vio/50 bg-vio/15 text-ink' : 'border-line bg-raised/50 text-dim hover:text-mut')}>
-            Одно устройство
-          </button>
-          <button onClick={() => setMode('range')} className={cls('flex-1 rounded-lg border px-3 py-2 text-[12.5px] font-semibold transition-all', mode === 'range' ? 'border-vio/50 bg-vio/15 text-ink' : 'border-line bg-raised/50 text-dim hover:text-mut')}>
-            Диапазон устройств
-          </button>
+        <div>
+          <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Тип проверки</span>
+          <div className="flex flex-wrap gap-1.5">
+            {DEVICE_TYPES.map((t) => (
+              <button key={t} onClick={() => setType(t)}
+                className={cls('rounded-lg border px-3 py-1.5 text-[12px] font-bold transition-all',
+                  type === t ? 'border-vio/60 bg-vio/20 text-ink' : 'border-line bg-raised/50 text-dim hover:text-mut')}
+                title={DEVICE_TYPE_META[t].desc}>
+                {DEVICE_TYPE_META[t].label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-[11px] text-dim/80">{DEVICE_TYPE_META[type].desc}</p>
         </div>
 
-        {mode === 'single' ? (
-          <>
-            <Field label="Тип проверки">
-              <div className="grid grid-cols-5 gap-1.5">
-                {DEVICE_TYPES.map((t) => (
-                  <button key={t} onClick={() => { setType(t); setInterval(settings.intervals[t]); }}
-                    title={DEVICE_TYPE_META[t].desc}
-                    className={cls('rounded-lg border px-2 py-2 font-mono text-[11px] font-bold transition-all', type === t ? 'border-vio/50 bg-vio/15 text-vio' : 'border-line bg-raised/50 text-dim hover:text-mut')}>
-                    {DEVICE_TYPE_META[t].label}
-                  </button>
-                ))}
-              </div>
-              <p className="mt-1.5 text-[11px] text-dim">{DEVICE_TYPE_META[type].desc}</p>
-            </Field>
-            <Field label="Имя">
-              <input className="inp" value={name} onChange={(e) => setName(e.target.value)} />
-            </Field>
-            <Field label={type === 'rtsp' ? 'RTSP-ссылка' : type === 'sip' ? 'SIP URI' : 'IP-адрес или хост'}>
-              <input className="inp font-mono" value={address} onChange={(e) => setAddress(e.target.value)} />
-            </Field>
-            {(type === 'http' || type === 'api' || type === 'rtsp') && (
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Порт"><input className="inp font-mono" value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ''))} /></Field>
-                {type !== 'rtsp' && <Field label="Путь"><input className="inp font-mono" value={path} onChange={(e) => setPath(e.target.value)} /></Field>}
-              </div>
-            )}
-            {type === 'api' && (
-              <>
-                <Field label="Метод">
-                  <div className="flex gap-1.5">
-                    {['GET', 'POST', 'PUT'].map((mth) => (
-                      <button key={mth} onClick={() => setMethod(mth)} className={cls('rounded-lg border px-3 py-1.5 font-mono text-[11px] font-bold transition-all', method === mth ? 'border-vio/50 bg-vio/15 text-vio' : 'border-line bg-raised/50 text-dim')}>{mth}</button>
-                    ))}
-                  </div>
-                </Field>
-                {method !== 'GET' && (
-                  <Field label="Тело запроса (JSON)">
-                    <textarea className="inp min-h-[74px] resize-y font-mono text-[12px]" value={body} onChange={(e) => setBody(e.target.value)} />
-                  </Field>
-                )}
-              </>
-            )}
-          </>
-        ) : (
-          <>
-            <Field label="Название диапазона" hint="Каждое устройство получит имя с суффиксом-адресом">
-              <input className="inp" value={name} onChange={(e) => setName(e.target.value)} />
-            </Field>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Начальный IP"><input className="inp font-mono" value={ipFrom} onChange={(e) => setIpFrom(e.target.value)} placeholder="192.168.1.10" /></Field>
-              <Field label="Конечный IP"><input className="inp font-mono" value={ipTo} onChange={(e) => setIpTo(e.target.value)} placeholder="192.168.1.20" /></Field>
-            </div>
-            <div className={cls('rounded-lg border px-3 py-2 font-mono text-[12px]', rangeCount == null ? 'border-line text-dim' : rangeCount > 254 ? 'border-crit/40 text-crit' : 'border-ok/40 text-ok')}>
-              {rangeCount == null
-                ? 'Задайте диапазон — одна подсеть /24, начало ≤ конца'
-                : rangeCount > 254
-                  ? `Получится ${rangeCount} адресов — слишком много (максимум 254)`
-                  : `Получится устройств: ${rangeCount} (все — типа PING)`}
-            </div>
-          </>
-        )}
-
-        <Field label={`Интервал опроса, сек (по умолчанию для ${mode === 'range' ? 'PING' : DEVICE_TYPE_META[type].label}: ${settings.intervals[mode === 'range' ? 'ping' : type]})`}>
-          <input className="inp font-mono" type="number" min={5} value={interval} onChange={(e) => setInterval(parseInt(e.target.value, 10) || 60)} />
+        <Field label="Название">
+          <input className="inp" value={name} onChange={(e) => setName(e.target.value)} placeholder="Например: Сервер 1С" />
         </Field>
 
+        <Field label={type === 'ping' ? 'IP / диапазон / подсеть' : 'Адрес'} hint={type === 'ping' ? 'Один IP, диапазон 192.168.1.10-20 или подсеть 192.168.1.0/24' : undefined}>
+          <input className="inp font-mono" value={address} onChange={(e) => setAddress(e.target.value)} placeholder={type === 'ping' ? '192.168.1.0/24' : '192.168.1.10'} />
+        </Field>
+
+        {(type === 'http' || type === 'api') && (
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Порт"><input className="inp font-mono" value={port} onChange={(e) => setPort(e.target.value)} placeholder="8080" /></Field>
+            <Field label="Путь"><input className="inp font-mono" value={path} onChange={(e) => setPath(e.target.value)} placeholder="/health" /></Field>
+          </div>
+        )}
+
+        <Field label="Интервал опроса, сек">
+          <input className="inp font-mono" type="number" min={5} value={interval} onChange={(e) => setIntervalV(parseInt(e.target.value, 10) || 60)} />
+        </Field>
+
+        <div className="flex items-center justify-between rounded-lg border border-line bg-raised/40 px-4 py-3">
+          <div>
+            <p className="text-[13px] font-semibold text-ink">На публичной витрине</p>
+            <p className="mt-0.5 text-[11px] text-dim">Статус виден без входа на отдельном порту</p>
+          </div>
+          <Toggle checked={showcase} onChange={setShowcase} />
+        </div>
+
         {tags.length > 0 && (
-          <Field label="Теги">
+          <div>
+            <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Теги</span>
             <div className="flex flex-wrap gap-1.5">
               {tags.map((t) => {
                 const on = selTags.includes(t.id);
                 return (
-                  <button key={t.id} onClick={() => setSelTags((s) => (on ? s.filter((x) => x !== t.id) : [...s, t.id]))}
-                    className="rounded-lg border px-2.5 py-1 text-[11.5px] font-semibold transition-all"
-                    style={on ? { borderColor: t.color, background: `${t.color}22`, color: t.color } : { borderColor: 'var(--color-line)', color: 'var(--color-dim)' }}>
+                  <button key={t.id} onClick={() => setSelTags((s) => on ? s.filter((x) => x !== t.id) : [...s, t.id])}
+                    className={cls('rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-all', on ? 'text-void' : 'text-mut')}
+                    style={{ borderColor: t.color, background: on ? t.color : 'transparent' }}>
                     {t.label}
                   </button>
                 );
               })}
             </div>
-          </Field>
+          </div>
         )}
 
-        {err && <p className="rounded-lg border border-crit/35 bg-crit/10 px-3.5 py-2.5 text-[12.5px] font-semibold text-crit">{err}</p>}
+        {err && <p className="rounded-lg border border-crit/40 bg-crit/10 px-3 py-2 text-[12.5px] text-crit">{err}</p>}
 
         <div className="flex justify-end gap-2 pt-1">
-          <button className="btn-ghost" onClick={onClose}>Отмена</button>
-          <button className="btn-acc" onClick={submit}>
-            <Plus className="h-4 w-4" /> {mode === 'range' ? `Добавить ${rangeCount ?? '…'} устройств` : 'Добавить'}
+          <button onClick={onClose} className="rounded-lg border border-line bg-raised/50 px-4 py-2 text-[13px] font-semibold text-dim transition-colors hover:text-mut">Отмена</button>
+          <button onClick={save} className="rounded-lg border border-vio/60 bg-vio/25 px-4 py-2 text-[13px] font-bold text-ink transition-all hover:bg-vio/35">
+            {initial ? 'Сохранить' : 'Добавить'}
           </button>
         </div>
       </div>
@@ -312,99 +138,170 @@ function AddDeviceModal({ open, onClose }: { open: boolean; onClose: () => void 
   );
 }
 
-// ─── Детали устройства ──────────────────────────────────────────────────────
-
-function DeviceDrawer({ device, onClose, isAdmin }: { device: Device | null; onClose: () => void; isAdmin: boolean }) {
+export default function Devices() {
+  const user = useCurrentUser();
+  const devices = usePluto((s) => visibleDevices(s, user));
   const tags = usePluto((s) => s.tags);
-  const [checking, setChecking] = useState(false);
+  const routeParam = usePluto((s) => s.routeParam);
+  const isAdmin = user?.role === 'admin';
 
-  if (!device) return <Drawer open={false} onClose={onClose} title=""><div /></Drawer>;
-  const m = STATUS_META[device.status];
+  const [q, setQ] = useState('');
+  const [filter, setFilter] = useState<'all' | Device['status']>('all');
+  const [modal, setModal] = useState<{ open: boolean; initial: Device | null }>({ open: false, initial: null });
+
+  useEffect(() => {
+    if (routeParam === 'new') { setModal({ open: true, initial: null }); store.nav('devices'); }
+    else if (routeParam === 'down') { setFilter('down'); store.nav('devices'); }
+  }, [routeParam]);
+
+  const tagById = useMemo(() => Object.fromEntries(tags.map((t) => [t.id, t])), [tags]);
+
+  const list = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    return devices.filter((d) => {
+      if (filter !== 'all' && d.status !== filter) return false;
+      if (!query) return true;
+      const tagIds = tags.filter((t) => t.label.toLowerCase().includes(query)).map((t) => t.id);
+      return d.name.toLowerCase().includes(query) || d.address.toLowerCase().includes(query) || d.tags.some((t) => tagIds.includes(t));
+    });
+  }, [devices, q, filter, tags]);
+
+  const counts = useMemo(() => ({
+    all: devices.length,
+    up: devices.filter((d) => d.status === 'up').length,
+    down: devices.filter((d) => d.status === 'down').length,
+    degraded: devices.filter((d) => d.status === 'degraded').length,
+    unknown: devices.filter((d) => d.status === 'unknown').length,
+  }), [devices]);
 
   return (
-    <Drawer
-      open={!!device}
-      onClose={onClose}
-      title={
-        <div className="flex items-center gap-2.5">
-          <StatusDot status={device.status} />
-          <div className="min-w-0">
-            <div className="truncate text-[14px] font-bold text-ink">{device.name}</div>
-            <div className="font-mono text-[10.5px] text-dim">{device.address}{device.port ? `:${device.port}` : ''} · {DEVICE_TYPE_META[device.type].label}</div>
+    <div className="space-y-4">
+      <Panel
+        title={`Устройства · ${devices.length}`} icon={<Plus className="h-4 w-4" />}
+        right={isAdmin ? (
+          <button onClick={() => setModal({ open: true, initial: null })}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-vio/50 bg-vio/20 px-3 py-1.5 text-[12.5px] font-bold text-ink transition-all hover:bg-vio/30">
+            <Plus className="h-4 w-4" /> Добавить устройство
+          </button>
+        ) : undefined}>
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <div className="flex min-w-[220px] flex-1 items-center gap-2 rounded-lg border border-line bg-raised/70 px-3 py-2">
+            <Search className="h-4 w-4 shrink-0 text-dim" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск: имя, IP или тег…"
+              className="w-full bg-transparent text-[13px] text-ink outline-none placeholder:text-dim/80" />
+            {q && <button onClick={() => setQ('')} className="text-dim hover:text-ink"><X className="h-3.5 w-3.5" /></button>}
           </div>
-        </div>
-      }
-    >
-      <div className="space-y-4">
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <div className="rounded-lg border border-line bg-raised/40 p-3">
-            <div className={cls('font-mono text-[20px] font-bold tabular-nums', m.text)}>{device.status === 'down' ? 'СБОЙ' : fmtMs(device.latency)}</div>
-            <div className="mt-0.5 text-[9px] font-bold uppercase tracking-wider text-dim">задержка</div>
-          </div>
-          <div className="rounded-lg border border-line bg-raised/40 p-3">
-            <div className="font-mono text-[20px] font-bold tabular-nums text-ink">{device.baseline != null ? fmtMs(device.baseline) : '—'}</div>
-            <div className="mt-0.5 text-[9px] font-bold uppercase tracking-wider text-dim">базовая</div>
-          </div>
-          <div className="rounded-lg border border-line bg-raised/40 p-3">
-            <div className="font-mono text-[20px] font-bold tabular-nums text-ink">{device.interval} с</div>
-            <div className="mt-0.5 text-[9px] font-bold uppercase tracking-wider text-dim">интервал</div>
+          <div className="flex flex-wrap gap-1.5">
+            {([['all', `Все ${counts.all}`], ['up', `В сети ${counts.up}`], ['degraded', `Деградация ${counts.degraded}`], ['down', `Авария ${counts.down}`], ['unknown', `Ожидание ${counts.unknown}`]] as const).map(([v, label]) => (
+              <button key={v} onClick={() => setFilter(v)}
+                className={cls('rounded-lg border px-2.5 py-1.5 text-[11.5px] font-semibold transition-all',
+                  filter === v ? 'border-vio/60 bg-vio/20 text-ink' : 'border-line bg-raised/50 text-dim hover:text-mut')}>
+                {label}
+              </button>
+            ))}
           </div>
         </div>
 
-        <div>
-          <h4 className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-dim">История проверок · {device.history.length} точек</h4>
-          <Sparkbar data={device.history} height={44} width={440} />
-        </div>
-
-        <div className="space-y-1.5 font-mono text-[11.5px] text-mut">
-          <div className="flex justify-between"><span className="text-dim">Статус</span><span className={m.text}>{m.label}</span></div>
-          <div className="flex justify-between"><span className="text-dim">Сбоев подряд</span><span>{device.fails}</span></div>
-          <div className="flex justify-between"><span className="text-dim">Последняя проверка</span><TimeAgo ts={device.lastCheck} /></div>
-          <div className="flex justify-between"><span className="text-dim">Смена статуса</span><TimeAgo ts={device.lastChange} /></div>
-          {device.tags.length > 0 && (
-            <div className="flex justify-between">
-              <span className="text-dim">Теги</span>
-              <span className="flex gap-1">
-                {device.tags.map((tid) => {
-                  const t = tags.find((x) => x.id === tid);
-                  return t ? <span key={tid} className="rounded px-1.5 py-0.5 text-[9.5px] font-bold uppercase" style={{ background: `${t.color}22`, color: t.color }}>{t.label}</span> : null;
+        {list.length === 0 ? (
+          <EmptyState icon={<Search className="h-6 w-6" />} title={devices.length ? 'Ничего не найдено' : 'Устройств пока нет'}
+            text={devices.length ? 'Попробуйте другой запрос или сбросьте фильтры.' : 'Добавьте первое устройство — PING, HTTP, API, RTSP или SIP.'}
+            action={isAdmin && !devices.length ? (
+              <button onClick={() => setModal({ open: true, initial: null })}
+                className="rounded-lg border border-vio/50 bg-vio/20 px-4 py-2 text-[13px] font-bold text-ink transition-all hover:bg-vio/30">
+                Добавить устройство
+              </button>
+            ) : undefined} />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b border-line/60 text-[10px] font-bold uppercase tracking-[0.12em] text-dim">
+                  <th className="py-2 pr-3">Устройство</th>
+                  <th className="py-2 pr-3">Тип</th>
+                  <th className="py-2 pr-3">Статус</th>
+                  <th className="py-2 pr-3">Задержка</th>
+                  <th className="hidden py-2 pr-3 lg:table-cell">История</th>
+                  <th className="hidden py-2 pr-3 xl:table-cell">Теги</th>
+                  <th className="hidden py-2 pr-3 md:table-cell">Опрос</th>
+                  <th className="py-2 text-right">Действия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {list.map((d) => {
+                  const m = STATUS_META[d.status];
+                  return (
+                    <tr key={d.id} className="border-b border-line/30 transition-colors hover:bg-raised/40">
+                      <td className="py-2.5 pr-3">
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => store.toggleDeviceFav(d.id)} title="В избранное"
+                            className={cls('transition-transform hover:scale-110', d.favorite ? 'text-warn' : 'text-dim/40 hover:text-dim')}>
+                            <Star className={cls('h-4 w-4', d.favorite && 'fill-warn')} strokeWidth={1.5} />
+                          </button>
+                          <div>
+                            <div className="flex items-center gap-1.5 text-[13px] font-semibold text-ink">
+                              {d.name}
+                              {d.showcase && <span className="rounded border border-mint/40 bg-mint/10 px-1 py-px text-[8.5px] font-bold text-mint" title="На публичной витрине">ВИТРИНА</span>}
+                            </div>
+                            <div className="font-mono text-[11px] text-dim">{d.address}{d.port ? `:${d.port}` : ''}{d.path || ''}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="py-2.5 pr-3"><TypeBadge t={d.type} /></td>
+                      <td className="py-2.5 pr-3">
+                        <span className="flex items-center gap-2">
+                          <StatusDot status={d.status} />
+                          <span className={cls('text-[12px] font-semibold', m.text)}>{m.label}</span>
+                        </span>
+                      </td>
+                      <td className="py-2.5 pr-3 font-mono text-[13px] tabular-nums text-mut">{d.status === 'down' ? '—' : `${d.latency ?? '—'}${d.latency != null ? ' мс' : ''}`}</td>
+                      <td className="hidden py-2.5 pr-3 lg:table-cell"><Sparkbar data={d.history} /></td>
+                      <td className="hidden py-2.5 pr-3 xl:table-cell">
+                        <div className="flex flex-wrap gap-1">
+                          {d.tags.map((tid) => tagById[tid] && (
+                            <span key={tid} className="rounded-full border px-2 py-0.5 text-[10px] font-semibold"
+                              style={{ borderColor: tagById[tid].color, color: tagById[tid].color }}>
+                              {tagById[tid].label}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="hidden py-2.5 pr-3 font-mono text-[11px] text-dim md:table-cell">
+                        <TimeAgo ts={d.lastCheck} />
+                      </td>
+                      <td className="py-2.5 text-right">
+                        <div className="inline-flex items-center gap-1">
+                          <button onClick={() => void forceCheck(d.id)} title="Проверить сейчас"
+                            className="rounded-md p-1.5 text-dim transition-colors hover:bg-raised hover:text-vio">
+                            <RefreshCw className={cls('h-4 w-4', d.checking && 'animate-spin')} />
+                          </button>
+                          {isAdmin && (
+                            <>
+                              <button onClick={() => store.toggleDeviceShowcase(d.id)} title={d.showcase ? 'Убрать с витрины' : 'На витрину'}
+                                className={cls('rounded-md p-1.5 transition-colors hover:bg-raised', d.showcase ? 'text-mint' : 'text-dim hover:text-mint')}>
+                                <LayoutGrid className="h-4 w-4" />
+                              </button>
+                              <button onClick={() => setModal({ open: true, initial: d })} title="Изменить"
+                                className="rounded-md px-2 py-1 text-[11px] font-semibold text-dim transition-colors hover:bg-raised hover:text-ink">
+                                Изм.
+                              </button>
+                              <button onClick={() => { if (window.confirm(`Удалить «${d.name}»?`)) void store.removeDevice(d.id); }} title="Удалить"
+                                className="rounded-md p-1.5 text-dim transition-colors hover:bg-raised hover:text-crit">
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
                 })}
-              </span>
-            </div>
-          )}
-        </div>
-
-        {isAdmin && (
-          <div className="flex gap-2 border-t border-line/60 pt-4">
-            <button
-              className="btn-ghost"
-              disabled={checking}
-              onClick={async () => {
-                setChecking(true);
-                const r = await forceCheck(device.id);
-                setChecking(false);
-                if (r) useToasts.push(r.ok ? 'ok' : 'crit', r.ok ? `Проверка: ${fmtMs(r.latency)}` : 'Проверка: нет ответа');
-              }}
-            >
-              <RefreshCw className={cls('h-3.5 w-3.5', checking && 'animate-spin')} /> Проверить сейчас
-            </button>
-            <button className="btn-ghost" onClick={() => store.toggleDeviceFav(device.id)}>
-              <Star className={cls('h-3.5 w-3.5', device.favorite && 'fill-warn text-warn')} /> {device.favorite ? 'Из избранного' : 'В избранное'}
-            </button>
-            <button
-              className="btn-danger ml-auto"
-              onClick={() => {
-                if (window.confirm(`Удалить «${device.name}» из мониторинга?`)) {
-                  store.removeDevice(device.id);
-                  onClose();
-                }
-              }}
-            >
-              <Trash2 className="h-3.5 w-3.5" /> Удалить
-            </button>
+              </tbody>
+            </table>
           </div>
         )}
-      </div>
-    </Drawer>
+      </Panel>
+
+      <DeviceModal open={modal.open} initial={modal.initial} onClose={() => setModal({ open: false, initial: null })} />
+    </div>
   );
 }

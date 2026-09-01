@@ -1,16 +1,15 @@
 // ─── PLUTO: корень приложения ────────────────────────────────────────────────
 import { useEffect, useState } from 'react';
 import { Orbit } from 'lucide-react';
-import { getState, rehydrate, restoreServerSession, store, useCurrentUser, usePluto } from './lib/store';
-import { startEngine, stopEngine } from './lib/engine';
+import { getState, restoreServerSession, store, useCurrentUser, usePluto } from './lib/store';
 import { detectApi, syncAll } from './lib/api';
+import { startEngine, stopEngine } from './lib/engine';
 import { Shell } from './components/layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Devices from './pages/Devices';
 import Agents from './pages/Agents';
-import Telemetry from './pages/Telemetry';
-import Bars from './pages/Bars';
+import Showcase from './pages/Showcase';
 import SettingsPage from './pages/Settings';
 import Deploy from './pages/Deploy';
 
@@ -21,33 +20,26 @@ export default function App() {
   const user = useCurrentUser();
   const [booting, setBooting] = useState(true);
 
-  // Определение режима: есть ли серверное ядро рядом?
+  // Определение режима: серверное ядро рядом?
   useEffect(() => {
-    rehydrate();
     let alive = true;
-
     const probe = async (first: boolean) => {
       const ver = await detectApi();
       if (!alive) return;
-      const s = getState();
       if (ver) {
         store.setCoreVersion(ver);
-        // восстанавливаем сессию по сохранённому токену
-        if (!s.session && !(await restoreServerSession())) {
+        if (!getState().session && !(await restoreServerSession())) {
           /* покажем экран входа */
-        } else if (s.apiMode === 'server') {
+        } else if (getState().apiMode === 'server') {
           void syncAll();
         }
       }
       if (first && alive) setBooting(false);
     };
-
     void probe(true);
-    // если ядро стартует позже консоли — доопределимся
     const t = window.setInterval(() => {
       if (!getState().session) void probe(false);
     }, 5000);
-
     return () => {
       alive = false;
       window.clearInterval(t);
@@ -58,9 +50,7 @@ export default function App() {
   useEffect(() => {
     if (hasSession && apiMode === 'embedded') startEngine();
     else stopEngine();
-    return () => {
-      stopEngine();
-    };
+    return () => stopEngine();
   }, [hasSession, apiMode]);
 
   // Серверный режим: поллинг состояния ядра
@@ -87,18 +77,15 @@ export default function App() {
 
   // контроль доступа по ролям
   let page = route;
-  if (user.role !== 'admin' && page === 'settings') page = 'dashboard';
-  if (user.role !== 'admin' && page === 'agents' && !user.scope.includes('agent')) page = 'dashboard';
-  if (user.role !== 'admin' && page === 'telemetry' && !user.scope.includes('agent')) page = 'dashboard';
-  if (user.role !== 'admin' && page === 'bars' && !user.scope.includes('glances')) page = 'dashboard';
+  if (user.role !== 'admin' && (page === 'settings' || page === 'showcase')) page = 'dashboard';
+  if (user.role !== 'admin' && page === 'agents' && !user.scope.includes('agent' as never)) page = 'dashboard';
 
   return (
     <Shell>
       {page === 'dashboard' && <Dashboard />}
       {page === 'devices' && <Devices key={`dev-${user.id}`} />}
       {page === 'agents' && <Agents key={`ag-${user.id}`} />}
-      {page === 'telemetry' && <Telemetry key={`tel-${user.id}`} />}
-      {page === 'bars' && <Bars key={`bars-${user.id}`} />}
+      {page === 'showcase' && <Showcase />}
       {page === 'settings' && <SettingsPage />}
       {page === 'deploy' && <Deploy />}
     </Shell>

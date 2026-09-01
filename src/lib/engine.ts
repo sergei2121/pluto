@@ -1,11 +1,9 @@
 // ─── PLUTO: встроенное ядро (браузерный режим) ──────────────────────────────
-// Работает, когда серверное ядро недоступно: честные fetch-зонды для HTTP/API
-// и синтез для ICMP/RTSP/SIP (браузер не умеет слать ICMP). В серверном режиме
-// движок выключен — все проверки выполняет ядро.
-
+// Используется только когда серверное ядро недоступно. HTTP/API-зонды —
+// честные fetch; ICMP/RTSP/SIP — протокольная эмуляция (браузер не шлёт ICMP).
 import { getState, store, useToasts } from './store';
-import type { Device, GlancesPoint } from './types';
-import { clamp, mulberry32, hashStr, rnd, rndInt } from './util';
+import type { Device } from './types';
+import { clamp, hashStr, mulberry32, rnd } from './util';
 
 let timer: number | null = null;
 
@@ -30,18 +28,13 @@ function tick() {
     if (now - d.lastCheck >= iv) void runCheck(d);
   }
 
+  const aiv = Math.max(10, s.settings.intervals.agent) * 1000;
   for (const a of s.agents) {
-    const agentIv = Math.max(10, s.settings.intervals.agent ?? 30) * 1000;
-    if (now - a.lastPoll >= agentIv) stepAgent(a.id, now);
-  }
-
-  for (const g of s.glances) {
-    const gIv = Math.max(15, s.settings.intervals.glances ?? 60) * 1000;
-    if (now - g.lastScrape >= gIv) stepGlancesDevice(g.id, now);
+    if (now - a.lastPoll >= aiv) pollAgentEmbedded(a.id);
   }
 }
 
-// ─── Устройства ─────────────────────────────────────────────────────────────
+// ─── Проверки устройств ─────────────────────────────────────────────────────
 
 function probeUrl(d: Device): string | null {
   const addr = d.address.trim();
@@ -54,64 +47,39 @@ function probeUrl(d: Device): string | null {
   return null;
 }
 
-async function realProbe(d: Device, timeoutMs: number): Promise<{ ok: boolean; latency: number }> {
-  const url = probeUrl(d);
-  if (!url) return { ok: false, latency: 0 };
-  const ctrl = new AbortController();
-  const to = window.setTimeout(() => ctrl.abort(), timeoutMs);
-  const t0 = performance.now();
-  try {
-    await fetch(url, { mode: 'no-cors', cache: 'no-store', signal: ctrl.signal, method: d.method ?? 'GET' });
-    return { ok: true, latency: Math.max(1, Math.round(performance.now() - t0)) };
-  } catch {
-    return { ok: false, latency: 0 };
-  } finally {
-    window.clearTimeout(to);
-  }
-}
-
 function simulatedProbe(d: Device, now: number): { ok: boolean; latency: number } {
   const slot = Math.floor(now / 1000 / Math.max(5, d.interval));
   const rng = mulberry32(hashStr(d.id) ^ slot);
-  if (now < d.spikeUntil) return { ok: true, latency: Math.round(d.profile.base * (6 + rng() * 18)) };
-  if (rng() < d.profile.failP) return { ok: false, latency: 0 };
-  if (rng() < d.profile.spikeP) store.patchDevice(d.id, { spikeUntil: now + rndInt(40, 140) * 1000 });
-  return { ok: true, latency: Math.max(1, Math.round(d.profile.base * (0.72 + rng() * 0.56))) };
+  const base = { ping: 12, http: 45, api: 60, rtsp: 80, sip: 40 }[d.type] ?? 30;
+  if (rng() < 0.03) return { ok: false, latency: 0 };
+  const spike = rng() < 0.02 ? base * 12 : 0;
+  return { ok: true, latency: Math.max(1, Math.round(base * (0.72 + rng() * 0.56) + spike)) };
 }
 
-async function runCheck(d: Device) {
+export async function runCheck(d: Device): Promise<void> {
   const s = getState();
   store.patchDevice(d.id, { checking: true });
-  const url = probeUrl(d);
   let res: { ok: boolean; latency: number };
-  let approx: boolean;
+  let approx = false;
+
+  const url = probeUrl(d);
   if (url && (d.type === 'http' || d.type === 'api')) {
-    res = await realProbe(d, s.settings.timeoutMs);
-    approx = false;
-  } else if (!url) {
-    res = { ok: false, latency: 0 };
-    approx = true;
+    const t0 = performance.now();
+    try {
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), s.settings.timeoutMs);
+      await fetch(url, { mode: 'no-cors', cache: 'no-store', signal: ctrl.signal, method: d.method ?? 'GET' });
+      clearTimeout(to);
+      res = { ok: true, latency: Math.max(1, Math.round(performance.now() - t0)) };
+    } catch {
+      res = { ok: false, latency: 0 };
+    }
   } else {
-    await new Promise((r) => setTimeout(r, rndInt(120, 500)));
+    await new Promise((r) => setTimeout(r, 200 + Math.random() * 400));
     res = simulatedProbe(d, Date.now());
     approx = true;
   }
   applyResult(d.id, res.ok, res.latency, approx);
-}
-
-export async function forceCheck(id: string): Promise<{ ok: boolean; latency: number } | null> {
-  const s = getState();
-  if (s.apiMode === 'server') {
-    const { api, syncAll } = await import('./api');
-    const r = await api.checkDevice(id);
-    void syncAll();
-    return { ok: r.result.ok, latency: r.result.latency ?? 0 };
-  }
-  const d = s.devices.find((x) => x.id === id);
-  if (!d) return null;
-  await runCheck(d);
-  const fresh = getState().devices.find((x) => x.id === id);
-  return fresh ? { ok: fresh.status !== 'down', latency: fresh.latency ?? 0 } : null;
 }
 
 function applyResult(id: string, ok: boolean, latency: number, approx: boolean) {
@@ -134,119 +102,75 @@ function applyResult(id: string, ok: boolean, latency: number, approx: boolean) 
     return;
   }
 
-  const base = d.baseline ?? d.profile.base;
-  const degraded = latency > base * cfg.degradeFactor && latency > cfg.degradeMinMs;
+  const degraded = latency > cfg.degradeMinMs && d.latency != null && latency > d.latency * cfg.degradeFactor;
   const status: Device['status'] = degraded ? 'degraded' : 'up';
-
   if (d.status === 'down') {
     store.pushEvent('ok', 'device', `${d.name} (${d.address}) — связь восстановлена`);
-    if (cfg.notifications.on.recover) dispatchNotification('recover', 'PLUTO: восстановление', `${d.name} снова в строю`);
   } else if (degraded && d.status !== 'degraded') {
-    store.pushEvent('warn', 'device', `${d.name}: деградация связи — ${latency} мс при базовых ${Math.round(base)} мс`);
-    if (cfg.notifications.on.degraded) dispatchNotification('degraded', 'PLUTO: деградация', `${d.name}: задержка ${latency} мс`);
+    store.pushEvent('warn', 'device', `${d.name}: деградация связи — ${latency} мс`);
   }
-
-  store.patchDevice(id, {
-    status, fails: 0, latency, baseline: Math.round(base * 0.9 + latency * 0.1),
-    lastCheck: now, lastChange: status === d.status ? d.lastChange : now, history, checking: false, approx,
-  });
+  store.patchDevice(id, { status, fails: 0, latency, lastCheck: now, lastChange: status === d.status ? d.lastChange : now, history, checking: false, approx });
 }
 
-// ─── Агенты (эмуляция телеметрии Glances) ────────────────────────────────────
-
-function mockGlancesPoint(t: number, memTotal: number): GlancesPoint {
-  return {
-    t,
-    cpu: Math.round(rnd(2, 90) * 10) / 10, user: Math.round(rnd(1, 50) * 10) / 10,
-    system: Math.round(rnd(1, 25) * 10) / 10, iowait: Math.round(rnd(0, 10) * 10) / 10,
-    idle: Math.round(rnd(10, 95) * 10) / 10, irq: 0, nice: 0, steal: 0,
-    mem: Math.round(rnd(20, 90) * 10) / 10, memTotal,
-    memUsed: Math.round(rnd(memTotal * 0.2, memTotal * 0.85) * 10) / 10,
-    memFree: Math.round(rnd(memTotal * 0.1, memTotal * 0.6) * 10) / 10,
-    rx: Math.round(rnd(0, 5000) * 10) / 10, tx: Math.round(rnd(0, 1500) * 10) / 10,
-    pkg: Math.round(rnd(35, 78) * 10) / 10, ssdTemp: Math.round(rnd(30, 58) * 10) / 10,
-    load1: Math.round(rnd(0.2, 3.5) * 100) / 100, load5: Math.round(rnd(0.2, 2.5) * 100) / 100,
-    load15: Math.round(rnd(0.2, 2) * 100) / 100, swap: Math.round(rnd(0, 15) * 10) / 10,
-    diskRead: Math.round(rnd(0, 8000) * 10) / 10, diskWrite: Math.round(rnd(0, 4000) * 10) / 10,
-    diskCount: 3, diskUsed: Math.round(rnd(30, 80) * 10) / 10,
-    uptimeSec: Math.floor(t / 1000) % 864000,
-  };
+export async function forceCheck(id: string): Promise<void> {
+  const d = getState().devices.find((x) => x.id === id);
+  if (d) await runCheck(d);
 }
 
-function stepAgent(id: string, now: number) {
+// ─── Агенты (relay) — эмуляция ──────────────────────────────────────────────
+
+export function pollAgentEmbedded(id: string) {
   const s = getState();
   const a = s.agents.find((x) => x.id === id);
-  if (!a) return;
-
+  if (!a || s.apiMode === 'server') return;
+  const now = Date.now();
   const rng = mulberry32(hashStr(id) ^ Math.floor(now / 1000));
-  const online = rng() > 0.015;
-  const ms = online ? Math.round(rnd(1, 40)) : null;
+  const online = rng() > 0.03;
+  const ms = online ? Math.max(1, Math.round(rnd(1, 40))) : null;
 
-  const glIv = Math.max(15, s.settings.intervals.glances ?? 60) * 1000;
-  const dueGl = a.glancesUrl && now - a.lastGlances >= glIv;
-
-  let glancesLatest = a.glancesLatest;
-  let glances = a.glances;
-  if (online && dueGl) {
-    const pt = mockGlancesPoint(now, 16);
-    glancesLatest = pt;
-    glances = [...glances, pt].slice(-4000);
-  }
+  const targets = a.pingTargets.map((tgt) => ({
+    target: tgt,
+    lastCheck: now,
+    results: expandLocal(tgt).map((ip) => {
+      const alive = online && rng() > 0.08;
+      return { ip, alive, latency: alive ? Math.max(1, Math.round(rnd(1, 30))) : null };
+    }),
+  }));
 
   store.patchAgent(id, {
-    online, latency: ms,
-    onlineSince: online ? (a.onlineSince || now) : 0,
+    online,
+    latency: ms,
+    onlineSince: online ? a.onlineSince || now : 0,
     lastSeen: online ? now : a.lastSeen,
     lastPoll: now,
-    lastGlances: dueGl && online ? now : a.lastGlances,
-    glancesLatest, glances,
+    targets,
     latHist: [...a.latHist, { t: now, ms }].slice(-480),
-    lastError: online ? null : 'агент недоступен (эмуляция)',
   });
 }
 
-// ─── Glances-устройства (Bars, эмуляция) ────────────────────────────────────
-
-function stepGlancesDevice(id: string, now: number) {
-  const s = getState();
-  const g = s.glances.find((x) => x.id === id);
-  if (!g) return;
-  const online = Math.random() > 0.02;
-  if (!online) {
-    set({ glances: getState().glances.map((x) => (x.id === id ? { ...x, online: false, lastScrape: now, lastError: 'сервер не ответил (эмуляция)' } : x)) });
-    return;
+function expandLocal(target: string): string[] {
+  const t = target.trim();
+  const ip = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.)(\d{1,3})$/.exec(t);
+  if (ip) return [t];
+  const range = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.)(\d{1,3})\s*-\s*(\d{1,3})$/.exec(t);
+  if (range) {
+    const out: string[] = [];
+    for (let i = parseInt(range[2], 10); i <= parseInt(range[3], 10) && out.length < 32; i++) out.push(range[1] + i);
+    return out;
   }
-  const pt = mockGlancesPoint(now, 32);
-  set({
-    glances: getState().glances.map((x) =>
-      x.id === id
-        ? { ...x, online: true, lastScrape: now, lastError: null, latest: pt, history: [...(x.history || []), pt].slice(-4000) }
-        : x,
-    ),
-  });
+  return [t];
 }
 
-function set(patch: Partial<ReturnType<typeof getState>>) {
-  // локальная мутация для эмуляционного режима (вне серверного стора)
-  const s = getState();
-  store.applyServerState({
-    devices: patch.devices ?? s.devices,
-    agents: patch.agents ?? s.agents,
-    glances: patch.glances ?? s.glances,
-    tags: s.tags,
-    events: s.events,
-    settings: s.settings,
-  });
-}
+// ─── Уведомления ────────────────────────────────────────────────────────────
 
-// ─── Уведомления ─────────────────────────────────────────────────────────────
-
-type NotifyKind = 'down' | 'degraded' | 'recover' | 'agentOff' | 'agentOn';
-
-function dispatchNotification(kind: NotifyKind, title: string, body: string) {
+function dispatchNotification(kind: 'down' | 'degraded' | 'recover' | 'agentOff' | 'agentOn', title: string, body: string) {
   const n = getState().settings.notifications;
   if (n.push.enabled && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-    try { new Notification(title, { body, tag: `${kind}-${Date.now()}` }); } catch { /* без поддержки */ }
+    try {
+      new Notification(title, { body, tag: `${kind}-${Date.now()}` });
+    } catch {
+      /* noop */
+    }
   }
   if (n.telegram.enabled && n.telegram.botToken.trim() && n.telegram.chatId.trim()) {
     fetch(`https://api.telegram.org/bot${n.telegram.botToken.trim()}/sendMessage`, {
@@ -257,31 +181,32 @@ function dispatchNotification(kind: NotifyKind, title: string, body: string) {
   }
 }
 
-export function sendTestNotification(kind: 'push' | 'telegram' | 'email'): { ok: boolean; text: string } {
-  const n = getState().settings.notifications;
-  const body = 'Проверочное уведомление системы мониторинга PLUTO.';
-  if (kind === 'push') {
-    if (typeof Notification === 'undefined') return { ok: false, text: 'Браузер не поддерживает уведомления' };
-    if (Notification.permission !== 'granted') return { ok: false, text: 'Разрешение на уведомления не выдано' };
-    try { new Notification('PLUTO: тест', { body }); return { ok: true, text: 'Уведомление показано' }; }
-    catch { return { ok: false, text: 'Не удалось показать уведомление' }; }
-  }
-  if (kind === 'telegram') {
-    if (!n.telegram.botToken.trim() || !n.telegram.chatId.trim()) return { ok: false, text: 'Заполните токен бота и chat_id' };
-    fetch(`https://api.telegram.org/bot${n.telegram.botToken.trim()}/sendMessage`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: n.telegram.chatId.trim(), text: `PLUTO: тест\n${body}` }),
-    })
-      .then((r) => useToasts.push(r.ok ? 'ok' : 'warn', r.ok ? 'Telegram: тест отправлен' : 'Telegram: ошибка API'))
-      .catch(() => useToasts.push('warn', 'Telegram: запрос не прошёл'));
-    return { ok: true, text: 'Запрос к Telegram API отправлен' };
-  }
-  return { ok: true, text: 'Письмо поставлено в очередь (SMTP работает на сервере ядра)' };
-}
-
 export function requestPushPermission(): Promise<boolean> {
   if (typeof Notification === 'undefined') return Promise.resolve(false);
   return Notification.requestPermission().then((p) => p === 'granted');
 }
 
-export { clamp };
+export function sendTestNotification(kind: 'push' | 'telegram' | 'email'): { ok: boolean; text: string } {
+  const n = getState().settings.notifications;
+  const body = 'Проверочное уведомление PLUTO. Канал связи работает.';
+  if (kind === 'push') {
+    if (typeof Notification === 'undefined') return { ok: false, text: 'Браузер не поддерживает уведомления' };
+    if (Notification.permission !== 'granted') return { ok: false, text: 'Разрешение не выдано' };
+    new Notification('PLUTO: тест', { body });
+    return { ok: true, text: 'Уведомление показано' };
+  }
+  if (kind === 'telegram') {
+    if (!n.telegram.botToken.trim() || !n.telegram.chatId.trim()) return { ok: false, text: 'Заполните токен и chat_id' };
+    fetch(`https://api.telegram.org/bot${n.telegram.botToken.trim()}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: n.telegram.chatId.trim(), text: `PLUTO: тест\n${body}` }),
+    }).catch(() => undefined);
+    return { ok: true, text: 'Запрос к Telegram отправлен' };
+  }
+  return { ok: true, text: 'Письмо поставлено в очередь (SMTP на сервере)' };
+}
+
+export function clampLat(v: number): number {
+  return clamp(v, 0, 10000);
+}

@@ -42,7 +42,7 @@ export default class ErrorBoundary extends Component<Props, State> {
 
           <p className="mt-5 text-[13px] leading-relaxed text-[#aeb6d8]">
             {stale
-              ? 'Похоже, браузер загрузил устаревший пакет интерфейса. Нажмите Ctrl+Shift+R; если не поможет — пересоберите образ: git pull && docker compose up -d --build.'
+              ? 'Похоже, браузер загрузил устаревший пакет. Нажмите Ctrl+Shift+R; если не поможет — пересоберите образ: git pull && docker compose up -d --build.'
               : 'Компонент консоли упал с ошибкой. Перезагрузите страницу; если ошибка повторяется — пересоберите образ и пришлите текст ниже.'}
           </p>
 

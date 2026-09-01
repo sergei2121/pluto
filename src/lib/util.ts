@@ -1,6 +1,6 @@
 // ─── PLUTO: утилиты ─────────────────────────────────────────────────────────
 
-export const CONSOLE_VERSION = '1.11.0';
+export const CONSOLE_VERSION = '1.12.0';
 
 export function hashStr(s: string): number {
   let h = 2166136261;
@@ -26,10 +26,6 @@ export function rnd(min: number, max: number): number {
   return min + Math.random() * (max - min);
 }
 
-export function rndInt(min: number, max: number): number {
-  return Math.floor(rnd(min, max + 1));
-}
-
 export function clamp(v: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, v));
 }
@@ -37,7 +33,9 @@ export function clamp(v: number, min: number, max: number): number {
 let counter = 0;
 export function uid(prefix: string): string {
   counter = (counter + 1) % 1296;
-  return `${prefix}-${Date.now().toString(36)}${counter.toString(36).padStart(2, '0')}${Math.floor(Math.random() * 1296)
+  return `${prefix}-${Date.now().toString(36)}${counter.toString(36).padStart(2, '0')}${Math.floor(
+    Math.random() * 1296,
+  )
     .toString(36)
     .padStart(2, '0')}`;
 }
@@ -53,8 +51,6 @@ export function cls(...parts: Array<string | false | null | undefined>): string 
   return parts.filter(Boolean).join(' ');
 }
 
-// ─── Форматирование ──────────────────────────────────────────────────────────
-
 export function timeAgo(ts: number): string {
   if (!ts) return '—';
   const d = Math.max(0, Date.now() - ts);
@@ -69,45 +65,59 @@ export function fmtClock(ts: number): string {
   return new Date(ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-export function fmtDate(ts: number): string {
-  return new Date(ts).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) +
-    ' ' + new Date(ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-}
-
 export function fmtMs(n: number | null): string {
   if (n == null) return '—';
   if (n >= 1000) return `${(n / 1000).toFixed(2)} с`;
   return `${Math.round(n)} мс`;
 }
 
-export function fmtNet(kbs: number | null): string {
-  if (kbs == null) return '—';
-  if (kbs >= 1024 * 1024) return `${(kbs / 1024 / 1024).toFixed(2)} ГБ/с`;
-  if (kbs >= 1024) return `${(kbs / 1024).toFixed(1)} МБ/с`;
-  return `${Math.round(kbs)} КБ/с`;
-}
-
 export function fmtUp(ms: number): string {
-  if (!ms || ms < 0) return '—';
-  const m = Math.floor(ms / 60000);
-  if (m < 1) return '< 1 мин';
-  if (m < 60) return `${m} мин`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h} ч ${m % 60} мин`;
-  const d = Math.floor(h / 24);
-  return `${d} д ${h % 24} ч`;
+  if (ms <= 0) return '—';
+  const s = Math.floor(ms / 1000);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d > 0) return `${d}д ${h}ч`;
+  if (h > 0) return `${h}ч ${m}м`;
+  return `${m}м ${s % 60}с`;
 }
 
-export function fmtUpSec(sec: number | null): string {
-  if (sec == null) return '—';
-  return fmtUp(sec * 1000);
+export function isIp(s: string): boolean {
+  return /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(s.trim());
 }
 
-// ─── Палитра тегов (10 цветов) ───────────────────────────────────────────────
+/** IP, диапазон a.b.c.1-10 или подсеть a.b.c.0/24 */
+export function isTarget(s: string): boolean {
+  const t = s.trim();
+  if (isIp(t)) return true;
+  if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\s*-\s*\d{1,3}$/.test(t)) return true;
+  if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}$/.test(t)) return true;
+  return false;
+}
+
+export function expandTargets(target: string): string[] {
+  const t = target.trim();
+  if (isIp(t)) return [t];
+  const range = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.)(\d{1,3})\s*-\s*(\d{1,3})$/.exec(t);
+  if (range) {
+    const out: string[] = [];
+    const a = parseInt(range[2], 10);
+    const b = parseInt(range[3], 10);
+    for (let i = Math.min(a, b); i <= Math.max(a, b) && out.length < 256; i++) out.push(range[1] + i);
+    return out;
+  }
+  const cidr = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.)\d{1,3}\/(\d{1,2})$/.exec(t);
+  if (cidr && parseInt(cidr[2], 10) >= 24) {
+    const out: string[] = [];
+    for (let i = 1; i < 255; i++) out.push(cidr[1] + i);
+    return out;
+  }
+  return [];
+}
 
 export const TAG_COLORS = [
   '#9a8cfa', '#7ba4e6', '#5fc6d8', '#55c795', '#8bc46a',
   '#e0b65e', '#e0945e', '#e07a80', '#d98bb0', '#98a4c8',
 ];
 
-export const LINE_COLORS = ['#8f7df0', '#7ba4e6', '#5fc6d8', '#55c795', '#dfa65e', '#e07a80', '#d98bb0', '#98a4c8', '#8bc46a', '#e0945e'];
+export const LINE_COLORS = ['#8f7df0', '#7ba4e6', '#5fc6d8', '#55c795', '#e0b65e', '#e07a80', '#d98bb0', '#8bc46a'];

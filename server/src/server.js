@@ -1,382 +1,43 @@
-// ─── PLUTO Core v1.10: REST API + движок опроса + шлюз агентов ──────────────
+// ─── PLUTO Core: HTTP-сервер, проверки, relay-агенты, публичная витрина ──────
 import http from 'node:http';
-import https from 'node:https';
-import fs from 'node:fs';
-import path from 'node:path';
 import net from 'node:net';
 import dgram from 'node:dgram';
+import fs from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import {
-  loadDb, saveDb, uid, pushEvent, hashPass, verifyPass, issueSession, authUser, attachWs,
+  loadDb, getDb, saveDb, uid, pushEvent, hashPass, verifyPass,
+  issueSession, authUser, publicUser, DEFAULT_SETTINGS,
 } from './lib.js';
 
-const VERSION = '1.11.0';
+const VERSION = '1.12.0';
 const HTTP_PORT = parseInt(process.env.HTTP_PORT || '8080', 10);
-const AGENT_PORT = parseInt(process.env.AGENT_PORT || '8443', 10);
-// Зеркало-ретранслятор: PLUTO_MIRROR=1 запускает экземпляр в режиме «витрина»
-// (read-only, не опрашивает ничего), MIRROR_SECRET защищает приём снапшотов.
-const IS_MIRROR = process.env.PLUTO_MIRROR === '1';
-const MIRROR_SECRET = (process.env.MIRROR_SECRET || '').trim();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.join(__dirname, '..', 'web');
 
 const db = loadDb();
 
-const MIME = {
-  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon',
-  '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8',
-};
+// ─── HTTP-хелперы ────────────────────────────────────────────────────────────
 
-function json(res, code, data) {
+function json(res, code, obj) {
+  const body = JSON.stringify(obj);
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
-  res.end(JSON.stringify(data));
+  res.end(body);
 }
 function text(res, code, body, type = 'text/plain; charset=utf-8') {
   res.writeHead(code, { 'Content-Type': type });
   res.end(body);
 }
 function readBody(req) {
-  return new Promise((resolve) => {
-    let raw = '';
-    req.on('data', (c) => (raw += c));
-    req.on('end', () => {
-      try { resolve(JSON.parse(raw || '{}')); } catch { resolve({}); }
-    });
-  });
-}
-const publicUser = (u) => ({ id: u.id, name: u.name, login: u.login, role: u.role, scope: u.scope, builtIn: u.builtIn, createdAt: u.createdAt });
-
-// ─── HTTP-клиент с абсолютным таймаутом ─────────────────────────────────────
-
-function fetchText(rawUrl, timeoutMs = 7000) {
   return new Promise((resolve, reject) => {
-    let u;
-    try { u = new URL(rawUrl); } catch { return reject(new Error('некорректный адрес')); }
-    const lib = u.protocol === 'https:' ? https : http;
-    let done = false;
-    const r = lib.get(u, {
-      timeout: timeoutMs,
-      headers: { 'User-Agent': 'pluto-core', 'Accept': '*/*', 'Connection': 'close' },
-    }, (res) => {
-      if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
-        res.resume();
-        return fetchText(new URL(res.headers.location, u).toString(), timeoutMs).then(finish(resolve), finish(reject));
-      }
-      if (res.statusCode !== 200) { res.resume(); return finish(reject)(new Error(`HTTP ${res.statusCode}`)); }
-      let data = '';
-      res.setEncoding('utf8');
-      res.on('data', (c) => (data += c));
-      res.on('end', () => finish(resolve)(data));
+    let data = '';
+    req.on('data', (c) => (data += c));
+    req.on('end', () => {
+      try { resolve(data ? JSON.parse(data) : {}); } catch (e) { reject(e); }
     });
-    const kill = setTimeout(() => { if (!done) r.destroy(new Error(`таймаут запроса (${timeoutMs} мс)`)); }, timeoutMs);
-    function finish(fn) {
-      return (v) => { if (done) return; done = true; clearTimeout(kill); fn(v); };
-    }
-    r.on('timeout', () => r.destroy(new Error('таймаут соединения')));
-    r.on('error', (e) => finish(reject)(e));
+    req.on('error', reject);
   });
-}
-
-const isLoopbackUrl = (u) => /^https?:\/\/(127\.|localhost|0\.0\.0\.0|\[::1?\])/i.test(String(u || '').trim());
-
-/** Чтение страницы напрямую или через relay (для loopback-адресов). */
-async function fetchListing(url, relayUrl) {
-  const target = String(url || '').trim();
-  if (!target) throw new Error('не задан адрес источника');
-  if (isLoopbackUrl(target)) {
-    if (!relayUrl) throw new Error(`адрес ${target} локальный — сервер не может открыть его из контейнера. Укажите LAN-IP машины или настройте relay (aida-monitor)`);
-    const base = String(relayUrl).replace(/\/+$/, '');
-    try {
-      const html = await fetchText(base + '/fetch?url=' + encodeURIComponent(target), 15000);
-      return { html, via: 'relay' };
-    } catch (e) {
-      throw new Error('loopback-адрес, relay не ответил: ' + (e.message || e));
-    }
-  }
-  const html = await fetchText(target, 7000);
-  return { html, via: 'direct' };
-}
-
-// ─── Хранение рядов с ярусным сжатием ───────────────────────────────────────
-
-function mergePoints(dst, src) {
-  for (const k of Object.keys(src)) {
-    if (k === 't') continue;
-    const v = src[k];
-    if (typeof v !== 'number' || !isFinite(v)) continue;
-    dst[k] = dst[k] == null ? v : Math.round(((dst[k] + v) / 2) * 10) / 10;
-  }
-  dst.t = src.t;
-}
-
-/** < 24 ч — как есть; 24 ч–7 дн — минутные бакеты; > 7 дн — часовые. */
-function compactSeries(arr, now) {
-  const d1 = now - 86400000;
-  const d7 = now - 7 * 86400000;
-  const raw = [];
-  const byMin = new Map();
-  const byHour = new Map();
-  for (const pt of arr) {
-    if (pt.t >= d1) raw.push(pt);
-    else if (pt.t >= d7) {
-      const k = Math.floor(pt.t / 60000);
-      const ex = byMin.get(k);
-      if (ex) mergePoints(ex, pt);
-      else byMin.set(k, { ...pt });
-    } else {
-      const k = Math.floor(pt.t / 3600000);
-      const ex = byHour.get(k);
-      if (ex) mergePoints(ex, pt);
-      else byHour.set(k, { ...pt });
-    }
-  }
-  const out = [...byHour.values(), ...byMin.values(), ...raw];
-  out.sort((a, b) => a.t - b.t);
-  return out;
-}
-
-const MAX_POINTS = 20000;
-const GLANCES_RETENTION_MS = 30 * 86400000; // 30 дней
-
-function seriesAppend(agent, key, pt, retentionMs) {
-  if (!Array.isArray(agent[key])) agent[key] = [];
-  const arr = agent[key];
-  arr.push(pt);
-  if (arr.length > MAX_POINTS) agent[key] = compactSeries(arr, pt.t);
-  const cutoff = pt.t - retentionMs;
-  let i = 0;
-  while (i < agent[key].length && agent[key][i].t < cutoff) i++;
-  if (i > 0) agent[key].splice(0, i);
-}
-
-const GLANCES_RANGE_MS = {
-  '5m': 5 * 60000, '30m': 30 * 60000, '3h': 3 * 3600000, '24h': 24 * 3600000,
-  '7d': 7 * 86400000, '30d': 30 * 86400000,
-};
-
-function rangePoints(arr, rangeMs, range) {
-  const cutoff = Date.now() - rangeMs;
-  let pts = (arr || []).filter((x) => x.t >= cutoff);
-  if (pts.length > 1500) {
-    const bw = rangeMs / 1500;
-    const out = [];
-    let cur = null, bi = -1;
-    for (const pt of pts) {
-      const idx = Math.floor((pt.t - cutoff) / bw);
-      if (idx !== bi) { if (cur) out.push(cur); cur = { ...pt }; bi = idx; }
-      else mergePoints(cur, pt);
-    }
-    if (cur) out.push(cur);
-    pts = out;
-  }
-  return { range, retentionDays: Math.round(rangeMs / 86400000) || 30, points: pts };
-}
-
-// ─── Парсер Glances (столбцы CPU/MEM/Rx/Tx/Package) ─────────────────────────
-
-const GLANCES_KEYS = ['cpu', 'user', 'system', 'iowait', 'idle', 'irq', 'nice', 'steal', 'mem', 'memTotal', 'memUsed', 'memFree', 'rx', 'tx', 'pkg', 'diskCount', 'diskUsed'];
-
-function htmlToText(html) {
-  return String(html)
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<br\s*\/?>/gi, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&deg;/gi, '°')
-    .replace(/&amp;/gi, '&')
-    .replace(/&#(\d+);/g, (_, c) => String.fromCharCode(+c))
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ');
-}
-
-function gSection(t, startRe, endRe) {
-  const s = t.search(startRe);
-  if (s < 0) return '';
-  const rest = t.slice(s);
-  const e = rest.slice(1).search(endRe);
-  return e < 0 ? rest : rest.slice(0, e + 1);
-}
-const gNum = (s, re) => { const m = s.match(re); return m ? parseFloat(m[1]) : null; };
-
-function gValGB(s, label) {
-  const m = s.match(new RegExp(label + ':?\\s*([0-9]+(?:\\.[0-9]+)?)\\s*([KMGT])?', 'i'));
-  if (!m) return null;
-  const v = parseFloat(m[1]);
-  const u = (m[2] || 'G').toUpperCase();
-  if (u === 'T') return Math.round(v * 1024 * 100) / 100;
-  if (u === 'G') return v;
-  if (u === 'M') return Math.round((v / 1024) * 100) / 100;
-  return Math.round((v / (1024 * 1024)) * 100) / 100;
-}
-
-function gNetKB(t, label) {
-  const re = new RegExp(label + '/s:?\\s*([0-9]+(?:\\.[0-9]+)?)\\s*([KMGT])?', 'gi');
-  let sum = 0, n = 0, m;
-  while ((m = re.exec(t))) {
-    const v = parseFloat(m[1]);
-    const u = (m[2] || '').toUpperCase();
-    const mult = u === 'T' ? 1e12 : u === 'G' ? 1e9 : u === 'M' ? 1e6 : u === 'K' ? 1e3 : 1;
-    sum += (v * mult) / 1024;
-    n++;
-  }
-  return n ? Math.round(sum * 10) / 10 : null;
-}
-
-function parseGlances(html) {
-  const t = htmlToText(html);
-  const cpuS = gSection(t, /\bCPU\b/i, /\b(MEM|LOAD|PERCPU|SWAP)\b/i);
-  const memS = gSection(t, /\bMEM\b/i, /\b(SWAP|LOAD|NETWORK|DISK|SENSORS|PROCESSES)\b/i);
-  return {
-    cpu: gNum(cpuS, /\bCPU\s+([0-9]+(?:\.[0-9]+)?)\s*%/i),
-    user: gNum(cpuS, /user:?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i),
-    system: gNum(cpuS, /system:?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i),
-    iowait: gNum(cpuS, /iowait:?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i),
-    idle: gNum(cpuS, /idle:?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i),
-    irq: gNum(cpuS, /irq:?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i),
-    nice: gNum(cpuS, /nice:?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i),
-    steal: gNum(cpuS, /steal:?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i),
-    mem: gNum(memS, /\bMEM\s+([0-9]+(?:\.[0-9]+)?)\s*%/i),
-    memTotal: gValGB(memS, 'total'),
-    memUsed: gValGB(memS, 'used'),
-    memFree: gValGB(memS, 'free'),
-    rx: gNetKB(t, 'Rx'),
-    tx: gNetKB(t, 'Tx'),
-    pkg: gNum(t, /Package[^0-9°]{0,24}?([0-9]+(?:\.[0-9]+)?)\s*°?\s*C/i),
-    diskCount: null,
-    diskUsed: null,
-  };
-}
-
-/**
- * Сбор Glances через REST API — надёжный способ: веб-страница Glances — это SPA,
- * значения в сыром HTML отсутствуют, но тот же порт отдаёт JSON:
- *   /api/4/all (Glances 4.x) и /api/3/all (Glances 3.x).
- * Разбор HTML (parseGlances) оставлен как запасной вариант для очень старых версий.
- */
-const GB = 1024 ** 3;
-const n2 = (v) => (typeof v === 'number' && isFinite(v) ? Math.round(v * 100) / 100 : null);
-
-/** Виртуальные интерфейсы, которые НЕ являются реальным адаптером (VM, контейнеры, туннели). */
-const VIRT_NET = /^(lo|loopback|veth|virbr|docker|br[-\d]|vboxnet|vmnet|vnet|venet|tap|tun|bond|team|wsl|bluetooth|isatap|teredo|pseudo|any|virtual|hyper-v|vethernet|vmware|virtualbox|local area connection\s*\*)/i;
-
-function glancesFromApi(data) {
-  const pt = {
-    cpu: null, user: null, system: null, iowait: null, idle: null, irq: null, nice: null, steal: null,
-    mem: null, memTotal: null, memUsed: null, memFree: null, rx: null, tx: null, pkg: null,
-    diskCount: null, diskUsed: null,
-  };
-  const cpu = data && data.cpu;
-  if (cpu && typeof cpu === 'object') {
-    pt.cpu = n2(cpu.total);
-    pt.user = n2(cpu.user);
-    pt.system = n2(cpu.system);
-    pt.iowait = n2(cpu.iowait);
-    pt.idle = n2(cpu.idle);
-    pt.irq = n2(cpu.irq);
-    pt.nice = n2(cpu.nice);
-    pt.steal = n2(cpu.steal);
-  }
-  const mem = data && data.mem;
-  if (mem && typeof mem === 'object') {
-    pt.mem = n2(mem.percent);
-    pt.memTotal = n2((mem.total || 0) / GB);
-    pt.memUsed = n2((mem.used || 0) / GB);
-    pt.memFree = n2((mem.free || 0) / GB);
-  }
-
-  // ── FILE SYS (плагин fs): количество ФС и заполненность основной ──
-  let disks = [];
-  const fs = data && data.fs;
-  if (Array.isArray(fs)) {
-    disks = fs
-      .filter((f) => f && typeof f.percent === 'number')
-      .map((f) => ({
-        mnt: String(f.mnt_point || f.device_name || '?'),
-        percent: n2(f.percent),
-        usedGB: n2((f.used || 0) / GB),
-        sizeGB: n2((f.size || 0) / GB),
-      }));
-    if (disks.length) {
-      pt.diskCount = disks.length;
-      const root = disks.find((d) => d.mnt === '/' || d.mnt === '\\')
-        || disks.find((d) => /^[A-Za-z]:[\\/]?$/.test(d.mnt)) // Windows: диск C:
-        || disks[0];
-      pt.diskUsed = root.percent;
-    }
-  }
-
-  // ── NETWORK: реальный адаптер, не виртуальный ──
-  // Из физических (после отсева виртуальных) берём самый нагруженный —
-  // через него, как правило, идёт аплинк. Если всё отфильтровалось —
-  // берём лучший из всех, чтобы не терять данные.
-  let netIface = null;
-  const net = data && data.network;
-  if (Array.isArray(net) && net.length) {
-    const phys = net.filter((i) => i && i.interface_name && !VIRT_NET.test(String(i.interface_name)));
-    const cand = phys.length ? phys : net;
-    let best = null;
-    let bestT = -1;
-    for (const itf of cand) {
-      const t = (typeof itf.rx === 'number' ? itf.rx : 0) + (typeof itf.tx === 'number' ? itf.tx : 0);
-      if (t > bestT) { best = itf; bestT = t; }
-    }
-    if (best) {
-      netIface = String(best.interface_name);
-      pt.rx = n2((best.rx || 0) / 1024); // байт/с → КБ/с
-      pt.tx = n2((best.tx || 0) / 1024);
-    }
-  }
-
-  // ── SENSORS: все датчики (t°C, RPM) + температура Package ──
-  let sensorsList = [];
-  const sensors = data && data.sensors;
-  if (Array.isArray(sensors)) {
-    sensorsList = sensors
-      .filter((s) => s && typeof s.value === 'number')
-      .map((s) => ({ label: String(s.label || '?'), unit: String(s.unit || ''), value: n2(s.value) }));
-    const pkg = sensors.find((s) => s && /package/i.test(String(s.label || '')) && s.unit === 'C')
-      || sensors.find((s) => s && /package/i.test(String(s.label || '')));
-    if (pkg && typeof pkg.value === 'number') pt.pkg = n2(pkg.value);
-    else {
-      const anyTemp = sensors.find((s) => s && s.unit === 'C' && typeof s.value === 'number');
-      if (anyTemp) pt.pkg = n2(anyTemp.value); // нет package — берём первый температурный датчик
-    }
-  }
-
-  // ── PER-CPU: загрузка каждого ядра ──
-  let cores = [];
-  const percpu = data && data.percpu;
-  if (Array.isArray(percpu)) cores = percpu.map((c) => n2(c && c.total)).filter((v) => v != null);
-
-  return { pt, disks, netIface, sensors: sensorsList, cores };
-}
-
-/** Возвращает { pt, source: 'api4'|'api3'|'html', via } или бросает ошибку с причиной. */
-async function collectGlances(rawUrl, relayUrl) {
-  const base = String(rawUrl || '').trim().replace(/\/+$/, '');
-  if (!base) throw new Error('не задан адрес Glances');
-
-  for (const ver of [4, 3]) {
-    const apiUrl = `${base}/api/${ver}/all`;
-    try {
-      const txt = await fetchListing(apiUrl, relayUrl).then((r) => r.html);
-      if (!txt || txt.trim().startsWith('<')) continue; // это HTML, а не JSON — пробуем другую версию
-      const data = JSON.parse(txt);
-      const { pt, disks, netIface, sensors, cores } = glancesFromApi(data);
-      if (GLANCES_KEYS.some((k) => pt[k] != null)) {
-        return { pt, disks, netIface, sensors, cores, source: ver === 4 ? 'api4' : 'api3', via: 'direct' };
-      }
-    } catch { /* версия API недоступна — пробуем следующую */ }
-  }
-
-  // запасной вариант: разбор HTML (старый Glances без REST API)
-  const { html } = await fetchListing(base, relayUrl);
-  const pt = parseGlances(html);
-  if (GLANCES_KEYS.some((k) => pt[k] != null)) return { pt, disks: [], netIface: null, sensors: [], cores: [], source: 'html', via: 'direct' };
-
-  throw new Error('Glances отвечает, но данные не получены: REST API (/api/4/all и /api/3/all) и HTML-разбор не дали показателей. Проверьте, что это именно Glances (glances -w)');
 }
 
 // ─── Проверки устройств ─────────────────────────────────────────────────────
@@ -400,386 +61,256 @@ async function checkHttp(addr, port, pth, method, body, timeoutMs) {
     url = /^https?:\/\//.test(addr) ? addr : `http://${addr}${port ? ':' + port : ''}${pth ? (pth.startsWith('/') ? pth : '/' + pth) : '/'}`;
   } catch { return { ok: false, latency: 0 }; }
   try {
-    const opts = { method: method || 'GET', signal: AbortSignal.timeout(timeoutMs) };
-    if (body && method !== 'GET') opts.body = body;
-    const res = await fetch(url, opts);
-    return { ok: res.status < 500, latency: Math.max(1, Date.now() - t0) };
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), timeoutMs);
+    await fetch(url, { method: method || 'GET', signal: ctrl.signal, body: body && method !== 'GET' ? body : undefined });
+    clearTimeout(to);
+    return { ok: true, latency: Math.max(1, Date.now() - t0) };
   } catch { return { ok: false, latency: 0 }; }
 }
 
-function checkRtsp(addr, port, timeoutMs) {
+function checkRtsp(addr, timeoutMs) {
   return new Promise((resolve) => {
+    let done = false;
+    const finish = (ok) => { if (!done) { done = true; try { sock.destroy(); } catch {} resolve({ ok, latency: ok ? Date.now() - t0 : 0 }); } };
     const t0 = Date.now();
-    const host = addr.replace(/^rtsp:\/\//i, '').split('/')[0].split(':')[0];
-    const p = port || 554;
-    const sock = net.connect(p, host, () => {
-      sock.write(`OPTIONS rtsp://${host}:${p}/ RTSP/1.0\r\nCSeq: 1\r\n\r\n`);
+    const to = setTimeout(() => finish(false), timeoutMs);
+    let host = addr, port = 554;
+    try {
+      const u = new URL(addr); host = u.hostname; port = parseInt(u.port, 10) || 554;
+    } catch { const m = /^([^:/]+)(?::(\d+))?/.exec(addr); if (m) { host = m[1]; port = parseInt(m[2], 10) || 554; } }
+    const sock = net.connect(port, host, () => {
+      sock.write(`OPTIONS ${addr} RTSP/1.0\r\nCSeq: 1\r\n\r\n`);
     });
-    const done = (ok) => { clearTimeout(to); sock.destroy(); resolve({ ok, latency: ok ? Math.max(1, Date.now() - t0) : 0 }); };
-    const to = setTimeout(() => done(false), timeoutMs);
-    sock.on('data', (d) => done(/RTSP\/1\.0\s+200/.test(String(d))));
-    sock.on('error', () => done(false));
+    sock.on('data', (d) => { clearTimeout(to); finish(/RTSP\/1\.0 200/.test(String(d))); });
+    sock.on('error', () => { clearTimeout(to); finish(false); });
   });
 }
 
 function checkSip(addr, timeoutMs) {
   return new Promise((resolve) => {
+    let done = false;
+    const finish = (ok) => { if (!done) { done = true; try { sock.close(); } catch {} resolve({ ok, latency: ok ? Date.now() - t0 : 0 }); } };
     const t0 = Date.now();
-    const m = /^sip:([^@]+)@([^:;]+)(?::(\d+))?/.exec(addr);
-    if (!m) return resolve({ ok: false, latency: 0 });
-    const host = m[2];
-    const p = parseInt(m[3] || '5060', 10);
+    const to = setTimeout(() => finish(false), timeoutMs);
+    let host = addr, port = 5060;
+    const m = /^sip:([^@:/]+)(?::(\d+))?/.exec(addr);
+    if (m) { host = m[1]; port = parseInt(m[2], 10) || 5060; }
     const sock = dgram.createSocket('udp4');
-    const req = `OPTIONS sip:${m[1]}@${host}:${p} SIP/2.0\r\nVia: SIP/2.0/UDP pluto.local\r\nFrom: <sip:pluto@pluto.local>\r\nTo: <sip:${m[1]}@${host}>\r\nCall-ID: ${uid()}@pluto\r\nCSeq: 1 OPTIONS\r\nContact: <sip:pluto@pluto.local>\r\nContent-Length: 0\r\n\r\n`;
-    const done = (ok) => { clearTimeout(to); try { sock.close(); } catch { /* ignore */ } resolve({ ok, latency: ok ? Math.max(1, Date.now() - t0) : 0 }); };
-    const to = setTimeout(() => done(false), timeoutMs);
-    sock.on('message', (msg) => done(/SIP\/2\.0\s+200/.test(String(msg))));
-    sock.on('error', () => done(false));
-    sock.send(req, p, host, (e) => { if (e) done(false); });
+    sock.on('message', (d) => { clearTimeout(to); finish(/SIP\/2\.0 200/.test(String(d))); });
+    sock.on('error', () => { clearTimeout(to); finish(false); });
+    const req = `OPTIONS sip:${host}:${port} SIP/2.0\r\nVia: SIP/2.0/UDP pluto\r\nCSeq: 1 OPTIONS\r\nCall-ID: ${uid()}@pluto\r\n\r\n`;
+    sock.send(req, port, host);
   });
 }
 
 async function runDeviceCheck(d) {
-  const tm = db.settings.timeoutMs || 3000;
-  if (d.type === 'ping') return checkPing(d.address, tm);
-  if (d.type === 'rtsp') return checkRtsp(d.address, d.port, tm);
-  if (d.type === 'sip') return checkSip(d.address, tm);
-  return checkHttp(d.address, d.port, d.path, d.method, d.body, tm);
+  const t = db.settings.timeoutMs || 3000;
+  if (d.type === 'ping') return checkPing(d.address, t);
+  if (d.type === 'http') return checkHttp(d.address, d.port, d.path, 'GET', null, t);
+  if (d.type === 'api') return checkHttp(d.address, d.port, d.path, d.method || 'GET', d.body, t);
+  if (d.type === 'rtsp') return checkRtsp(d.address, t);
+  if (d.type === 'sip') return checkSip(d.address, t);
+  return { ok: false, latency: 0 };
 }
 
 function applyDeviceResult(d, r) {
+  const now = Date.now();
+  const history = [...d.history, r.ok ? r.latency : -1].slice(-48);
   const cfg = db.settings;
-  d.history = [...(d.history || []), r.ok ? r.latency : -1].slice(-48);
-  d.lastCheck = Date.now();
   if (!r.ok) {
-    d.fails = (d.fails || 0) + 1;
-    if (d.fails >= cfg.failThreshold && d.status !== 'down') {
-      d.status = 'down'; d.latency = null; d.lastChange = Date.now();
-      pushEvent('crit', 'device', `${d.type.toUpperCase()} ${d.address} — потеря связи (${d.fails} сб. подряд)`);
+    const fails = (d.fails || 0) + 1;
+    if (fails >= cfg.failThreshold && d.status !== 'down') {
+      pushEvent('crit', 'device', `${d.type.toUpperCase()} ${d.address} — потеря связи (${fails} сб. подряд)`);
     }
-    return;
+    Object.assign(d, { fails, status: fails >= cfg.failThreshold ? 'down' : d.status, latency: null, lastCheck: now, lastChange: d.status === 'down' ? d.lastChange : now, history, checking: false });
+  } else {
+    const degraded = r.latency > cfg.degradeMinMs && d.latency != null && r.latency > d.latency * cfg.degradeFactor;
+    const status = degraded ? 'degraded' : 'up';
+    if (d.status === 'down') pushEvent('ok', 'device', `${d.name} (${d.address}) — связь восстановлена`);
+    else if (degraded && d.status !== 'degraded') pushEvent('warn', 'device', `${d.name}: деградация связи — ${r.latency} мс`);
+    Object.assign(d, { fails: 0, status, latency: r.latency, lastCheck: now, lastChange: status === d.status ? d.lastChange : now, history, checking: false });
   }
-  const base = d.baseline || r.latency;
-  const degraded = r.latency > base * cfg.degradeFactor && r.latency > cfg.degradeMinMs;
-  const st = degraded ? 'degraded' : 'up';
-  if (d.status === 'down') pushEvent('ok', 'device', `${d.name} (${d.address}) — связь восстановлена`);
-  else if (degraded && d.status !== 'degraded') pushEvent('warn', 'device', `${d.name}: деградация — ${r.latency} мс при базовых ${Math.round(base)} мс`);
-  d.status = st; d.fails = 0; d.latency = r.latency;
-  d.baseline = Math.round(base * 0.9 + r.latency * 0.1);
-  if (st !== d.status) d.lastChange = Date.now();
   saveDb();
 }
 
-// ─── Relay: пинги внутри VLAN агента ────────────────────────────────────────
+// ─── Relay-агенты: пинг целей через pluto-relay на ПК ───────────────────────
 
-function expandIps(target) {
+function expandTargets(target) {
   const t = String(target).trim();
-  if (!t) return [];
+  const ip = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(t);
+  if (ip) return [t];
   const range = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.)(\d{1,3})\s*-\s*(\d{1,3})$/.exec(t);
   if (range) {
     const out = [];
-    const a = parseInt(range[2], 10), b = parseInt(range[3], 10);
-    for (let i = Math.min(a, b); i <= Math.max(a, b) && out.length < 256; i++) out.push(range[1] + i);
+    for (let i = Math.min(+range[2], +range[3]); i <= Math.max(+range[2], +range[3]) && out.length < 256; i++) out.push(range[1] + i);
     return out;
   }
   const cidr = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.)\d{1,3}\/(\d{1,2})$/.exec(t);
-  if (cidr) {
-    if (parseInt(cidr[2], 10) < 24) return [];
+  if (cidr && parseInt(cidr[2], 10) >= 24) {
     const out = [];
     for (let i = 1; i < 255; i++) out.push(cidr[1] + i);
     return out;
   }
-  return /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(t) ? [t] : [];
-}
-
-async function relayPing(agent, ips) {
-  if (!agent.relayUrl || !ips.length) return [];
-  const base = String(agent.relayUrl).replace(/\/+$/, '');
-  try {
-    const txt = await fetchText(base + '/ping?targets=' + encodeURIComponent(ips.join(',')), 15000);
-    const arr = JSON.parse(txt);
-    if (Array.isArray(arr)) {
-      return arr.map((r) => ({ ip: r.ip, alive: !!r.alive, latency: r.latencyMs != null ? r.latencyMs : (r.latency != null ? r.latency : null) }));
-    }
-  } catch { /* relay недоступен */ }
   return [];
 }
 
-// ─── Опрос агента ───────────────────────────────────────────────────────────
-
-async function pollAgent(agent, force) {
-  const now = Date.now();
-
-  // 1) пинг до IP — доступность / uptime
-  const ping = await checkPing(agent.ip, db.settings.timeoutMs || 3000);
-  const wasOnline = agent.online;
-  agent.online = ping.ok;
-  agent.latency = ping.ok ? ping.latency : null;
-  agent.lastPoll = now;
-  if (!Array.isArray(agent.latHist)) agent.latHist = [];
-  agent.latHist.push({ t: now, ms: ping.ok ? ping.latency : null });
-  if (agent.latHist.length > 480) agent.latHist.splice(0, agent.latHist.length - 480);
-  if (ping.ok) {
-    agent.lastSeen = now;
-    if (!agent.onlineSince) agent.onlineSince = now;
-  } else {
-    agent.onlineSince = 0;
-  }
-  if (ping.ok && !wasOnline) pushEvent('ok', 'agent', `Агент «${agent.name}» (${agent.ip}) в сети`);
-  if (!ping.ok && wasOnline) pushEvent('warn', 'agent', `Агент «${agent.name}» (${agent.ip}) недоступен`);
-
-  // 2) Glances: REST API (порт 61208), свой интервал, хранение 30 дней
-  const glIv = Math.max(15, (db.settings.intervals && db.settings.intervals.glances) || 60) * 1000;
-  if (agent.glancesUrl && (force || now - (agent.lastGlances || 0) >= glIv)) {
-    agent.lastGlances = now;
-    try {
-      const { pt, disks, netIface, sensors, cores, source } = await collectGlances(agent.glancesUrl, agent.relayUrl);
-      pt.t = Date.now();
-      agent.glancesLatest = pt;
-      agent.glancesDisks = Array.isArray(disks) ? disks : [];
-      agent.glancesNetIface = netIface || null;
-      agent.glancesSensors = Array.isArray(sensors) ? sensors : [];
-      agent.glancesCores = Array.isArray(cores) ? cores : [];
-      seriesAppend(agent, 'glances', pt, GLANCES_RETENTION_MS);
-      agent.lastError = null;
-      console.log(`[pluto] Glances «${agent.name}» [${source}]: CPU ${pt.cpu ?? '—'}% · MEM ${pt.mem ?? '—'}% · FS ${pt.diskCount ?? '—'} шт (${pt.diskUsed ?? '—'}%) · net ${netIface ?? '—'}`);
-    } catch (e) {
-      agent.lastError = 'Glances: ' + (e.message || 'ошибка запроса');
-      console.log(`[pluto] Glances «${agent.name}»: ${agent.lastError}`);
-    }
-  }
-
-  // 3) пинги устройств через relay (внутри VLAN агента)
-  if (agent.relayUrl && (agent.pingTargets || []).length) {
-    const out = [];
-    for (const tgt of agent.pingTargets) {
-      const ips = expandIps(tgt);
-      const results = await relayPing(agent, ips);
-      out.push({ target: tgt, results, lastCheck: Date.now() });
-    }
-    agent.targets = out;
-  }
-
-  saveDb();
-}
-
-// ─── Glances-устройства (вкладка Bars) ──────────────────────────────────────
-
-async function scrapeGlancesDev(dev, force) {
-  const giv = Math.max(15, (db.settings.intervals && db.settings.intervals.glances) || 60) * 1000;
-  if (!force && Date.now() - (dev.lastScrape || 0) < giv) return;
-  const now = Date.now();
-  try {
-    const { pt, disks, netIface, source } = await collectGlances(dev.url, null);
-    pt.t = Date.now();
-    dev.lastScrape = now;
-    dev.online = true;
-    dev.latest = pt;
-    dev.disks = Array.isArray(disks) ? disks : [];
-    dev.netIface = netIface || null;
-    dev.lastError = null;
-    if (!Array.isArray(dev.history)) dev.history = [];
-    dev.history.push(pt);
-    if (dev.history.length > MAX_POINTS) dev.history = compactSeries(dev.history, pt.t);
-    const cutoff = pt.t - GLANCES_RETENTION_MS;
-    let i = 0;
-    while (i < dev.history.length && dev.history[i].t < cutoff) i++;
-    if (i > 0) dev.history.splice(0, i);
-    saveDb();
-    return { point: pt, error: null };
-  } catch (e) {
-    dev.lastScrape = now;
-    dev.online = false;
-    dev.lastError = e.message || 'ошибка запроса';
-    saveDb();
-    return { point: null, error: dev.lastError };
-  }
-}
-
-// ─── Зеркало-ретранслятор (push-синхронизация) ──────────────────────────────
-// Основной сервер периодически собирает снапшот состояния (без паролей, сессий
-// и настроек) и отправляет его на публичный read-only экземпляр. Зеркало не
-// опрашивает устройства — оно лишь показывает последнюю копию.
-
-function buildSnapshot() {
-  return {
-    version: VERSION,
-    syncedAt: Date.now(),
-    devices: db.devices.map((d) => ({ ...d, profile: undefined, checking: undefined })),
-    agents: db.agents.map((a) => ({ ...a, polling: undefined, pollStarted: undefined })),
-    glances: (db.glances || []).map((g) => ({ ...g, scraping: undefined })),
-    events: db.events.slice(0, 120),
-    tags: db.tags,
-  };
-}
-
-let mirrorBusy = false;
-async function syncMirror(force) {
-  const m = db.settings.mirror;
-  if (IS_MIRROR || mirrorBusy || !m || !m.enabled || !m.url || !m.secret) return;
-  const iv = Math.max(30, m.interval || 60) * 1000;
-  if (!force && Date.now() - ((db.mirrorLast && db.mirrorLast.t) || 0) < iv) return;
-  mirrorBusy = true;
-  const endpoint = String(m.url).replace(/\/+$/, '') + '/api/mirror/ingest';
+async function relayPing(agent, targets) {
+  if (!agent.relayUrl) return [];
+  const base = String(agent.relayUrl).replace(/\/+$/, '');
+  const url = `${base}/ping?targets=${encodeURIComponent(targets.join(','))}`;
   try {
     const ctrl = new AbortController();
-    const to = setTimeout(() => ctrl.abort(), 15000);
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      signal: ctrl.signal,
-      headers: { 'Content-Type': 'application/json', 'X-Mirror-Secret': m.secret },
-      body: JSON.stringify(buildSnapshot()),
-    });
+    const to = setTimeout(() => ctrl.abort(), 10000);
+    const res = await fetch(url, { signal: ctrl.signal });
     clearTimeout(to);
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
-    db.mirrorLast = { t: Date.now(), ok: true, error: null };
-    console.log(`[pluto] зеркало: снапшот отправлен (${db.devices.length} устр., ${db.agents.length} аг.)`);
-  } catch (e) {
-    db.mirrorLast = { t: Date.now(), ok: false, error: e.message || 'ошибка отправки' };
-    console.log(`[pluto] зеркало: не удалось отправить — ${db.mirrorLast.error}`);
-  } finally {
-    mirrorBusy = false;
-    saveDb();
-  }
+    if (!res.ok) return [];
+    const arr = await res.json();
+    return Array.isArray(arr) ? arr.map((r) => ({ ip: r.ip, alive: !!r.alive, latency: r.latency ?? null })) : [];
+  } catch { return []; }
 }
 
-// Приём снапшота на зеркале. Вызывается до авторизации, защищён общим секретом.
-function applySnapshot(snap) {
-  if (!snap || typeof snap !== 'object') throw new Error('некорректный снапшот');
-  db.devices = Array.isArray(snap.devices) ? snap.devices : [];
-  db.agents = Array.isArray(snap.agents) ? snap.agents : [];
-  db.glances = Array.isArray(snap.glances) ? snap.glances : [];
-  db.events = Array.isArray(snap.events) ? snap.events : [];
-  db.tags = Array.isArray(snap.tags) ? snap.tags : [];
-  db.mirrorSyncedAt = Date.now();
-  db.mirrorVersion = snap.version || null;
+async function pollAgent(a) {
+  const now = Date.now();
+  // 1) доступность самого ПК
+  const self = await checkPing(a.ip, db.settings.timeoutMs || 3000);
+  a.online = self.ok;
+  a.latency = self.ok ? self.latency : null;
+  a.lastPoll = now;
+  if (self.ok) { a.onlineSince = a.onlineSince || now; a.lastSeen = now; }
+  else { a.onlineSince = 0; }
+
+  // 2) пинг целей через relay (устройства, доступные только этому ПК)
+  if (self.ok && a.relayUrl) {
+    const targets = [];
+    for (const tgt of a.pingTargets) {
+      const ips = expandTargets(tgt);
+      if (!ips.length) continue;
+      const results = await relayPing(a, ips);
+      targets.push({ target: tgt, lastCheck: Date.now(), results });
+    }
+    a.targets = targets;
+  }
   saveDb();
+}
+
+// ─── Публичная витрина (отдельный порт, без авторизации) ────────────────────
+
+function showcaseDevices() {
+  return db.devices.filter((d) => d.showcase).map((d) => ({
+    name: d.name, type: d.type, address: d.address,
+    status: d.status, latency: d.latency ?? null, lastCheck: d.lastCheck || null,
+  }));
+}
+
+const SHOWCASE_HTML = `<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PLUTO — статус</title>
+<style>
+body{margin:0;background:#0b0e1a;color:#dfe3f5;font:15px/1.5 'IBM Plex Sans',system-ui,sans-serif}
+.wrap{max-width:720px;margin:0 auto;padding:32px 20px}
+h1{font-size:20px;letter-spacing:.2em;margin:0 0 4px;color:#8f7df0}
+.sub{font-size:12px;color:#8b93b8;margin:0 0 24px}
+.row{display:flex;align-items:center;gap:12px;padding:12px 16px;border:1px solid #242b4a;border-radius:10px;background:#12162a;margin-bottom:10px}
+.dot{width:10px;height:10px;border-radius:50%;flex:none}
+.up{background:#55c795;box-shadow:0 0 8px #55c79588}
+.down{background:#e07a80;box-shadow:0 0 8px #e07a8088}
+.degraded{background:#dfa65e;box-shadow:0 0 8px #dfa65e88}
+.unknown{background:#8b93b8}
+.name{font-weight:600;flex:1}
+.type{font:11px monospace;color:#8b93b8;text-transform:uppercase}
+.addr{font:12px monospace;color:#aeb6d8}
+.lat{font:12px monospace;color:#5fc6d8;width:70px;text-align:right}
+.empty{color:#8b93b8;text-align:center;padding:40px 0}
+.upd{font:11px monospace;color:#8b93b8;text-align:right;margin-top:16px}
+</style></head><body><div class="wrap">
+<h1>PLUTO</h1><p class="sub">Публичный статус инфраструктуры</p>
+<div id="list"><div class="empty">Загрузка…</div></div>
+<div class="upd" id="upd"></div></div>
+<script>
+const STATUS={up:['В сети','up'],down:['Авария','down'],degraded:['Деградация','degraded'],unknown:['Ожидание','unknown']};
+async function tick(){
+  try{
+    const r=await fetch('/api/showcase');const d=await r.json();
+    const el=document.getElementById('list');
+    if(!d.devices.length){el.innerHTML='<div class="empty">Нет устройств на витрине</div>';}
+    else{el.innerHTML=d.devices.map(x=>{const[label,cls]=STATUS[x.status]||STATUS.unknown;
+      return '<div class="row"><span class="dot '+cls+'"></span><span class="name">'+
+      String(x.name).replace(/</g,'&lt;')+'</span><span class="type">'+x.type+'</span>'+
+      '<span class="addr">'+String(x.address).replace(/</g,'&lt;')+'</span>'+
+      '<span class="lat">'+(x.latency==null?'—':x.latency+' мс')+'</span></div>';}).join('');}
+    document.getElementById('upd').textContent='обновлено '+new Date().toLocaleTimeString('ru-RU');
+  }catch(e){}
+}
+tick();setInterval(tick,10000);
+</script></body></html>`;
+
+let showcaseServer = null;
+function startShowcase() {
+  stopShowcase();
+  const port = db.settings.showcase.port || 8081;
+  showcaseServer = http.createServer((req, res) => {
+    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    if (url.pathname === '/api/showcase') {
+      return json(res, 200, { devices: showcaseDevices() });
+    }
+    if (url.pathname === '/' || url.pathname === '/index.html') {
+      return text(res, 200, SHOWCASE_HTML, 'text/html; charset=utf-8');
+    }
+    return text(res, 404, 'not found');
+  });
+  showcaseServer.on('error', (e) => console.error(`[pluto] витрина: порт ${port} —`, e.message));
+  showcaseServer.listen(port, () => console.log(`[pluto] витрина (публичная, без входа): http://0.0.0.0:${port}`));
+}
+function stopShowcase() {
+  if (showcaseServer) { try { showcaseServer.close(); } catch {} showcaseServer = null; }
 }
 
 // ─── Планировщик ────────────────────────────────────────────────────────────
 
-let lastCleanup = 0;
-
 setInterval(() => {
   const now = Date.now();
-
-  // Основной сервер: push снапшота на зеркало-ретранслятор
-  if (!IS_MIRROR) void syncMirror(false);
-
-  // Зеркало ничего не опрашивает — только показывает последнюю копию
-  if (IS_MIRROR) {
-    if (now - lastCleanup > 3600000) { lastCleanup = now; /* зеркала чистит основной */ }
-    return;
-  }
-
   for (const d of db.devices) {
-    const iv = Math.max(5, d.interval || (db.settings.intervals && db.settings.intervals[d.type]) || 60) * 1000;
+    const iv = Math.max(5, d.interval || db.settings.intervals[d.type] || 60) * 1000;
     if (!d.checking && now - (d.lastCheck || 0) >= iv) {
       d.checking = true;
       runDeviceCheck(d).then((r) => applyDeviceResult(d, r)).finally(() => { d.checking = false; });
     }
   }
-
-  const aiv = Math.max(10, (db.settings.intervals && db.settings.intervals.agent) || 30) * 1000;
+  const aiv = Math.max(10, db.settings.intervals.agent || 30) * 1000;
   for (const a of db.agents) {
-    if (a.polling && a.pollStarted && now - a.pollStarted > 180000) {
-      console.log(`[pluto] опрос «${a.name}» завис — флаг сброшен`);
-      a.polling = false;
+    if (!a._polling && now - (a.lastPoll || 0) >= aiv) {
+      a._polling = true;
+      pollAgent(a).finally(() => { a._polling = false; });
     }
-    if (!a.polling && now - (a.lastPoll || 0) >= aiv) {
-      a.polling = true;
-      a.pollStarted = now;
-      pollAgent(a).finally(() => { a.polling = false; a.lastPoll = Date.now(); });
-    }
-  }
-
-  for (const g of db.glances || []) {
-    if (!g.scraping) {
-      g.scraping = true;
-      scrapeGlancesDev(g).finally(() => { g.scraping = false; });
-    }
-  }
-
-  // автоочистка архивов по расписанию (раз в час): старше 60/30 дней
-  if (now - lastCleanup > 3600000) {
-    lastCleanup = now;
-    let changed = false;
-    for (const a of db.agents) {
-      for (const [key, ret] of [['glances', GLANCES_RETENTION_MS]]) {
-        const arr = a[key];
-        if (Array.isArray(arr) && arr.length && arr[0].t < now - ret) {
-          let i = 0;
-          while (i < arr.length && arr[i].t < now - ret) i++;
-          arr.splice(0, i);
-          changed = true;
-        }
-      }
-    }
-    for (const g of db.glances || []) {
-      const arr = g.history;
-      if (Array.isArray(arr) && arr.length && arr[0].t < now - GLANCES_RETENTION_MS) {
-        let i = 0;
-        while (i < arr.length && arr[i].t < now - GLANCES_RETENTION_MS) i++;
-        arr.splice(0, i);
-        changed = true;
-      }
-    }
-    if (changed) saveDb();
   }
 }, 1000);
 
-// ─── HTTP-сервер ────────────────────────────────────────────────────────────
+// ─── HTTP-сервер консоли и API ──────────────────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const p = url.pathname;
   const method = req.method || 'GET';
 
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (method === 'OPTIONS') { res.writeHead(204); return res.end(); }
-
   try {
     // ── публичные маршруты ──
-    if (p === '/api/health') return json(res, 200, { ok: true, name: 'pluto-core', version: VERSION, console: 'api', mirror: IS_MIRROR });
-    if (p === '/api/version') return json(res, 200, { version: VERSION, mirror: IS_MIRROR });
+    if (p === '/api/health') return json(res, 200, { ok: true, name: 'pluto-core', version: VERSION });
+    if (p === '/api/version') return json(res, 200, { version: VERSION });
 
-    // Приём снапшота на зеркале. До авторизации, но с общим секретом.
-    if (p === '/api/mirror/ingest' && method === 'POST') {
-      if (!IS_MIRROR) return json(res, 404, { error: 'not found' });
-      if (!MIRROR_SECRET) return json(res, 500, { error: 'зеркало не настроено: задайте MIRROR_SECRET' });
-      const got = String(req.headers['x-mirror-secret'] || '');
-      if (!got || got !== MIRROR_SECRET) return json(res, 403, { error: 'неверный секрет зеркала' });
-      try {
-        const snap = await readBody(req);
-        applySnapshot(snap);
-        return json(res, 200, { ok: true, syncedAt: db.mirrorSyncedAt });
-      } catch (e) {
-        return json(res, 400, { error: e.message || 'снапшот отклонён' });
-      }
-    }
-
-    // ── статика веб-консоли (без авторизации) ──
+    // ── статика консоли (до авторизации) ──
     if (method === 'GET' && !p.startsWith('/api/')) {
       let file = path.normalize(path.join(WEB_DIR, p === '/' ? 'index.html' : p));
       if (!file.startsWith(WEB_DIR)) return json(res, 403, { error: 'forbidden' });
       if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(WEB_DIR, 'index.html');
-      if (!fs.existsSync(file)) {
-        return text(res, 200, 'PLUTO Core работает. Веб-консоль не найдена: пересоберите образ Docker.');
-      }
+      if (!fs.existsSync(file)) return text(res, 200, 'PLUTO Core работает. Веб-консоль не найдена: пересоберите образ.');
       const ext = path.extname(file);
       if (ext === '.html' || !ext) {
-        // вшиваем подпись ядра — консоль по ней понимает, что работает с настоящим сервером
-        const html = fs.readFileSync(file, 'utf8').replace(
-          '<head>',
-          `<head><script>window.__PLUTO_CORE__={v:"${VERSION}"}</script>`,
-        );
+        const html = fs.readFileSync(file, 'utf8').replace('<head>', `<head><script>window.__PLUTO_CORE__={v:"${VERSION}"}</script>`);
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
         return res.end(html);
       }
-      res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': 'public, max-age=31536000, immutable' });
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
       return fs.createReadStream(file).pipe(res);
     }
 
@@ -798,34 +329,14 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/auth/me') return json(res, 200, publicUser(user));
 
-    // Зеркало — только чтение: любые изменения запрещены
-    if (IS_MIRROR && method !== 'GET' && p !== '/api/auth/login' && p !== '/api/auth/me') {
-      return json(res, 403, { error: 'зеркало: только чтение — изменения делайте на основном сервере' });
-    }
-
     // ── состояние ──
     if (p === '/api/state' && method === 'GET') {
       const devices = isAdmin ? db.devices : db.devices.filter((d) => user.scope.includes(d.type));
-      const agentsRaw = isAdmin || user.scope.includes('agent') ? db.agents : [];
-      const agents = agentsRaw.map((a) => ({ ...a, glances: undefined, polling: undefined, pollStarted: undefined }));
-      const glancesRaw = isAdmin || user.scope.includes('glances') ? db.glances : [];
-      const glances = glancesRaw.map((g) => ({ ...g, history: undefined, scraping: undefined }));
+      const agents = isAdmin || user.scope.includes('agent') ? db.agents : [];
       return json(res, 200, {
-        devices, agents, glances,
-        tags: db.tags, events: db.events, settings: db.settings,
+        devices, agents, tags: db.tags, events: db.events, settings: db.settings,
         users: isAdmin ? db.users.map(publicUser) : undefined,
-        mirror: IS_MIRROR,
-        mirrorLast: db.mirrorLast || null,
-        mirrorSyncedAt: db.mirrorSyncedAt || null,
-        mirrorVersion: db.mirrorVersion || null,
       });
-    }
-
-    // ручная отправка снапшота на зеркало (только основной сервер, админ)
-    if (p === '/api/mirror/sync-now' && method === 'POST' && isAdmin) {
-      if (IS_MIRROR) return json(res, 400, { error: 'это зеркало — отправлять некуда' });
-      await syncMirror(true);
-      return json(res, 200, db.mirrorLast || { ok: false, error: 'не настроено' });
     }
 
     // ── устройства ──
@@ -833,14 +344,14 @@ const server = http.createServer(async (req, res) => {
       const b = await readBody(req);
       if (!b.address) return json(res, 400, { error: 'укажите адрес устройства' });
       const d = {
-        id: uid(), name: String(b.name || '').trim() || String(b.address), type: ['ping', 'http', 'api', 'rtsp', 'sip'].includes(b.type) ? b.type : 'ping',
+        id: uid(), name: String(b.name || '').trim() || String(b.address),
+        type: ['ping', 'http', 'api', 'rtsp', 'sip'].includes(b.type) ? b.type : 'ping',
         address: String(b.address).trim(), port: b.port != null ? parseInt(b.port, 10) : null,
         path: String(b.path || ''), method: b.method || null, body: b.body || null,
-        interval: Math.max(5, parseInt(b.interval, 10) || (db.settings.intervals[b.type] || 60)),
+        interval: Math.max(5, parseInt(b.interval, 10) || db.settings.intervals[b.type] || 60),
         tags: Array.isArray(b.tags) ? b.tags : [], favorite: !!b.favorite, showcase: !!b.showcase,
-        status: 'unknown', latency: null, baseline: null, history: [], fails: 0,
-        lastCheck: 0, lastChange: Date.now(), checking: false, approx: false,
-        profile: { base: 20, failP: 0.03, spikeP: 0.02 }, spikeUntil: 0, createdAt: Date.now(),
+        status: 'unknown', latency: null, history: [], fails: 0,
+        lastCheck: 0, lastChange: Date.now(), checking: false, approx: false, createdAt: Date.now(),
       };
       db.devices.push(d);
       pushEvent('info', 'device', `Добавлено устройство «${d.name}» (${d.type.toUpperCase()} ${d.address})`);
@@ -854,9 +365,7 @@ const server = http.createServer(async (req, res) => {
       if (!d) return json(res, 404, { error: 'устройство не найдено' });
       if (method === 'PUT' || method === 'PATCH') {
         const b = await readBody(req);
-        for (const k of ['name', 'type', 'address', 'port', 'path', 'method', 'body', 'interval', 'tags', 'favorite', 'showcase']) {
-          if (k in b) d[k] = b[k];
-        }
+        for (const k of ['name', 'type', 'address', 'port', 'path', 'method', 'body', 'interval', 'tags', 'favorite', 'showcase']) if (k in b) d[k] = b[k];
         saveDb();
         return json(res, 200, d);
       }
@@ -873,31 +382,25 @@ const server = http.createServer(async (req, res) => {
       if (!d) return json(res, 404, { error: 'устройство не найдено' });
       const r = await runDeviceCheck(d);
       applyDeviceResult(d, r);
-      return json(res, 200, { result: r });
+      return json(res, 200, { ok: r.ok, latency: r.latency });
     }
 
-    // ── агенты ──
+    // ── агенты (relay) ──
     if (p === '/api/agents' && method === 'POST' && isAdmin) {
       const b = await readBody(req);
       const ip = String(b.ip || '').trim();
       if (!ip) return json(res, 400, { error: 'укажите IP-адрес ПК' });
       const a = {
-        id: uid(),
-        name: String(b.name || '').trim() || ('ПК ' + ip),
-        ip,
-        glancesUrl: String(b.glancesUrl || '').trim(),
+        id: uid(), name: String(b.name || '').trim() || ('ПК ' + ip), ip,
         relayUrl: String(b.relayUrl || '').trim(),
-        pingTargets: Array.isArray(b.pingTargets) ? b.pingTargets.map((x) => String(x).trim()).filter(Boolean) : [],
-        online: false, latency: null, onlineSince: 0,
-        lastSeen: 0, lastPoll: 0, lastGlances: 0, lastError: null,
-        glancesLatest: null, glancesDisks: [], glancesNetIface: null,
-        glancesSensors: [], glancesCores: [], glances: [], latHist: [], targets: [],
-        favorite: false, createdAt: Date.now(),
+        pingTargets: Array.isArray(b.pingTargets) ? b.pingTargets.map(String) : [],
+        targets: [], favorite: !!b.favorite, online: false, latency: null,
+        onlineSince: 0, lastSeen: 0, lastPoll: 0, latHist: [], createdAt: Date.now(),
       };
       db.agents.push(a);
       pushEvent('info', 'agent', `Добавлен агент «${a.name}» (${a.ip})`);
       saveDb();
-      pollAgent(a, true);
+      pollAgent(a);
       return json(res, 200, a);
     }
     m = p.match(/^\/api\/agents\/([^/]+)$/);
@@ -906,8 +409,8 @@ const server = http.createServer(async (req, res) => {
       if (!a) return json(res, 404, { error: 'агент не найден' });
       if (method === 'PUT' || method === 'PATCH') {
         const b = await readBody(req);
-        for (const k of ['name', 'ip', 'glancesUrl', 'relayUrl', 'favorite']) if (k in b) a[k] = b[k];
-        if (Array.isArray(b.pingTargets)) a.pingTargets = b.pingTargets.map((x) => String(x).trim()).filter(Boolean);
+        for (const k of ['name', 'ip', 'relayUrl', 'favorite']) if (k in b) a[k] = b[k];
+        if (Array.isArray(b.pingTargets)) a.pingTargets = b.pingTargets.map(String);
         saveDb();
         return json(res, 200, a);
       }
@@ -922,151 +425,35 @@ const server = http.createServer(async (req, res) => {
     if (m && method === 'POST' && isAdmin) {
       const a = db.agents.find((x) => x.id === m[1]);
       if (!a) return json(res, 404, { error: 'агент не найден' });
-      await pollAgent(a, true);
+      await pollAgent(a);
       return json(res, 200, a);
     }
-    // диагностика источника (Glances)
-    m = p.match(/^\/api\/agents\/([^/]+)\/test-glances$/);
-    if (m && method === 'GET') {
+    // Ручной relay-пинг произвольных целей через агента
+    m = p.match(/^\/api\/agents\/([^/]+)\/relay-ping$/);
+    if (m && method === 'GET' && isAdmin) {
       const a = db.agents.find((x) => x.id === m[1]);
       if (!a) return json(res, 404, { error: 'агент не найден' });
-      if (!isAdmin && !user.scope.includes('agent')) return json(res, 403, { error: 'нет доступа к агентам' });
-      const srcUrl = a.glancesUrl;
-      // Glances: пробуем REST API (/api/4/all → /api/3/all), затем HTML
-      try {
-        const { pt, disks, netIface, source } = await collectGlances(srcUrl, a.relayUrl);
-        const recognized = GLANCES_KEYS.filter((k) => pt[k] != null);
-        const viaText = source === 'html'
-          ? 'разбор HTML-страницы'
-          : 'REST API Glances, ' + (source === 'api4' ? '/api/4' : '/api/3');
-        return json(res, 200, {
-          ok: recognized.length > 0, url: srcUrl, via: source,
-          sample: viaText + (netIface ? ' · адаптер: ' + netIface : '') + (disks.length ? ' · ФС: ' + disks.length + ' шт' : ''),
-          values: pt, recognized, disks, netIface,
-          missing: GLANCES_KEYS.filter((k) => pt[k] == null),
-        });
-      } catch (e) {
-        return json(res, 200, { ok: false, url: srcUrl || '', via: null, error: e.message || String(e) });
-      }
-    }
-    // история Glances агента (30 дней)
-    m = p.match(/^\/api\/agents\/([^/]+)\/glances$/);
-    if (m && method === 'GET') {
-      const a = db.agents.find((x) => x.id === m[1]);
-      if (!a) return json(res, 404, { error: 'агент не найден' });
-      if (!isAdmin && !user.scope.includes('agent')) return json(res, 403, { error: 'нет доступа к агентам' });
-      const rq = url.searchParams.get('range');
-      const range = GLANCES_RANGE_MS[rq] ? rq : '5m';
-      const out = rangePoints(a.glances, GLANCES_RANGE_MS[range], range);
-      out.retentionDays = 30;
-      return json(res, 200, out);
+      const targets = String(url.searchParams.get('targets') || '').split(/[,\s]+/).filter(Boolean);
+      const ips = targets.flatMap(expandTargets);
+      if (!ips.length) return json(res, 400, { error: 'нет корректных целей' });
+      const results = await relayPing(a, ips);
+      return json(res, 200, results);
     }
 
-    // ── Glances-устройства (Bars) ──
-    if (p === '/api/glances' && method === 'POST' && isAdmin) {
-      const b = await readBody(req);
-      if (!b.url) return json(res, 400, { error: 'укажите адрес мониторинга' });
-      const g = {
-        id: uid(), name: String(b.name || '').trim() || 'Glances-сервер', url: String(b.url).trim(),
-        serverLink: String(b.serverLink || '').trim(), createdAt: Date.now(),
-        lastScrape: 0, lastError: null, online: false, latest: null, history: [],
-        disks: [], netIface: null,
-      };
-      db.glances.push(g);
-      saveDb();
-      scrapeGlancesDev(g, true);
-      return json(res, 200, g);
-    }
-    m = p.match(/^\/api\/glances\/([^/]+)$/);
-    if (m && isAdmin && method === 'DELETE') {
-      db.glances = db.glances.filter((x) => x.id !== m[1]);
-      saveDb();
-      return json(res, 200, { ok: true });
-    }
-    m = p.match(/^\/api\/glances\/([^/]+)\/scrape$/);
-    if (m && method === 'POST' && isAdmin) {
-      const g = db.glances.find((x) => x.id === m[1]);
-      if (!g) return json(res, 404, { error: 'устройство не найдено' });
-      return json(res, 200, await scrapeGlancesDev(g, true));
-    }
-    m = p.match(/^\/api\/glances\/([^/]+)\/history$/);
-    if (m && method === 'GET') {
-      const g = db.glances.find((x) => x.id === m[1]);
-      if (!g) return json(res, 404, { error: 'устройство не найдено' });
-      if (!isAdmin && !user.scope.includes('glances')) return json(res, 403, { error: 'нет доступа' });
-      const rq = url.searchParams.get('range');
-      const range = GLANCES_RANGE_MS[rq] ? rq : '5m';
-      const out = rangePoints(g.history, GLANCES_RANGE_MS[range], range);
-      out.retentionDays = 30;
-      return json(res, 200, out);
-    }
-
-    // ── теги ──
-    if (p === '/api/tags' && method === 'POST' && isAdmin) {
-      const b = await readBody(req);
-      const label = String(b.label || '').trim();
-      if (!label) return json(res, 400, { error: 'укажите название тега' });
-      if (db.tags.some((t) => t.label.toLowerCase() === label.toLowerCase())) return json(res, 400, { error: 'такой тег уже есть' });
-      const t = { id: uid(), label, color: String(b.color || '#9a8cfa') };
-      db.tags.push(t);
-      saveDb();
-      return json(res, 200, t);
-    }
-    m = p.match(/^\/api\/tags\/([^/]+)$/);
-    if (m && isAdmin && method === 'DELETE') {
-      const t = db.tags.find((x) => x.id === m[1]);
-      db.tags = db.tags.filter((x) => x.id !== m[1]);
-      for (const d of db.devices) d.tags = (d.tags || []).filter((x) => x !== m[1]);
-      if (t) pushEvent('info', 'system', `Тег «${t.label}» удалён`);
-      saveDb();
-      return json(res, 200, { ok: true });
-    }
-
-    // ── пользователи ──
-    if (p === '/api/users' && method === 'POST' && isAdmin) {
-      const b = await readBody(req);
-      const login = String(b.login || '').trim();
-      if (!login || !String(b.name || '').trim()) return json(res, 400, { error: 'заполните логин и имя' });
-      if (db.users.some((x) => x.login === login)) return json(res, 400, { error: 'такой логин уже есть' });
-      const u = {
-        id: uid(), name: String(b.name).trim(), login, role: b.role === 'admin' ? 'admin' : 'viewer',
-        scope: Array.isArray(b.scope) ? b.scope : [], builtIn: false,
-        passHash: hashPass(String(b.password || 'pluto')), createdAt: Date.now(),
-      };
-      db.users.push(u);
-      saveDb();
-      return json(res, 200, publicUser(u));
-    }
-    m = p.match(/^\/api\/users\/([^/]+)$/);
-    if (m && isAdmin) {
-      const u = db.users.find((x) => x.id === m[1]);
-      if (!u) return json(res, 404, { error: 'пользователь не найден' });
-      if (method === 'PUT' || method === 'PATCH') {
-        const b = await readBody(req);
-        if (b.role) u.role = b.role;
-        if (Array.isArray(b.scope)) u.scope = b.scope;
-        if (b.password) u.passHash = hashPass(String(b.password));
-        saveDb();
-        return json(res, 200, publicUser(u));
-      }
-      if (method === 'DELETE') {
-        if (u.builtIn) return json(res, 400, { error: 'нельзя удалить встроенного администратора' });
-        db.users = db.users.filter((x) => x.id !== u.id);
-        saveDb();
-        return json(res, 200, { ok: true });
-      }
+    // ── витрина: настройки ──
+    if (p === '/api/showcase/restart' && method === 'POST' && isAdmin) {
+      startShowcase();
+      return json(res, 200, { ok: true, port: db.settings.showcase.port });
     }
 
     // ── настройки ──
     if (p === '/api/settings' && method === 'PUT' && isAdmin) {
       const b = await readBody(req);
-      db.settings = {
-        ...db.settings, ...b,
-        intervals: { ...db.settings.intervals, ...(b.intervals || {}) },
-        notifications: { ...db.settings.notifications, ...(b.notifications || {}) },
-      };
-      pushEvent('info', 'system', 'Системные настройки сохранены');
+      const prevPort = db.settings.showcase.port;
+      db.settings = { ...db.settings, ...b };
       saveDb();
+      if (db.settings.showcase.port !== prevPort) startShowcase();
+      pushEvent('info', 'system', 'Системные настройки сохранены');
       return json(res, 200, db.settings);
     }
 
@@ -1077,18 +464,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-// ─── Шлюз агентов (WebSocket, порт 8443) — зарезервирован под будущие расширения ──
-const agentServer = http.createServer((req, res) => {
-  text(res, 200, 'pluto agent gateway');
-});
-attachWs(agentServer, (conn, url, ip) => {
-  console.log(`[pluto] шлюз: подключение от ${ip} (${url})`);
-  conn.onClose(() => {});
-});
-agentServer.listen(AGENT_PORT, () => {
-  console.log(`[pluto] шлюз агентов: :${AGENT_PORT}`);
-});
-
 server.listen(HTTP_PORT, () => {
   console.log(`[pluto] core v${VERSION} · консоль и API: http://0.0.0.0:${HTTP_PORT} · health: /api/health`);
 });
+startShowcase();
