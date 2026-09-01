@@ -1,53 +1,97 @@
 <!doctype html>
-<html lang="ru">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0b0e1a" />
-    <title>PLUTO — центр мониторинга</title>
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Ccircle cx='24' cy='24' r='13' fill='%238f7df0'/%3E%3Ccircle cx='19' cy='20' r='3' fill='%237668d8' opacity='.7'/%3E%3Ccircle cx='29' cy='28' r='2' fill='%237668d8' opacity='.55'/%3E%3Cellipse cx='24' cy='24' rx='21' ry='6.5' stroke='%237ba4e6' stroke-width='1.8' fill='none' transform='rotate(-18 24 24)'/%3E%3C/svg%3E" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <title>coder-app-name</title>
     <link
-      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap"
       rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
     />
     <style>
-      html, body { margin: 0; padding: 0; background-color: #0b0e1a; }
+      /* 内联样式确保主题色立即生效，避免闪烁 */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+      }
+      html.light,
+      html.light body {
+        background-color: #ffffff !important;
+        color: #000000;
+      }
+      html.dark,
+      html.dark body {
+        background-color: #1a1a1a !important;
+        color: #ffffff;
+      }
     </style>
     <script>
-      // Диагностика запуска: если бандл упадёт, покажем точную ошибку вместо пустого фона.
+      // 在 React 加载前立即设置主题，避免闪烁
       (function () {
-        function show(title, msg) {
-          var el = document.getElementById('__pluto_diag');
-          if (!el) {
-            el = document.createElement('div');
-            el.id = '__pluto_diag';
-            el.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#0b0e1a;color:#e07a80;' +
-              'font:12px/1.6 "JetBrains Mono",monospace;padding:24px;overflow:auto;white-space:pre-wrap;';
-            document.body.appendChild(el);
-          }
-          el.textContent = '[PLUTO] ' + title + '\n\n' + msg + '\n\nПришлите этот текст разработчику.';
+        const isInIframe = window.self !== window.top;
+
+        function applyThemeToDOM(theme) {
+          document.documentElement.classList.remove("light", "dark");
+          document.documentElement.classList.add(theme);
+          document.documentElement.setAttribute("data-theme", theme);
         }
-        window.addEventListener('error', function (e) {
-          show('Ошибка при запуске', (e.message || 'unknown') + '\n' + (e.filename || '') + ':' + (e.lineno || ''));
-        });
-        window.addEventListener('unhandledrejection', function (e) {
-          show('Необработанный промис', (e.reason && (e.reason.stack || e.reason.message || String(e.reason))) || 'unknown');
-        });
-        window.addEventListener('load', function () {
-          setTimeout(function () {
-            var root = document.getElementById('root');
-            if (root && !root.childElementCount && !document.getElementById('__pluto_diag')) {
-              show('Интерфейс не смонтировался', 'Скрипт загрузился, но React-дерево пустое.\nОткройте консоль браузера (F12) и пришлите красные ошибки.');
+
+        if (isInIframe) {
+          // 监听父窗口主动推送的主题消息
+          window.addEventListener("message", function (event) {
+            if (event.data && typeof event.data.theme === "string") {
+              const theme = event.data.theme;
+              if (theme === "light" || theme === "dark") {
+                applyThemeToDOM(theme);
+              }
             }
-          }, 6000);
+          });
+        } else {
+          // 非 iframe 环境，使用默认 light 主题
+          applyThemeToDOM("light");
+        }
+      })();
+    </script>
+      <script>
+      (function () {
+        if (window.self === window.top) return;
+        var reported = {};
+        window.addEventListener("error", function (event) {
+          // 资源加载失败的 error 事件没有 message，此处仅上报 JS 运行时错误
+          if (!event || !event.message) return;
+          var key =
+            event.message + "|" + (event.filename || "") + "|" + (event.lineno || 0);
+          if (reported[key]) return; // 相同错误只上报一次，避免渲染循环刷屏
+          reported[key] = true;
+          try {
+            window.parent.postMessage(
+              {
+                type: "sandbox-runtime-error",
+                payload: {
+                  message: String(event.message).slice(0, 500),
+                  filename: event.filename || "",
+                  lineno: event.lineno || 0,
+                  colno: event.colno || 0,
+                  stack:
+                    event.error && event.error.stack
+                      ? String(event.error.stack).slice(0, 2000)
+                      : ""
+                }
+              },
+              "*"
+            );
+          } catch (e) {
+            /* 上报失败不影响页面运行 */
+          }
         });
       })();
     </script>
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
