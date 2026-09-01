@@ -70,6 +70,8 @@ export function loadDb() {
     relayUrl: a.relayUrl || '',
     glancesUrl: a.glancesUrl || '',
     lastGlances: a.lastGlances || 0,
+    favorite: !!a.favorite,
+    stats: !!a.stats,
   }));
 
   if (!db.users.length) {

@@ -573,7 +573,7 @@ const server = http.createServer(async (req, res) => {
       const agentsRaw = isAdmin || user.scope.includes('agent') ? db.agents : [];
       const agents = agentsRaw.map((a) => ({
         id: a.id, name: a.name, ip: a.ip, relayUrl: a.relayUrl || '', glancesUrl: a.glancesUrl || '',
-        pingTargets: a.pingTargets || [], targets: a.targets || [], favorite: !!a.favorite,
+        pingTargets: a.pingTargets || [], targets: a.targets || [], favorite: !!a.favorite, stats: !!a.stats,
         online: !!a.online, latency: a.latency ?? null,
         onlineSince: a.onlineSince || 0, lastSeen: a.lastSeen || 0, lastPoll: a.lastPoll || 0,
         lastGlances: a.lastGlances || 0, glancesError: a.glancesError || null,
@@ -643,7 +643,7 @@ const server = http.createServer(async (req, res) => {
         relayUrl: String(b.relayUrl || '').trim(),
         glancesUrl: String(b.glancesUrl || '').trim(),
         pingTargets: Array.isArray(b.pingTargets) ? b.pingTargets.map(String) : [],
-        targets: [], favorite: !!b.favorite, online: false, latency: null,
+        targets: [], favorite: !!b.favorite, stats: !!b.stats, online: false, latency: null,
         onlineSince: 0, lastSeen: 0, lastPoll: 0, lastGlances: 0,
         latHist: [], glances: [], glancesLatest: null, glancesError: null, createdAt: Date.now(),
       };
@@ -659,7 +659,7 @@ const server = http.createServer(async (req, res) => {
       if (!a) return json(res, 404, { error: 'агент не найден' });
       if (method === 'PUT' || method === 'PATCH') {
         const b = await readBody(req);
-        for (const k of ['name', 'ip', 'relayUrl', 'glancesUrl', 'favorite']) if (k in b) a[k] = b[k];
+        for (const k of ['name', 'ip', 'relayUrl', 'glancesUrl', 'favorite', 'stats']) if (k in b) a[k] = b[k];
         if (Array.isArray(b.pingTargets)) a.pingTargets = b.pingTargets.map(String);
         saveDb();
         return json(res, 200, a);
