@@ -2,7 +2,7 @@
 
 export type DeviceType = 'ping' | 'http' | 'api' | 'rtsp' | 'sip';
 export type DeviceStatus = 'up' | 'down' | 'degraded' | 'unknown';
-export type Route = 'dashboard' | 'devices' | 'agents' | 'showcase' | 'settings' | 'deploy';
+export type Route = 'dashboard' | 'devices' | 'agents' | 'stats-bars' | 'stats-ws' | 'showcase' | 'settings' | 'deploy';
 export type Severity = 'ok' | 'warn' | 'crit' | 'info';
 export type Role = 'admin' | 'viewer';
 
@@ -44,21 +44,72 @@ export interface RelayTargetResult {
   results: RelayPingResult[];
 }
 
-/** Агент = ПК, на котором запущен pluto-relay (только пинг). */
+// ─── Телеметрия Glances ──────────────────────────────────────────────────────
+
+/** Точка истории Glances (компактная — для графиков, хранение 30 дней). */
+export interface GlancesPoint {
+  t: number;
+  cpu: number | null; // CPU, %
+  gpu: number | null; // GPU, %
+  ram: number | null; // RAM, %
+  rx: number | null; // основной адаптер, КБ/с
+  tx: number | null;
+  cput: number | null; // температура CPU, °C
+  ssdt: number | null; // температура SSD, °C
+  diskUsed: number | null; // заполненность основной ФС, %
+}
+
+export interface GlancesDisk { mnt: string; percent: number | null; usedGB: number | null; sizeGB: number | null; }
+export interface GlancesAdapter { name: string; rx: number | null; tx: number | null; } // КБ/с
+export interface GlancesSensor { label: string; value: number; unit: string; kind: string; } // температуры, вент.
+
+/** Полный снимок Glances (последний опрос — для карточки агента). */
+export interface GlancesSnapshot {
+  t: number;
+  cpu: number | null;
+  cpuCores: number[]; // загрузка каждого ядра, %
+  gpu: number | null;
+  gpuTemp: number | null;
+  ram: number | null;
+  ramUsedGB: number | null;
+  ramTotalGB: number | null;
+  swap: number | null;
+  load1: number | null;
+  load5: number | null;
+  cput: number | null; // Package / CPU
+  ssdt: number | null;
+  disks: GlancesDisk[];
+  adapters: GlancesAdapter[]; // все сетевые адаптеры
+  mainAdapter: string | null; // выбранный реальный адаптер
+  rx: number | null; // основной адаптер, КБ/с
+  tx: number | null;
+  sensors: GlancesSensor[]; // все доступные температуры/вентиляторы
+  uptimeSec: number | null;
+  via: string; // api4 | api3
+}
+
+export type StatsRange = '5m' | '30m' | '3h' | '24h' | '7d' | '30d';
+
+/** Агент = ПК: пинг (uptime), телеметрия Glances и relay-пинги локальных устройств. */
 export interface Agent {
   id: string;
   name: string;
   ip: string; // адрес ПК
   relayUrl: string; // адрес pluto-relay, напр. http://192.168.1.10:8091
+  glancesUrl: string; // адрес Glances (glances -w), напр. http://192.168.1.10:61208
   pingTargets: string[]; // цели, доступные только этому ПК
   targets: RelayTargetResult[];
   favorite: boolean;
   online: boolean;
-  latency: number | null;
+  latency: number | null; // пинг до ПК, мс
   onlineSince: number;
   lastSeen: number;
   lastPoll: number;
+  lastGlances: number;
   latHist: { t: number; ms: number | null }[];
+  glances: GlancesPoint[]; // история (в /api/state — хвост, полная — отдельным запросом)
+  glancesLatest: GlancesSnapshot | null;
+  glancesError: string | null;
   createdAt: number;
 }
 
@@ -87,7 +138,7 @@ export interface User {
 }
 
 export interface Settings {
-  intervals: Record<DeviceType | 'agent', number>;
+  intervals: Record<DeviceType | 'agent' | 'glances', number>;
   timeoutMs: number;
   failThreshold: number;
   degradeFactor: number;
