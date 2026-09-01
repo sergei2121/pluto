@@ -574,7 +574,7 @@ const server = http.createServer(async (req, res) => {
       const agents = agentsRaw.map((a) => ({
         id: a.id, name: a.name, ip: a.ip, relayUrl: a.relayUrl || '', glancesUrl: a.glancesUrl || '',
         pingTargets: a.pingTargets || [], targets: a.targets || [], tags: a.tags || [],
-        favorite: !!a.favorite,
+        favorite: !!a.favorite, pingsFavorite: !!a.pingsFavorite, pingsShowcase: !!a.pingsShowcase,
         // совместимость: старое булево stats=true → 'ws'
         statsView: a.statsView === 'bars' || a.statsView === 'ws' ? a.statsView : (a.stats ? 'ws' : ''),
         online: !!a.online, latency: a.latency ?? null,
@@ -648,6 +648,7 @@ const server = http.createServer(async (req, res) => {
         pingTargets: Array.isArray(b.pingTargets) ? b.pingTargets.map(String) : [],
         tags: Array.isArray(b.tags) ? b.tags.map(String) : [],
         targets: [], favorite: !!b.favorite,
+        pingsFavorite: !!b.pingsFavorite, pingsShowcase: !!b.pingsShowcase,
         statsView: b.statsView === 'bars' || b.statsView === 'ws' ? b.statsView : '',
         online: false, latency: null,
         onlineSince: 0, lastSeen: 0, lastPoll: 0, lastGlances: 0,
@@ -665,7 +666,7 @@ const server = http.createServer(async (req, res) => {
       if (!a) return json(res, 404, { error: 'агент не найден' });
       if (method === 'PUT' || method === 'PATCH') {
         const b = await readBody(req);
-        for (const k of ['name', 'ip', 'relayUrl', 'glancesUrl', 'favorite']) if (k in b) a[k] = b[k];
+        for (const k of ['name', 'ip', 'relayUrl', 'glancesUrl', 'favorite', 'pingsFavorite', 'pingsShowcase']) if (k in b) a[k] = b[k];
         // представление статистики: 'bars' | 'ws' | '' (ни в какую)
         if ('statsView' in b) {
           const v = String(b.statsView);

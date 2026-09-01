@@ -129,3 +129,23 @@ export function fmtNet(kbs: number | null | undefined): string {
   if (kbs >= 1024) return `${(kbs / 1024).toFixed(1)} МБ/с`;
   return `${Math.round(kbs)} КБ/с`;
 }
+
+/** Агрегированная ping-статистика агента по всем его целям. */
+export function pingStats(targets: { results: { alive: boolean; latency: number | null }[] }[]): {
+  total: number; online: number; offline: number; avg: number | null; max: number | null;
+} {
+  let total = 0, online = 0, sum = 0, cnt = 0, max: number | null = null;
+  for (const t of targets) {
+    for (const r of t.results) {
+      total++;
+      if (r.alive) {
+        online++;
+        if (r.latency != null) {
+          sum += r.latency; cnt++;
+          if (max == null || r.latency > max) max = r.latency;
+        }
+      }
+    }
+  }
+  return { total, online, offline: total - online, avg: cnt ? Math.round(sum / cnt) : null, max };
+}
