@@ -381,42 +381,118 @@ function showcaseDevices() {
   }));
 }
 
+/** Агенты, отмеченные для публичной витрины, со сводной ping-статистикой. */
+function showcaseAgents() {
+  return db.agents.filter((a) => a.pingsShowcase).map((a) => {
+    let total = 0, online = 0, sum = 0, cnt = 0, max = null;
+    for (const t of a.targets || []) {
+      for (const r of t.results || []) {
+        total++;
+        if (r.alive) {
+          online++;
+          if (r.latency != null) {
+            sum += r.latency; cnt++;
+            if (max == null || r.latency > max) max = r.latency;
+          }
+        }
+      }
+    }
+    return {
+      name: a.name, ip: a.ip, online: !!a.online, latency: a.latency ?? null,
+      total, onlineCount: online, offline: total - online,
+      avg: cnt ? Math.round(sum / cnt) : null, max,
+    };
+  });
+}
+
 const SHOWCASE_HTML = `<!doctype html><html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>PLUTO — статус</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
-body{margin:0;background:#0b0e1a;color:#dfe3f5;font:15px/1.5 'IBM Plex Sans',system-ui,sans-serif}
-.wrap{max-width:720px;margin:0 auto;padding:32px 20px}
-h1{font-size:20px;letter-spacing:.2em;margin:0 0 4px;color:#8f7df0}
-.sub{font-size:12px;color:#8b93b8;margin:0 0 24px}
-.row{display:flex;align-items:center;gap:12px;padding:12px 16px;border:1px solid #242b4a;border-radius:10px;background:#12162a;margin-bottom:10px}
-.dot{width:10px;height:10px;border-radius:50%;flex:none}
-.up{background:#55c795;box-shadow:0 0 8px #55c79588}
-.down{background:#e07a80;box-shadow:0 0 8px #e07a8088}
-.degraded{background:#dfa65e;box-shadow:0 0 8px #dfa65e88}
+*{box-sizing:border-box}
+body{margin:0;background:#0b0e1a;color:#dfe3f5;font:15px/1.5 'IBM Plex Sans',system-ui,sans-serif;min-height:100vh;position:relative;overflow-x:hidden}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;
+  background:
+    radial-gradient(60% 50% at 15% 15%, rgba(143,125,240,.10), transparent 70%),
+    radial-gradient(50% 45% at 85% 80%, rgba(123,164,230,.09), transparent 70%);}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;opacity:.55;
+  background-image:
+    radial-gradient(1px 1px at 25px 35px, rgba(223,227,245,.6), transparent),
+    radial-gradient(1px 1px at 120px 90px, rgba(223,227,245,.4), transparent),
+    radial-gradient(1.5px 1.5px at 200px 160px, rgba(143,125,240,.5), transparent),
+    radial-gradient(1px 1px at 300px 60px, rgba(123,164,230,.45), transparent);
+  background-size:340px 340px;animation:drift 240s linear infinite;}
+@keyframes drift{from{transform:translate3d(0,0,0)}to{transform:translate3d(-340px,-170px,0)}}
+.wrap{position:relative;max-width:760px;margin:0 auto;padding:40px 20px 56px}
+.brand{display:flex;align-items:baseline;gap:14px;margin-bottom:2px}
+h1{font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;letter-spacing:.24em;margin:0;color:#8f7df0}
+.live{display:inline-flex;align-items:center;gap:7px;font:600 11px 'JetBrains Mono',monospace;color:#55c795;text-transform:uppercase;letter-spacing:.12em}
+.live i{width:7px;height:7px;border-radius:50%;background:#55c795;animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(85,199,149,.5)}50%{box-shadow:0 0 0 6px rgba(85,199,149,0)}}
+.sub{font-size:12.5px;color:#8b93b8;margin:0 0 30px}
+.sec{display:flex;align-items:center;gap:10px;margin:26px 0 12px;font:700 12px 'JetBrains Mono',monospace;letter-spacing:.18em;text-transform:uppercase;color:#aeb6d8}
+.sec::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,#242b4a,transparent)}
+.cnt{font:600 11px 'JetBrains Mono',monospace;color:#8f7df0;background:rgba(143,125,240,.12);border:1px solid rgba(143,125,240,.3);border-radius:999px;padding:1px 9px}
+.row{display:flex;align-items:center;gap:12px;padding:13px 16px;border:1px solid #242b4a;border-radius:10px;background:rgba(18,22,42,.85);margin-bottom:9px;transition:transform .15s ease,border-color .15s ease,background .15s ease}
+.row:hover{transform:translateY(-2px);border-color:rgba(143,125,240,.45);background:rgba(24,29,54,.95)}
+.dot{width:10px;height:10px;border-radius:50%;flex:none;position:relative}
+.up{background:#55c795;box-shadow:0 0 9px #55c79588}
+.down{background:#e07a80;box-shadow:0 0 9px #e07a8088}
+.degraded{background:#dfa65e;box-shadow:0 0 9px #dfa65e88}
 .unknown{background:#8b93b8}
-.name{font-weight:600;flex:1}
-.type{font:11px monospace;color:#8b93b8;text-transform:uppercase}
-.addr{font:12px monospace;color:#aeb6d8}
-.lat{font:12px monospace;color:#5fc6d8;width:70px;text-align:right}
-.empty{color:#8b93b8;text-align:center;padding:40px 0}
-.upd{font:11px monospace;color:#8b93b8;text-align:right;margin-top:16px}
+.name{font-weight:600;font-size:14.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.type{font:600 10px 'JetBrains Mono',monospace;color:#8b93b8;text-transform:uppercase;letter-spacing:.08em;flex:none}
+.addr{font:12px 'JetBrains Mono',monospace;color:#aeb6d8;flex:none}
+.lat{font:600 13px 'JetBrains Mono',monospace;color:#5fc6d8;width:76px;text-align:right;flex:none}
+.stats{display:flex;gap:8px;flex:none}
+.chip{font:600 11px 'JetBrains Mono',monospace;padding:3px 9px;border-radius:7px;border:1px solid #242b4a;background:rgba(11,14,26,.6);color:#aeb6d8;white-space:nowrap}
+.chip b{font-weight:600}
+.chip .ok{color:#55c795}.chip .warn{color:#dfa65e}.chip .bad{color:#e07a80}.chip .info{color:#5fc6d8}
+.empty{color:#8b93b8;text-align:center;padding:48px 0;font-size:13.5px}
+.upd{font:11px 'JetBrains Mono',monospace;color:#8b93b8;text-align:right;margin-top:20px}
+@media(max-width:560px){.addr{display:none}.stats{gap:5px}}
 </style></head><body><div class="wrap">
-<h1>PLUTO</h1><p class="sub">Публичный статус инфраструктуры</p>
+<div class="brand"><h1>PLUTO</h1><span class="live"><i></i>online</span></div>
+<p class="sub">Публичный статус инфраструктуры · обновление каждые 10 с</p>
 <div id="list"><div class="empty">Загрузка…</div></div>
 <div class="upd" id="upd"></div></div>
 <script>
 const STATUS={up:['В сети','up'],down:['Авария','down'],degraded:['Деградация','degraded'],unknown:['Ожидание','unknown']};
+const esc=(s)=>String(s==null?'':s).replace(/</g,'&lt;');
 async function tick(){
   try{
     const r=await fetch('/api/showcase');const d=await r.json();
     const el=document.getElementById('list');
-    if(!d.devices.length){el.innerHTML='<div class="empty">Нет устройств на витрине</div>';}
-    else{el.innerHTML=d.devices.map(x=>{const[label,cls]=STATUS[x.status]||STATUS.unknown;
-      return '<div class="row"><span class="dot '+cls+'"></span><span class="name">'+
-      String(x.name).replace(/</g,'&lt;')+'</span><span class="type">'+x.type+'</span>'+
-      '<span class="addr">'+String(x.address).replace(/</g,'&lt;')+'</span>'+
-      '<span class="lat">'+(x.latency==null?'—':x.latency+' мс')+'</span></div>';}).join('');}
+    const devs=d.devices||[],ags=d.agents||[];
+    if(!devs.length&&!ags.length){el.innerHTML='<div class="empty">Нет устройств на витрине</div>';}
+    else{
+      let html='';
+      if(devs.length){
+        html+='<div class="sec">Устройства <span class="cnt">'+devs.length+'</span></div>';
+        html+=devs.map(x=>{const cls=(STATUS[x.status]||STATUS.unknown)[1];
+          return '<div class="row"><span class="dot '+cls+'"></span><span class="name">'+esc(x.name)+'</span>'+
+          '<span class="type">'+esc(x.type)+'</span><span class="addr">'+esc(x.address)+'</span>'+
+          '<span class="lat">'+(x.latency==null?'—':x.latency+' мс')+'</span></div>';}).join('');
+      }
+      if(ags.length){
+        html+='<div class="sec">Пинги агентов <span class="cnt">'+ags.length+'</span></div>';
+        html+=ags.map(x=>{
+          const cls=x.online?'up':'down';
+          const on=x.onlineCount,off=x.offline;
+          return '<div class="row"><span class="dot '+cls+'"></span><span class="name">'+esc(x.name)+'</span>'+
+          '<span class="addr">'+esc(x.ip)+'</span>'+
+          '<span class="stats">'+
+          '<span class="chip">всего <b>'+x.total+'</b></span>'+
+          '<span class="chip"><b class="'+(on?'ok':'bad')+'">'+on+'</b> онлайн</span>'+
+          (off?'<span class="chip"><b class="bad">'+off+'</b> офлайн</span>':'')+
+          '<span class="chip">ср <b class="info">'+(x.avg==null?'—':x.avg+' мс')+'</b></span>'+
+          '<span class="chip">макс <b class="warn">'+(x.max==null?'—':x.max+' мс')+'</b></span>'+
+          '</span></div>';}).join('');
+      }
+      el.innerHTML=html;
+    }
     document.getElementById('upd').textContent='обновлено '+new Date().toLocaleTimeString('ru-RU');
   }catch(e){}
 }
@@ -433,7 +509,7 @@ function startShowcase() {
   showcaseServer = http.createServer((req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     if (url.pathname === '/api/showcase') {
-      return json(res, 200, { devices: showcaseDevices() });
+      return json(res, 200, { devices: showcaseDevices(), agents: showcaseAgents() });
     }
     if (url.pathname === '/' || url.pathname === '/index.html') {
       return text(res, 200, SHOWCASE_HTML, 'text/html; charset=utf-8');
