@@ -1,5 +1,5 @@
 // ─── PLUTO: хранилище состояния (pub/sub + useSyncExternalStore) ─────────────
-import { useSyncExternalStore } from 'react';
+import { useRef, useSyncExternalStore } from 'react';
 import type { Agent, Device, EventItem, Route, Settings, Severity, Tag, User } from './types';
 import { uid } from './util';
 
@@ -84,12 +84,17 @@ export function subscribe(l: () => void): () => void {
 }
 
 export function usePluto<T>(selector: (s: PlutoState) => T): T {
-  let prev: { value: T } | null = null;
+  // Кэш привязан к объекту state, а НЕ к рендеру: пока set() не создал новый
+  // state, getSnapshot возвращает одну и ту же ссылку. Иначе useSyncExternalStore
+  // видит «новое» значение при каждом вызове и уходит в бесконечный цикл.
+  const cache = useRef<{ snap: PlutoState; value: T } | null>(null);
   return useSyncExternalStore(subscribe, () => {
-    const next = selector(state);
-    if (prev && prev.value === next) return prev.value;
-    prev = { value: next };
-    return next;
+    const snap = state;
+    const c = cache.current;
+    if (c && c.snap === snap) return c.value;
+    const value = selector(snap);
+    cache.current = { snap, value };
+    return value;
   });
 }
 
