@@ -1,9 +1,9 @@
 // ─── PLUTO: главная ──────────────────────────────────────────────────────────
 import { memo, useMemo, useState } from 'react';
-import { Globe, AlertTriangle, Activity, Monitor, Star, Server, Rocket, LayoutGrid, Check, Bell } from 'lucide-react';
+import { Globe, AlertTriangle, Activity, Monitor, Star, Server, Rocket, LayoutGrid, Check, Bell, Crosshair } from 'lucide-react';
 import { Panel, StatusDot, STATUS_META, Sparkbar, Seg, TypeBadge, EmptyState, TimeAgo } from '../components/ui';
 import { FAVORITES_LIMIT, store, useCurrentUser, usePluto, visibleAgents, visibleDevices } from '../lib/store';
-import { cls, fmtMs, fmtUp, fmtNet } from '../lib/util';
+import { cls, fmtMs, fmtUp, fmtNet, pingStats } from '../lib/util';
 import type { Agent, Device, EventItem, Severity } from '../lib/types';
 
 const SEV_META: Record<Severity, { icon: React.ReactNode; cls: string; bar: string }> = {
@@ -122,6 +122,48 @@ const FavAgentCard = memo(function FavAgentCard({ id }: { id: string }) {
   );
 });
 
+/** Компактное окно «Пинги агентов» для избранного на главной. */
+const FavAgentPingsCard = memo(function FavAgentPingsCard({ id }: { id: string }) {
+  const a = usePluto((s) => s.agents.find((x) => x.id === id));
+  if (!a) return null;
+  const st = pingStats(a.targets);
+  const pct = st.total ? Math.round((st.online / st.total) * 100) : 0;
+  return (
+    <div className="group cursor-pointer rounded-lg border border-line bg-raised/50 p-3.5 transition-all duration-200 hover:-translate-y-0.5 hover:border-vio/40 hover:bg-raised/80"
+      onClick={() => store.nav('agent-pings')}>
+      <div className="flex items-center gap-2">
+        <span className="text-vio"><Crosshair className="h-4 w-4" /></span>
+        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">{a.name} · пинги</span>
+        <button onClick={(e) => { e.stopPropagation(); store.toggleAgentPingsFav(a.id); }} className="text-warn transition-transform hover:scale-110" title="Убрать с главной">
+          <Star className="h-4 w-4 fill-warn" strokeWidth={1.4} />
+        </button>
+      </div>
+      <div className="mt-2.5 grid grid-cols-3 gap-2 text-center">
+        <div>
+          <div className="font-mono text-[15px] font-bold text-ink">{st.total}</div>
+          <div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">всего</div>
+        </div>
+        <div>
+          <div className={cls('font-mono text-[15px] font-bold', st.offline > 0 ? 'text-warn' : 'text-ok')}>{st.online}</div>
+          <div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">онлайн</div>
+        </div>
+        <div>
+          <div className="font-mono text-[15px] font-bold text-blu">{fmtMs(st.avg)}</div>
+          <div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">ср. пинг</div>
+        </div>
+      </div>
+      <div className="mt-2.5 flex h-1.5 overflow-hidden rounded-full bg-raised/70">
+        <div className="bg-ok transition-all duration-500" style={{ width: `${pct}%` }} />
+        {st.offline > 0 && <div className="bg-crit transition-all duration-500" style={{ width: `${100 - pct}%` }} />}
+      </div>
+      <div className="mt-1.5 flex items-center justify-between font-mono text-[10px] text-dim">
+        <span>{a.ip}</span>
+        <span className={st.offline > 0 ? 'text-warn' : 'text-ok'}>{st.total ? `доступно ${pct}%` : 'нет целей'}</span>
+      </div>
+    </div>
+  );
+});
+
 function Onboarding() {
   const steps = [
     { icon: <Server className="h-4 w-4" />, title: 'Добавьте устройство', text: 'PING, HTTP, API, RTSP или SIP — с тегами, интервалом и диапазоном IP.', act: () => store.nav('devices', 'new'), label: 'Добавить устройство' },
@@ -159,6 +201,7 @@ export default function Dashboard() {
 
   const favD = devices.filter((d: Device) => d.favorite);
   const favA = agents.filter((a: Agent) => a.favorite);
+  const favAP = agents.filter((a: Agent) => a.pingsFavorite);
 
   const down = devices.filter((d) => d.status === 'down').length;
   const degraded = devices.filter((d) => d.status === 'degraded').length;
@@ -193,13 +236,14 @@ export default function Dashboard() {
       <div className="grid gap-4 xl:grid-cols-[1fr_330px]">
         <div className="space-y-4">
           <Panel title="Избранное" icon={<Star className="h-4 w-4" />} delay={140}
-            right={<span className="font-mono text-[11px] text-dim">{favD.length + favA.length} / {FAVORITES_LIMIT}</span>}>
-            {favD.length + favA.length === 0 ? (
+            right={<span className="font-mono text-[11px] text-dim">{favD.length + favA.length + favAP.length} / {FAVORITES_LIMIT}</span>}>
+            {favD.length + favA.length + favAP.length === 0 ? (
               <EmptyState icon={<Star className="h-6 w-6" />} title="Закрепите важное"
-                text="Отмечайте звёздочкой устройства и relay-агентов — до 15 элементов с краткой сводкой статуса будут жить здесь." />
+                text="Отмечайте звёздочкой устройства, relay-агентов и их пинги — до 15 элементов с краткой сводкой статуса будут жить здесь." />
             ) : (
               <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
                 {favA.map((a) => <FavAgentCard key={a.id} id={a.id} />)}
+                {favAP.map((a) => <FavAgentPingsCard key={`ap-${a.id}`} id={a.id} />)}
                 {favD.map((d) => <FavDeviceCard key={d.id} id={d.id} />)}
               </div>
             )}

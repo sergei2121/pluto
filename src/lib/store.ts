@@ -205,6 +205,8 @@ export const store = {
         glancesUrl: a.glancesUrl ?? '',
         lastGlances: a.lastGlances ?? 0,
         favorite: !!a.favorite,
+        pingsFavorite: !!a.pingsFavorite,
+        pingsShowcase: !!a.pingsShowcase,
         // совместимость со старым булевым stats: true → 'ws'
         statsView: (a as Agent & { statsView?: StatsView; stats?: boolean }).statsView ??
           (((a as Agent & { stats?: boolean }).stats) ? 'ws' : ''),
@@ -290,6 +292,7 @@ export const store = {
     const a: Agent = {
       id: uid('ag'), name: d.name, ip: d.ip, relayUrl: d.relayUrl, glancesUrl: d.glancesUrl ?? '',
       pingTargets: d.pingTargets ?? [], targets: [], tags: [], favorite: false, statsView: d.statsView ?? '',
+      pingsFavorite: false, pingsShowcase: false,
       online: false, latency: null, onlineSince: 0, lastSeen: 0, lastPoll: 0, lastGlances: 0,
       latHist: [], glances: [], glancesLatest: null, glancesError: null, createdAt: Date.now(),
     };
@@ -337,6 +340,18 @@ export const store = {
     void store.updateAgent(id, { statsView: view });
     const label = view === 'bars' ? 'в «Статистика Bars»' : view === 'ws' ? 'в «Статистика WS»' : 'убран из статистики';
     get().pushEvent('info', 'agent', `«${a.name}» ${label}`);
+  },
+
+  toggleAgentPingsFav(id: string) {
+    const a = state.agents.find((x) => x.id === id);
+    if (!a) return;
+    void store.updateAgent(id, { pingsFavorite: !a.pingsFavorite });
+  },
+
+  toggleAgentPingsShowcase(id: string) {
+    const a = state.agents.find((x) => x.id === id);
+    if (!a) return;
+    void store.updateAgent(id, { pingsShowcase: !a.pingsShowcase });
   },
 
   async pollAgentNow(id: string): Promise<void> {

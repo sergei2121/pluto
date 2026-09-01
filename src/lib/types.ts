@@ -2,7 +2,7 @@
 
 export type DeviceType = 'ping' | 'http' | 'api' | 'rtsp' | 'sip';
 export type DeviceStatus = 'up' | 'down' | 'degraded' | 'unknown';
-export type Route = 'dashboard' | 'devices' | 'agents' | 'stats-bars' | 'stats-ws' | 'showcase' | 'settings' | 'deploy';
+export type Route = 'dashboard' | 'devices' | 'agents' | 'agent-pings' | 'stats-bars' | 'stats-ws' | 'showcase' | 'settings' | 'deploy';
 export type Severity = 'ok' | 'warn' | 'crit' | 'info';
 export type Role = 'admin' | 'viewer';
 
@@ -106,6 +106,8 @@ export interface Agent {
   favorite: boolean; // избранное на главной
   /** В какую вкладку статистики попадает агент: 'bars' | 'ws' | '' (ни в какую). */
   statsView: StatsView;
+  pingsFavorite: boolean; // окно «Пинги агентов» на главной
+  pingsShowcase: boolean; // окно «Пинги агентов» на публичной витрине
   online: boolean;
   latency: number | null; // пинг до ПК, мс
   onlineSince: number;

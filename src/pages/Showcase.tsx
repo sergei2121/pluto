@@ -1,18 +1,20 @@
 // ─── PLUTO: публичная витрина ────────────────────────────────────────────────
 import { useMemo, useState } from 'react';
-import { LayoutGrid, ExternalLink, RefreshCw, Eye, EyeOff, Server } from 'lucide-react';
+import { LayoutGrid, ExternalLink, RefreshCw, Eye, EyeOff, Server, Crosshair } from 'lucide-react';
 import { Panel, StatusDot, STATUS_META, TypeBadge, Toggle, EmptyState } from '../components/ui';
 import { store, usePluto, useToasts } from '../lib/store';
 import { api } from '../lib/api';
-import { cls, fmtMs } from '../lib/util';
+import { cls, fmtMs, pingStats } from '../lib/util';
 
 export default function Showcase() {
   const devices = usePluto((s) => s.devices);
+  const agents = usePluto((s) => s.agents);
   const apiMode = usePluto((s) => s.apiMode);
   const settings = usePluto((s) => s.settings);
   const [portDraft, setPortDraft] = useState<string | null>(null);
 
   const shown = useMemo(() => devices.filter((d) => d.showcase), [devices]);
+  const shownAP = useMemo(() => agents.filter((a) => a.pingsShowcase), [agents]);
   const port = settings.showcase.port || 8081;
   const publicUrl = `http://${window.location.hostname || 'IP-СЕРВЕРА'}:${port}`;
 
@@ -67,6 +69,51 @@ export default function Showcase() {
             Не забудьте пробросить порт в docker-compose (<code className="font-mono">PLUTO_SHOWCASE_PORT</code>).
           </span>
         </div>
+      </Panel>
+
+      <Panel title={`Пинги агентов на витрине · ${shownAP.length} из ${agents.length}`} icon={<Crosshair className="h-4 w-4" />}>
+        {agents.length === 0 ? (
+          <p className="py-2 text-center text-[12.5px] text-dim">Relay-агентов пока нет.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b border-line/60 text-[10px] font-bold uppercase tracking-[0.12em] text-dim">
+                  <th className="py-2 pr-3">На витрине</th>
+                  <th className="py-2 pr-3">Агент</th>
+                  <th className="py-2 pr-3">Устройств</th>
+                  <th className="py-2 pr-3">Онлайн</th>
+                </tr>
+              </thead>
+              <tbody>
+                {agents.map((a) => {
+                  const st = pingStats(a.targets);
+                  return (
+                    <tr key={a.id} className={cls('border-b border-line/30 transition-colors', a.pingsShowcase ? 'bg-mint/[0.04]' : 'hover:bg-raised/40')}>
+                      <td className="py-2.5 pr-3">
+                        <button onClick={() => store.toggleAgentPingsShowcase(a.id)}
+                          title={a.pingsShowcase ? 'Убрать с витрины' : 'Показать на витрине'}
+                          className={cls('inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11.5px] font-bold transition-all',
+                            a.pingsShowcase ? 'border-mint/50 bg-mint/15 text-mint' : 'border-line bg-raised/50 text-dim hover:text-mut')}>
+                          {a.pingsShowcase ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                          {a.pingsShowcase ? 'Видно' : 'Скрыто'}
+                        </button>
+                      </td>
+                      <td className="py-2.5 pr-3">
+                        <div className="text-[13px] font-semibold text-ink">{a.name}</div>
+                        <div className="font-mono text-[11px] text-dim">{a.ip}</div>
+                      </td>
+                      <td className="py-2.5 pr-3 font-mono text-[13px] tabular-nums text-mut">{st.total}</td>
+                      <td className="py-2.5 pr-3">
+                        <span className={cls('font-mono text-[13px] tabular-nums', st.offline > 0 ? 'text-warn' : 'text-ok')}>{st.online}/{st.total}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Panel>
 
       <Panel title={`Устройства на витрине · ${shown.length} из ${devices.length}`} icon={<Server className="h-4 w-4" />}>
