@@ -155,6 +155,163 @@ function expandTargets(target) {
   return [];
 }
 
+// ─── Телеметрия Glances (данные для журнала статистики) ─────────────────────
+
+const GLANCES_RETENTION_MS = 30 * 86400000; // хранение истории — 30 дней
+const GLANCES_MAX_POINTS = 4000;
+
+function fetchJson(url, timeoutMs = 7000) {
+  return new Promise((resolve, reject) => {
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), timeoutMs);
+    fetch(url, { signal: ctrl.signal })
+      .then((r) => {
+        clearTimeout(to);
+        if (!r.ok) return reject(new Error('HTTP ' + r.status));
+        return r.json().then(resolve, reject);
+      })
+      .catch((e) => { clearTimeout(to); reject(e); });
+  });
+}
+
+const num = (v) => (typeof v === 'number' && isFinite(v) ? Math.round(v * 10) / 10 : null);
+
+/** Сетевой адаптер «виртуальный»? (veth, docker, virbr, vpn, tap, hyper-v и т.п.) */
+function isVirtualIface(name) {
+  return /^(veth|docker|br-|virbr|tap|tun|vboxnet|vmnet|hyper-v|hyper_v|isatap|teredo|bluetooth|loopback|lo$)/i.test(String(name));
+}
+
+/** Разбор ответа Glances (/api/4/all или /api/3/all) в полный снимок. */
+function parseGlancesAll(data) {
+  const cpu = data.cpu || {};
+  const mem = data.mem || {};
+  const swap = data.swap || {};
+  const load = data.load || {};
+
+  // ядра CPU
+  const cores = Array.isArray(data.percpu) ? data.percpu.map((c) => num(c.total)) : [];
+
+  // GPU: берём первую карту (glances отдаёт массив)
+  let gpu = null, gpuTemp = null;
+  const gpus = Array.isArray(data.gpu) ? data.gpu : [];
+  if (gpus.length) { gpu = num(gpus[0].proc ?? gpus[0].percent ?? null); gpuTemp = num(gpus[0].temperature ?? null); }
+
+  // диски (fs)
+  const disks = (Array.isArray(data.fs) ? data.fs : []).map((f) => ({
+    mnt: String(f.mnt_point || f.device_name || '?'),
+    percent: num(f.percent ?? null),
+    usedGB: f.used != null ? Math.round((f.used / 1073741824) * 10) / 10 : null,
+    sizeGB: f.size != null ? Math.round((f.size / 1073741824) * 10) / 10 : null,
+  }));
+
+  // сетевые адаптеры (bytes/s → КБ/с), все + выбор реального по трафику
+  const adapters = (Array.isArray(data.network) ? data.network : [])
+    .filter((n) => n.interface_name)
+    .map((n) => ({
+      name: String(n.interface_name),
+      rx: n.bytes_recv != null ? Math.round((n.bytes_recv / 1024) * 10) / 10 : num(n.rx ?? null),
+      tx: n.bytes_sent != null ? Math.round((n.bytes_sent / 1024) * 10) / 10 : num(n.tx ?? null),
+    }));
+  let mainAdapter = null, best = -1;
+  for (const a of adapters) {
+    if (isVirtualIface(a.name)) continue;
+    const traffic = (a.rx || 0) + (a.tx || 0);
+    if (traffic > best) { best = traffic; mainAdapter = a.name; }
+  }
+  if (!mainAdapter && adapters.length) mainAdapter = adapters[0].name;
+  const main = adapters.find((a) => a.name === mainAdapter) || null;
+
+  // все датчики: температуры и вентиляторы
+  const sensors = (Array.isArray(data.sensors) ? data.sensors : [])
+    .filter((s) => s.value != null)
+    .map((s) => ({
+      label: String(s.label || s.name || 'sensor'),
+      value: Math.round(Number(s.value) * 10) / 10,
+      unit: s.unit === 'RPM' ? 'об/м' : '°C',
+      kind: s.type === 'fan_speed' || s.unit === 'RPM' ? 'fan' : 'temp',
+    }));
+
+  const cput = num(cpu.temperature ?? null)
+    ?? (() => { const s = sensors.find((s) => s.kind === 'temp' && /package|^cpu/i.test(s.label)); return s ? s.value : null; })();
+  const ssdt = (() => { const s = sensors.find((s) => s.kind === 'temp' && /ssd|nvme|disk/i.test(s.label)); return s ? s.value : null; })();
+
+  const mainFs = disks.find((d) => d.mnt === '/' || /^[A-Za-z]:\\?$/.test(d.mnt)) || disks[0] || null;
+
+  let uptimeSec = null;
+  const up = data.uptime;
+  if (typeof up === 'string') {
+    const hms = /(\d+):(\d{1,2}):(\d{1,2})/.exec(up);
+    const dm = /(\d+)\s*(?:д|d)/i.exec(up);
+    if (hms) uptimeSec = (dm ? parseInt(dm[1], 10) : 0) * 86400 + parseInt(hms[1], 10) * 3600 + parseInt(hms[2], 10) * 60 + parseInt(hms[3], 10);
+  } else if (typeof up === 'number') uptimeSec = Math.round(up);
+
+  return {
+    t: Date.now(),
+    cpu: num(cpu.total ?? null),
+    cpuCores: cores,
+    gpu, gpuTemp,
+    ram: num(mem.percent ?? null),
+    ramUsedGB: mem.used != null ? Math.round((mem.used / 1073741824) * 10) / 10 : null,
+    ramTotalGB: mem.total != null ? Math.round((mem.total / 1073741824) * 10) / 10 : null,
+    swap: num(swap.percent ?? null),
+    load1: num(load.min1 ?? null), load5: num(load.min5 ?? null),
+    cput, ssdt,
+    disks, adapters, mainAdapter,
+    rx: main ? main.rx : null, tx: main ? main.tx : null,
+    sensors, uptimeSec,
+    via: 'api',
+    // компактные значения для точки истории
+    _point: {
+      cpu: num(cpu.total ?? null), gpu, ram: num(mem.percent ?? null),
+      rx: main ? main.rx : null, tx: main ? main.tx : null,
+      cput, ssdt, diskUsed: mainFs ? mainFs.percent : null,
+    },
+  };
+}
+
+/** Опрос Glances: /api/4/all → /api/3/all. Возвращает снимок или null. */
+async function pollGlances(baseUrl) {
+  const base = String(baseUrl).replace(/\/+$/, '');
+  for (const ver of [4, 3]) {
+    try {
+      const data = await fetchJson(`${base}/api/${ver}/all`);
+      if (data && data.cpu) {
+        const snap = parseGlancesAll(data);
+        snap.via = 'api' + ver;
+        return snap;
+      }
+    } catch { /* пробуем следующую версию API */ }
+  }
+  return null;
+}
+
+/** Дописать точку в историю агента со сжатием и чисткой >30 дней. */
+function glancesAppend(a, point) {
+  if (!Array.isArray(a.glances)) a.glances = [];
+  const arr = a.glances;
+  const last = arr[arr.length - 1];
+  if (last) {
+    const age = point.t - last.t;
+    const sameMin = Math.floor(last.t / 60000) === Math.floor(point.t / 60000);
+    const sameHour = Math.floor(last.t / 3600000) === Math.floor(point.t / 3600000);
+    // сжатие: старше 7 дней — почасовые бакеты, старше суток — поминутные
+    if ((age > 7 * 86400000 && sameHour) || (age > 86400000 && sameMin)) {
+      for (const k of ['cpu', 'gpu', 'ram', 'rx', 'tx', 'cput', 'ssdt', 'diskUsed']) {
+        if (point[k] == null) continue;
+        last[k] = last[k] == null ? point[k] : Math.round(((last[k] + point[k]) / 2) * 10) / 10;
+      }
+      last.t = point.t;
+      return;
+    }
+  }
+  arr.push(point);
+  if (arr.length > GLANCES_MAX_POINTS) arr.splice(0, arr.length - GLANCES_MAX_POINTS);
+  const cutoff = point.t - GLANCES_RETENTION_MS;
+  let i = 0;
+  while (i < arr.length && arr[i].t < cutoff) i++;
+  if (i > 0) arr.splice(0, i);
+}
+
 async function relayPing(agent, targets) {
   if (!agent.relayUrl) return [];
   const base = String(agent.relayUrl).replace(/\/+$/, '');
@@ -180,7 +337,28 @@ async function pollAgent(a) {
   if (self.ok) { a.onlineSince = a.onlineSince || now; a.lastSeen = now; }
   else { a.onlineSince = 0; }
 
-  // 2) пинг целей через relay (устройства, доступные только этому ПК)
+  // 2) телеметрия Glances (свой интервал, хранение 30 дней)
+  if (self.ok && a.glancesUrl) {
+    const giv = Math.max(15, db.settings.intervals.glances || 60) * 1000;
+    if (now - (a.lastGlances || 0) >= giv) {
+      a.lastGlances = now;
+      try {
+        const snap = await pollGlances(a.glancesUrl);
+        if (snap) {
+          const { _point, ...rest } = snap;
+          a.glancesLatest = rest;
+          a.glancesError = null;
+          glancesAppend(a, { t: snap.t, ..._point });
+        } else {
+          a.glancesError = 'Glances не ответил (проверьте «glances -w» и адрес)';
+        }
+      } catch (e) {
+        a.glancesError = 'Glances: ' + (e.message || 'ошибка запроса');
+      }
+    }
+  }
+
+  // 3) пинг целей через relay (устройства, доступные только этому ПК)
   if (self.ok && a.relayUrl) {
     const targets = [];
     for (const tgt of a.pingTargets) {
@@ -394,9 +572,13 @@ const server = http.createServer(async (req, res) => {
       }));
       const agentsRaw = isAdmin || user.scope.includes('agent') ? db.agents : [];
       const agents = agentsRaw.map((a) => ({
-        id: a.id, name: a.name, ip: a.ip, relayUrl: a.relayUrl || '', pingTargets: a.pingTargets || [],
-        targets: a.targets || [], favorite: !!a.favorite, online: !!a.online, latency: a.latency ?? null,
+        id: a.id, name: a.name, ip: a.ip, relayUrl: a.relayUrl || '', glancesUrl: a.glancesUrl || '',
+        pingTargets: a.pingTargets || [], targets: a.targets || [], favorite: !!a.favorite,
+        online: !!a.online, latency: a.latency ?? null,
         onlineSince: a.onlineSince || 0, lastSeen: a.lastSeen || 0, lastPoll: a.lastPoll || 0,
+        lastGlances: a.lastGlances || 0, glancesError: a.glancesError || null,
+        glancesLatest: a.glancesLatest || null,
+        glances: (a.glances || []).slice(-120), // хвост для мини-графиков; полная история — /glances
         latHist: (a.latHist || []).slice(-120), createdAt: a.createdAt,
       }));
       return json(res, 200, {
@@ -459,9 +641,11 @@ const server = http.createServer(async (req, res) => {
       const a = {
         id: uid(), name: String(b.name || '').trim() || ('ПК ' + ip), ip,
         relayUrl: String(b.relayUrl || '').trim(),
+        glancesUrl: String(b.glancesUrl || '').trim(),
         pingTargets: Array.isArray(b.pingTargets) ? b.pingTargets.map(String) : [],
         targets: [], favorite: !!b.favorite, online: false, latency: null,
-        onlineSince: 0, lastSeen: 0, lastPoll: 0, latHist: [], createdAt: Date.now(),
+        onlineSince: 0, lastSeen: 0, lastPoll: 0, lastGlances: 0,
+        latHist: [], glances: [], glancesLatest: null, glancesError: null, createdAt: Date.now(),
       };
       db.agents.push(a);
       pushEvent('info', 'agent', `Добавлен агент «${a.name}» (${a.ip})`);
@@ -475,7 +659,7 @@ const server = http.createServer(async (req, res) => {
       if (!a) return json(res, 404, { error: 'агент не найден' });
       if (method === 'PUT' || method === 'PATCH') {
         const b = await readBody(req);
-        for (const k of ['name', 'ip', 'relayUrl', 'favorite']) if (k in b) a[k] = b[k];
+        for (const k of ['name', 'ip', 'relayUrl', 'glancesUrl', 'favorite']) if (k in b) a[k] = b[k];
         if (Array.isArray(b.pingTargets)) a.pingTargets = b.pingTargets.map(String);
         saveDb();
         return json(res, 200, a);
@@ -504,6 +688,37 @@ const server = http.createServer(async (req, res) => {
       if (!ips.length) return json(res, 400, { error: 'нет корректных целей' });
       const results = await relayPing(a, ips);
       return json(res, 200, results);
+    }
+    // История Glances за период (журнал статистики)
+    m = p.match(/^\/api\/agents\/([^/]+)\/glances$/);
+    if (m && method === 'GET') {
+      const a = db.agents.find((x) => x.id === m[1]);
+      if (!a) return json(res, 404, { error: 'агент не найден' });
+      if (!isAdmin && !user.scope.includes('agent')) return json(res, 403, { error: 'нет доступа к агентам' });
+      const ranges = { '5m': 3e5, '30m': 18e5, '3h': 108e5, '24h': 864e5, '7d': 6048e5, '30d': 2592e6 };
+      const rq = url.searchParams.get('range');
+      const range = ranges[rq] ? rq : '3h';
+      const cutoff = Date.now() - ranges[range];
+      let pts = (a.glances || []).filter((x) => x.t >= cutoff);
+      if (pts.length > 1200) { // прореживаем до ≤1200 точек
+        const bw = ranges[range] / 1200;
+        const out = [];
+        let cur = null, bi = -1;
+        for (const pt of pts) {
+          const idx = Math.floor((pt.t - cutoff) / bw);
+          if (idx !== bi) { if (cur) out.push(cur); cur = { ...pt }; bi = idx; }
+          else {
+            for (const k of ['cpu', 'gpu', 'ram', 'rx', 'tx', 'cput', 'ssdt', 'diskUsed']) {
+              if (pt[k] == null) continue;
+              cur[k] = cur[k] == null ? pt[k] : Math.round(((cur[k] + pt[k]) / 2) * 10) / 10;
+            }
+            cur.t = pt.t;
+          }
+        }
+        if (cur) out.push(cur);
+        pts = out;
+      }
+      return json(res, 200, { range, retentionDays: 30, points: pts });
     }
 
     // ── витрина: настройки ──

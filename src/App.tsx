@@ -9,6 +9,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Devices from './pages/Devices';
 import Agents from './pages/Agents';
+import Stats from './pages/Stats';
 import Showcase from './pages/Showcase';
 import SettingsPage from './pages/Settings';
 import Deploy from './pages/Deploy';
@@ -80,12 +81,15 @@ export default function App() {
   let page = route;
   if (user.role !== 'admin' && (page === 'settings' || page === 'showcase')) page = 'dashboard';
   if (user.role !== 'admin' && page === 'agents' && !user.scope.includes('agent' as never)) page = 'dashboard';
+  if (user.role !== 'admin' && (page === 'stats-bars' || page === 'stats-ws') && !user.scope.includes('agent' as never)) page = 'dashboard';
 
   return (
     <Shell>
       {page === 'dashboard' && <Dashboard />}
       {page === 'devices' && <Devices key={`dev-${user.id}`} />}
       {page === 'agents' && <Agents key={`ag-${user.id}`} />}
+      {page === 'stats-bars' && <Stats key="stats-bars" mode="bars" />}
+      {page === 'stats-ws' && <Stats key="stats-ws" mode="ws" />}
       {page === 'showcase' && <Showcase />}
       {page === 'settings' && <SettingsPage />}
       {page === 'deploy' && <Deploy />}

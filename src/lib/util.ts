@@ -121,3 +121,11 @@ export const TAG_COLORS = [
 ];
 
 export const LINE_COLORS = ['#8f7df0', '#7ba4e6', '#5fc6d8', '#55c795', '#e0b65e', '#e07a80', '#d98bb0', '#8bc46a'];
+
+/** КБ/с → читаемый вид. */
+export function fmtNet(kbs: number | null | undefined): string {
+  if (kbs == null) return '—';
+  if (kbs >= 1024 * 1024) return `${(kbs / 1024 / 1024).toFixed(2)} ГБ/с`;
+  if (kbs >= 1024) return `${(kbs / 1024).toFixed(1)} МБ/с`;
+  return `${Math.round(kbs)} КБ/с`;
+}

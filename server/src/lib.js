@@ -7,7 +7,7 @@ export const DATA_DIR = process.env.DATA_DIR || './data';
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
 export const DEFAULT_SETTINGS = {
-  intervals: { ping: 60, http: 60, api: 180, rtsp: 120, sip: 120, agent: 30 },
+  intervals: { ping: 60, http: 60, api: 180, rtsp: 120, sip: 120, agent: 30, glances: 60 },
   timeoutMs: 3000,
   failThreshold: 3,
   degradeFactor: 10,
@@ -64,7 +64,12 @@ export function loadDb() {
     pingTargets: Array.isArray(a.pingTargets) ? a.pingTargets : [],
     targets: Array.isArray(a.targets) ? a.targets : [],
     latHist: Array.isArray(a.latHist) ? a.latHist : [],
+    glances: Array.isArray(a.glances) ? a.glances : [],
+    glancesLatest: a.glancesLatest || null,
+    glancesError: a.glancesError || null,
     relayUrl: a.relayUrl || '',
+    glancesUrl: a.glancesUrl || '',
+    lastGlances: a.lastGlances || 0,
   }));
 
   if (!db.users.length) {

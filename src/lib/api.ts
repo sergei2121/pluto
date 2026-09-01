@@ -1,5 +1,5 @@
 // ─── PLUTO: клиент REST API серверного ядра ──────────────────────────────────
-import type { Agent, Device, EventItem, RelayPingResult, Settings, Tag, User } from './types';
+import type { Agent, Device, EventItem, GlancesPoint, RelayPingResult, Settings, StatsRange, Tag, User } from './types';
 
 const TOKEN_KEY = 'pluto_token';
 
@@ -84,6 +84,8 @@ export const api = {
   updateAgent: (id: string, b: Partial<Agent>) => req<Agent>('PUT', `/api/agents/${id}`, b),
   deleteAgent: (id: string) => req<{ ok: boolean }>('DELETE', `/api/agents/${id}`),
   pollAgent: (id: string) => req<Agent>('POST', `/api/agents/${id}/poll`),
+  agentGlances: (id: string, range: StatsRange) =>
+    req<{ range: StatsRange; retentionDays: number; points: GlancesPoint[] }>('GET', `/api/agents/${id}/glances?range=${range}`),
 
   saveSettings: (s: Settings) => req<Settings>('PUT', '/api/settings', s),
   restartShowcase: () => req<{ ok: boolean; port: number }>('POST', '/api/showcase/restart'),

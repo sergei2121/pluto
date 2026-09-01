@@ -104,6 +104,31 @@ export function Modal({
   );
 }
 
+/** Выдвижная панель справа (карточка агента). */
+export function Drawer({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode }) {
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [open, onClose]);
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50">
+      <div className="absolute inset-0 bg-[#070a16]/70" onClick={onClose} />
+      <aside className="absolute right-0 top-0 flex h-full w-full max-w-xl flex-col border-l border-line bg-panel shadow-[-20px_0_60px_rgba(0,0,0,.5)]">
+        <header className="flex items-center justify-between border-b border-line/60 px-5 py-3.5">
+          <div className="min-w-0">{title}</div>
+          <button onClick={onClose} className="ml-3 rounded-md p-1.5 text-dim transition-colors hover:bg-raised hover:text-ink">
+            <X className="h-4 w-4" />
+          </button>
+        </header>
+        <div className="scroll-thin flex-1 overflow-y-auto p-5">{children}</div>
+      </aside>
+    </div>
+  );
+}
+
 export function EmptyState({ icon, title, text, action }: { icon?: ReactNode; title: string; text?: string; action?: ReactNode }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">

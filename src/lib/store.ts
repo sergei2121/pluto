@@ -21,7 +21,7 @@ export interface PlutoState {
 
 function defaultSettings(): Settings {
   return {
-    intervals: { ping: 60, http: 60, api: 180, rtsp: 120, sip: 120, agent: 30 },
+    intervals: { ping: 60, http: 60, api: 180, rtsp: 120, sip: 120, agent: 30, glances: 60 },
     timeoutMs: 3000,
     failThreshold: 3,
     degradeFactor: 10,
@@ -196,8 +196,13 @@ export const store = {
         pingTargets: Array.isArray(a.pingTargets) ? a.pingTargets : [],
         targets: Array.isArray(a.targets) ? a.targets : [],
         latHist: Array.isArray(a.latHist) ? a.latHist : [],
+        glances: Array.isArray(a.glances) ? a.glances : [],
+        glancesLatest: a.glancesLatest ?? null,
+        glancesError: a.glancesError ?? null,
         latency: a.latency ?? null,
         relayUrl: a.relayUrl ?? '',
+        glancesUrl: a.glancesUrl ?? '',
+        lastGlances: a.lastGlances ?? 0,
       })),
       tags: st.tags || [],
       events: st.events || [],
@@ -268,8 +273,8 @@ export const store = {
     get().pushEvent('info', 'device', `«${d.name}» ${d.showcase ? 'убрано с витрины' : 'добавлено на витрину'}`);
   },
 
-  // ── агенты (relay) ──
-  async addAgent(d: { name: string; ip: string; relayUrl: string; pingTargets?: string[] }): Promise<void> {
+  // ── агенты (relay + Glances) ──
+  async addAgent(d: { name: string; ip: string; relayUrl: string; glancesUrl?: string; pingTargets?: string[] }): Promise<void> {
     if (getState().apiMode === 'server') {
       const { api } = await import('./api');
       await api.addAgent(d as never);
@@ -278,10 +283,10 @@ export const store = {
       return;
     }
     const a: Agent = {
-      id: uid('ag'), name: d.name, ip: d.ip, relayUrl: d.relayUrl,
+      id: uid('ag'), name: d.name, ip: d.ip, relayUrl: d.relayUrl, glancesUrl: d.glancesUrl ?? '',
       pingTargets: d.pingTargets ?? [], targets: [], favorite: false,
-      online: false, latency: null, onlineSince: 0, lastSeen: 0, lastPoll: 0,
-      latHist: [], createdAt: Date.now(),
+      online: false, latency: null, onlineSince: 0, lastSeen: 0, lastPoll: 0, lastGlances: 0,
+      latHist: [], glances: [], glancesLatest: null, glancesError: null, createdAt: Date.now(),
     };
     set({ agents: [...state.agents, a] });
     get().pushEvent('info', 'agent', `Добавлен агент «${a.name}» (${a.ip})`);

@@ -3,7 +3,7 @@ import { memo, useMemo, useState } from 'react';
 import { Globe, AlertTriangle, Activity, Monitor, Star, Server, Rocket, LayoutGrid, Check, Bell } from 'lucide-react';
 import { Panel, StatusDot, STATUS_META, Sparkbar, Seg, TypeBadge, EmptyState, TimeAgo } from '../components/ui';
 import { FAVORITES_LIMIT, store, useCurrentUser, usePluto, visibleAgents, visibleDevices } from '../lib/store';
-import { cls, fmtMs, fmtUp } from '../lib/util';
+import { cls, fmtMs, fmtUp, fmtNet } from '../lib/util';
 import type { Agent, Device, EventItem, Severity } from '../lib/types';
 
 const SEV_META: Record<Severity, { icon: React.ReactNode; cls: string; bar: string }> = {
@@ -76,8 +76,8 @@ const FavDeviceCard = memo(function FavDeviceCard({ id }: { id: string }) {
 const FavAgentCard = memo(function FavAgentCard({ id }: { id: string }) {
   const a = usePluto((s) => s.agents.find((x) => x.id === id));
   if (!a) return null;
-  const alive = a.targets.reduce((n, t) => n + t.results.filter((r) => r.alive).length, 0);
-  const total = a.targets.reduce((n, t) => n + t.results.length, 0);
+  const g = a.glancesLatest;
+  const off = !a.online;
   return (
     <div className="group cursor-pointer rounded-lg border border-line bg-raised/50 p-3.5 transition-all duration-200 hover:-translate-y-0.5 hover:border-vio/40 hover:bg-raised/80"
       onClick={() => store.nav('agents', a.ip)}>
@@ -90,21 +90,33 @@ const FavAgentCard = memo(function FavAgentCard({ id }: { id: string }) {
       </div>
       <div className="mt-2.5 grid grid-cols-3 gap-2 text-center">
         <div>
-          <div className={cls('font-mono text-[15px] font-bold', a.online ? 'text-vio' : 'text-dim')}>{fmtMs(a.latency)}</div>
-          <div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">до ПК</div>
+          <div className={cls('font-mono text-[15px] font-bold', off ? 'text-dim' : 'text-vio')}>{off || g?.cpu == null ? '—' : `${Math.round(g.cpu)}%`}</div>
+          <div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">CPU</div>
         </div>
         <div>
-          <div className="font-mono text-[15px] font-bold text-mint">{alive}<span className="text-[10px] text-dim">/{total || '—'}</span></div>
-          <div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">целей живо</div>
+          <div className={cls('font-mono text-[15px] font-bold', off ? 'text-dim' : g?.cput != null && g.cput > 75 ? 'text-crit' : 'text-warn')}>{off || g?.cput == null ? '—' : `${Math.round(g.cput)}°`}</div>
+          <div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">t°C CPU</div>
         </div>
         <div>
-          <div className="font-mono text-[15px] font-bold text-blu">{a.online ? fmtUp(Date.now() - (a.onlineSince || Date.now())) : '—'}</div>
-          <div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">в сети</div>
+          <div className={cls('font-mono text-[15px] font-bold', off ? 'text-dim' : 'text-blu')}>{a.latency != null ? `${a.latency}` : '—'}</div>
+          <div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">пинг, мс</div>
+        </div>
+        <div>
+          <div className={cls('font-mono text-[15px] font-bold', off ? 'text-dim' : 'text-mint')}>{off || g?.ram == null ? '—' : `${Math.round(g.ram)}%`}</div>
+          <div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">RAM</div>
+        </div>
+        <div>
+          <div className={cls('font-mono text-[13px] font-bold leading-[19px]', off ? 'text-dim' : 'text-ok')}>{off || !g ? '—' : `↓${fmtNet(g.rx ?? null)}`}</div>
+          <div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">сеть RX</div>
+        </div>
+        <div>
+          <div className={cls('font-mono text-[15px] font-bold', off ? 'text-dim' : 'text-[#d98bb0]')}>{off || g?.ssdt == null ? '—' : `${Math.round(g.ssdt)}°`}</div>
+          <div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">t° SSD</div>
         </div>
       </div>
       <div className="mt-2.5 flex items-center justify-between font-mono text-[10px] text-dim">
         <span>{a.ip}</span>
-        <span className={a.online ? 'text-ok' : 'text-crit'}>{a.online ? 'relay на связи' : 'relay офлайн'}</span>
+        <span className={a.online ? 'text-ok' : 'text-crit'}>{a.online ? `в сети ${fmtUp(Date.now() - (a.onlineSince || Date.now()))}` : 'офлайн'}</span>
       </div>
     </div>
   );
