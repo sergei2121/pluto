@@ -11,7 +11,7 @@ import {
   issueSession, authUser, publicUser, DEFAULT_SETTINGS,
 } from './lib.js';
 
-const VERSION = '1.13.0';
+const VERSION = '1.13.1';
 const HTTP_PORT = parseInt(process.env.HTTP_PORT || '8080', 10);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.join(__dirname, '..', 'web');
@@ -329,13 +329,37 @@ const server = http.createServer(async (req, res) => {
       if (!file.startsWith(WEB_DIR)) return json(res, 403, { error: 'forbidden' });
       if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(WEB_DIR, 'index.html');
       if (!fs.existsSync(file)) return text(res, 200, 'PLUTO Core работает. Веб-консоль не найдена: пересоберите образ.');
-      const ext = path.extname(file);
+      const ext = path.extname(file).toLowerCase();
       if (ext === '.html' || !ext) {
         const html = fs.readFileSync(file, 'utf8').replace('<head>', `<head><script>window.__PLUTO_CORE__={v:"${VERSION}"}</script>`);
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
         return res.end(html);
       }
-      res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+      // Браузеры жёстко проверяют MIME для модульных скриптов: JS с
+      // «application/octet-stream» отклоняется, и интерфейс остаётся пустым.
+      const MIME = {
+        '.js': 'application/javascript; charset=utf-8',
+        '.mjs': 'application/javascript; charset=utf-8',
+        '.css': 'text/css; charset=utf-8',
+        '.svg': 'image/svg+xml',
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif',
+        '.ico': 'image/x-icon',
+        '.webmanifest': 'application/manifest+json; charset=utf-8',
+        '.json': 'application/json; charset=utf-8',
+        '.map': 'application/json; charset=utf-8',
+        '.woff': 'font/woff',
+        '.woff2': 'font/woff2',
+        '.txt': 'text/plain; charset=utf-8',
+        '.wasm': 'application/wasm',
+      };
+      res.writeHead(200, {
+        'Content-Type': MIME[ext] || 'application/octet-stream',
+        // хэшированные ассеты Vite можно кэшировать надолго, остальное — нет
+        'Cache-Control': /^\/assets\//.test(p) ? 'public, max-age=31536000, immutable' : 'no-cache',
+      });
       return fs.createReadStream(file).pipe(res);
     }
 
