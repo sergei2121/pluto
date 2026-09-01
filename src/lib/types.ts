@@ -88,6 +88,9 @@ export interface GlancesSnapshot {
   via: string; // api4 | api3
 }
 
+/** Куда попадает агент в статистике: Bars, WS или никуда (только «Агенты»). */
+export type StatsView = '' | 'bars' | 'ws';
+
 export type StatsRange = '5m' | '30m' | '3h' | '24h' | '7d' | '30d';
 
 /** Агент = ПК: пинг (uptime), телеметрия Glances и relay-пинги локальных устройств. */
@@ -101,7 +104,8 @@ export interface Agent {
   targets: RelayTargetResult[];
   tags: string[]; // присвоенные теги (редактируются в «Изменить»)
   favorite: boolean; // избранное на главной
-  stats: boolean; // явно добавлен в «Статистику Bars/WS»
+  /** В какую вкладку статистики попадает агент: 'bars' | 'ws' | '' (ни в какую). */
+  statsView: StatsView;
   online: boolean;
   latency: number | null; // пинг до ПК, мс
   onlineSince: number;
