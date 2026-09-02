@@ -1,4 +1,4 @@
-// ─── PLUTO Core: хранилище, авторизация, события ─────────────────────────────
+// ─── PLUTO Core: хранилище, авторизация ─────────────────────────────────────
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -7,27 +7,20 @@ export const DATA_DIR = process.env.DATA_DIR || './data';
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
 export const DEFAULT_SETTINGS = {
-  intervals: { ping: 60, http: 60, api: 180, rtsp: 120, sip: 120, agent: 30, glances: 60 },
-  timeoutMs: 3000,
-  failThreshold: 3,
-  degradeFactor: 10,
-  degradeMinMs: 250,
-  showcase: { port: 8081 },
+  intervals: { ping: 60, http: 60, api: 180, rtsp: 120, sip: 120, agent: 30, glances: 20 },
+  timeoutMs: 3000, failThreshold: 3, degradeFactor: 10, degradeMinMs: 250,
+  mirror: { enabled: false, url: '', secret: '', interval: 60 },
   notifications: {
     telegram: { enabled: false, botToken: '', chatId: '' },
     email: { enabled: false, smtp: '', from: '', to: '' },
     push: { enabled: false },
     on: { down: true, degraded: true, recover: true, agentOff: true, agentOn: false },
   },
+  showcase: { port: 8081 },
 };
 
 const DEFAULT_DB = () => ({
-  users: [],
-  sessions: [],
-  devices: [],
-  agents: [],
-  tags: [],
-  events: [],
+  users: [], sessions: [], devices: [], agents: [], tags: [], events: [],
   settings: DEFAULT_SETTINGS,
 });
 
@@ -44,52 +37,40 @@ export function loadDb() {
   }
   db = { ...DEFAULT_DB(), ...(data || {}) };
   db.settings = {
-    ...DEFAULT_SETTINGS,
-    ...(db.settings || {}),
+    ...DEFAULT_SETTINGS, ...(db.settings || {}),
     intervals: { ...DEFAULT_SETTINGS.intervals, ...((db.settings || {}).intervals || {}) },
     notifications: { ...DEFAULT_SETTINGS.notifications, ...((db.settings || {}).notifications || {}) },
+    mirror: { ...DEFAULT_SETTINGS.mirror, ...((db.settings || {}).mirror || {}) },
     showcase: { ...DEFAULT_SETTINGS.showcase, ...((db.settings || {}).showcase || {}) },
   };
-
-  // Нормализация записей между версиями ядра
-  db.devices = (db.devices || []).map((d) => ({
-    ...d,
-    tags: Array.isArray(d.tags) ? d.tags : [],
-    history: Array.isArray(d.history) ? d.history : [],
-    showcase: !!d.showcase,
-    checking: false,
-  }));
-  db.agents = (db.agents || []).map((a) => ({
-    ...a,
-    pingTargets: Array.isArray(a.pingTargets) ? a.pingTargets : [],
-    targets: Array.isArray(a.targets) ? a.targets : [],
-    tags: Array.isArray(a.tags) ? a.tags : [],
-    latHist: Array.isArray(a.latHist) ? a.latHist : [],
-    glances: Array.isArray(a.glances) ? a.glances : [],
-    glancesLatest: a.glancesLatest || null,
-    glancesError: a.glancesError || null,
-    relayUrl: a.relayUrl || '',
-    glancesUrl: a.glancesUrl || '',
-    lastGlances: a.lastGlances || 0,
-    favorite: !!a.favorite,
-    // совместимость со старым булевым stats: true → 'ws'
-    statsView: a.statsView === 'bars' || a.statsView === 'ws' ? a.statsView : (a.stats ? 'ws' : ''),
-  }));
-
-  if (!db.users.length) {
+  if (db.users.length === 0) {
     db.users.push({
       id: uid(), login: 'admin', name: 'admin', role: 'admin', scope: [],
       passHash: hashPass(process.env.ADMIN_PASSWORD || 'pluto'), builtIn: true, createdAt: Date.now(),
     });
     pushEvent('info', 'system', 'Первый запуск ядра: создан администратор admin');
+    saveDb();
   }
-  saveDb();
+  // нормализация записей (совместимость со старыми базами)
+  db.devices = (db.devices || []).map((d) => ({
+    ...d, tags: Array.isArray(d.tags) ? d.tags : [], history: Array.isArray(d.history) ? d.history : [],
+    showcase: !!d.showcase, checking: false,
+  }));
+  db.agents = (db.agents || []).map((a) => ({
+    ...a, pingTargets: Array.isArray(a.pingTargets) ? a.pingTargets : [],
+    targets: Array.isArray(a.targets) ? a.targets : [], tags: Array.isArray(a.tags) ? a.tags : [],
+    latHist: Array.isArray(a.latHist) ? a.latHist : [], glances: Array.isArray(a.glances) ? a.glances : [],
+    glancesLatest: a.glancesLatest || null, glancesError: a.glancesError || null,
+    relayUrl: a.relayUrl || '', glancesUrl: a.glancesUrl || '', lastGlances: a.lastGlances || 0,
+    favorite: !!a.favorite, pingsFavorite: !!a.pingsFavorite, pingsShowcase: !!a.pingsShowcase,
+    statsView: a.statsView === 'bars' || a.statsView === 'ws' ? a.statsView : (a.stats ? 'ws' : ''),
+  }));
+  db.devices.forEach((d) => (d.checking = false));
   return db;
 }
 
 export function saveDb() {
-  // Дебаунс: при тысячах устройств проверки идут непрерывно, и сериализация
-  // базы на каждый чих блокировала бы event loop. 2 с — безопасный компромисс.
+  // Дебаунс: при тысячах устройств проверки идут непрерывно.
   if (saveTimer) return;
   saveTimer = setTimeout(() => {
     saveTimer = null;
@@ -104,13 +85,7 @@ export function saveDb() {
   }, 2000);
 }
 
-export function getDb() {
-  return db;
-}
-
-export function uid() {
-  return crypto.randomBytes(6).toString('hex');
-}
+export function uid() { return crypto.randomBytes(6).toString('hex'); }
 
 export function pushEvent(sev, source, text) {
   db.events.unshift({ id: uid(), ts: Date.now(), sev, source, text });
@@ -152,8 +127,3 @@ export function authUser(req) {
   if (!s) return null;
   return db.users.find((u) => u.id === s.userId) || null;
 }
-
-export const publicUser = (u) => ({
-  id: u.id, login: u.login, name: u.name, role: u.role, scope: u.scope,
-  builtIn: u.builtIn, createdAt: u.createdAt,
-});

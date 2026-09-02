@@ -4,25 +4,23 @@
 # Этап 1: сборка веб-консоли (React + Vite)
 FROM node:20-alpine AS web
 WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN npm ci
-COPY vite.config.js tsconfig.json index.html ./
+COPY package.json package-lock.json tsconfig.json vite.config.js index.html ./
 COPY src ./src
-RUN npm run build
+RUN npm ci && npm run build
 
-# Этап 2: серверное ядро (Node, без внешних npm-зависимостей)
+# Этап 2: ядро мониторинга (зависимостей нет — только встроенные модули Node)
 FROM node:20-alpine
-# iputils — настоящий ping (ICMP) для проверок; tzdata — часовой пояс
+# iputils — бинарь ping для ICMP-проверок
 RUN apk add --no-cache iputils iproute2 tzdata
-WORKDIR /app/server
+WORKDIR /app
 ENV NODE_ENV=production \
-    DATA_DIR=/app/server/data \
+    DATA_DIR=/data \
     HTTP_PORT=8080
 
 COPY server/package.json ./package.json
 COPY server/src ./src
 COPY --from=web /app/dist ./web
 
-VOLUME /app/server/data
-EXPOSE 8080 8081
+VOLUME /data
+EXPOSE 8080
 CMD ["node", "src/server.js"]

@@ -1,5 +1,12 @@
 node_modules/
-.next/
 dist/
-build/
+data/
+server/data/
 *.log
+.env
+.env.local
+pluto-relay/pluto-relay
+pluto-relay/pluto-relay.exe
+.DS_Store
+.next/
+build/

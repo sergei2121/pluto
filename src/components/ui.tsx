@@ -1,12 +1,10 @@
 // ─── PLUTO: UI-кит ───────────────────────────────────────────────────────────
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import { cls, timeAgo } from '../lib/util';
 import type { DeviceStatus } from '../lib/types';
 
-export function Panel({
-  title, icon, right, children, className, bodyClass, delay = 0,
-}: {
+export function Panel({ title, icon, right, children, className, bodyClass, delay = 0 }: {
   title?: string; icon?: ReactNode; right?: ReactNode; children: ReactNode;
   className?: string; bodyClass?: string; delay?: number;
 }) {
@@ -56,29 +54,16 @@ export function TypeBadge({ t }: { t: string }) {
 
 export function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (
-    <button
-      type="button"
-      onClick={() => !disabled && onChange(!checked)}
-      className={cls(
-        'relative h-[22px] w-10 shrink-0 rounded-full border transition-colors duration-200',
-        checked ? 'border-vio/60 bg-vio/40' : 'border-line bg-raised',
-        disabled && 'cursor-not-allowed opacity-50',
-      )}
-      aria-pressed={checked}
-    >
-      <span
-        className={cls(
-          'absolute top-[2px] h-4 w-4 rounded-full transition-all duration-200',
-          checked ? 'left-[21px] bg-ink shadow-[0_0_8px_rgba(154,140,250,.7)]' : 'left-[2px] bg-dim',
-        )}
-      />
+    <button type="button" onClick={() => !disabled && onChange(!checked)} aria-pressed={checked}
+      className={cls('relative h-[22px] w-10 shrink-0 rounded-full border transition-colors duration-200',
+        checked ? 'border-vio/60 bg-vio/40' : 'border-line bg-raised', disabled && 'cursor-not-allowed opacity-50')}>
+      <span className={cls('absolute top-[2px] h-4 w-4 rounded-full transition-all duration-200',
+        checked ? 'left-[21px] bg-ink' : 'left-[2px] bg-dim')} />
     </button>
   );
 }
 
-export function Modal({
-  open, onClose, title, children, width = 'max-w-lg',
-}: {
+export function Modal({ open, onClose, title, children, width = 'max-w-lg' }: {
   open: boolean; onClose: () => void; title: string; children: ReactNode; width?: string;
 }) {
   useEffect(() => {
@@ -90,7 +75,7 @@ export function Modal({
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-[#070a16]/80" onClick={onClose} />
+      <div className="absolute inset-0 bg-[#070a16]/80 backdrop-blur-[3px]" onClick={onClose} />
       <div className={cls('pop relative w-full rounded-xl border border-line bg-panel shadow-[0_30px_80px_-20px_rgba(0,0,0,.9)]', width)}>
         <header className="flex items-center justify-between border-b border-line/60 px-5 py-3.5">
           <h3 className="font-display text-sm font-semibold tracking-wide text-ink">{title}</h3>
@@ -104,7 +89,6 @@ export function Modal({
   );
 }
 
-/** Выдвижная панель справа (карточка агента). */
 export function Drawer({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode }) {
   useEffect(() => {
     if (!open) return;
@@ -129,15 +113,23 @@ export function Drawer({ open, onClose, title, children }: { open: boolean; onCl
   );
 }
 
+export function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">{label}</span>
+      {children}
+      {hint && <span className="mt-1 block text-[11px] text-dim/80">{hint}</span>}
+    </label>
+  );
+}
+
 export function EmptyState({ icon, title, text, action }: { icon?: ReactNode; title: string; text?: string; action?: ReactNode }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
       {icon && (
         <div className="relative">
           <div className="absolute inset-0 rounded-full bg-vio/10 blur-xl" />
-          <div className="relative flex h-14 w-14 items-center justify-center rounded-full border border-line bg-raised text-dim">
-            {icon}
-          </div>
+          <div className="relative flex h-14 w-14 items-center justify-center rounded-full border border-line bg-raised text-dim">{icon}</div>
         </div>
       )}
       <div>
@@ -149,21 +141,24 @@ export function EmptyState({ icon, title, text, action }: { icon?: ReactNode; ti
   );
 }
 
-export function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
+export function Seg<T extends string>({ options, value, onChange }: { options: { v: T; label: string }[]; value: T; onChange: (v: T) => void }) {
   return (
-    <label className="block">
-      <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">{label}</span>
-      {children}
-      {hint && <span className="mt-1 block text-[11px] text-dim/80">{hint}</span>}
-    </label>
+    <div className="inline-flex rounded-lg border border-line bg-raised/70 p-0.5">
+      {options.map((o) => (
+        <button key={o.v} onClick={() => onChange(o.v)}
+          className={cls('rounded-md px-2.5 py-1 text-[11px] font-semibold transition-all duration-150',
+            value === o.v ? 'bg-vio/30 text-ink shadow-sm' : 'text-dim hover:text-mut')}>
+          {o.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
+/** Полоски истории проверок: -1 = сбой. */
 export function Sparkbar({ data, height = 26, width = 120 }: { data: number[]; height?: number; width?: number }) {
   const view = data.slice(-30);
-  if (view.length === 0) {
-    return <div className="flex items-center font-mono text-[10px] text-dim/70" style={{ height }}>нет данных</div>;
-  }
+  if (view.length === 0) return <div className="flex items-center font-mono text-[10px] text-dim/70" style={{ height }}>нет данных</div>;
   const max = Math.max(...view.filter((v) => v > 0), 1);
   const bw = width / 30;
   return (
@@ -172,19 +167,31 @@ export function Sparkbar({ data, height = 26, width = 120 }: { data: number[]; h
         const fail = v < 0;
         const h = fail ? height : Math.max(3, (v / max) * (height - 4));
         return (
-          <rect
-            key={i}
-            x={i * bw + 0.5}
-            y={height - h}
-            width={Math.max(1.5, bw - 1.5)}
-            height={h}
-            rx={0.8}
-            fill={fail ? '#e07a80' : v > max * 0.6 ? '#dfa65e' : '#8f7df0'}
-            opacity={fail ? 0.95 : 0.85}
-          />
+          <rect key={i} x={i * bw + 0.5} y={height - h} width={Math.max(1.5, bw - 1.5)} height={h} rx={0.8}
+            fill={fail ? '#e07a80' : v > max * 0.6 ? '#dfa65e' : '#8f7df0'} opacity={fail ? 0.95 : 0.85} />
         );
       })}
     </svg>
+  );
+}
+
+/** Кольцевой индикатор. */
+export function Ring({ value, size = 64, color = '#8f7df0', label }: { value: number; size?: number; color?: string; label?: string }) {
+  const r = (size - 8) / 2;
+  const c = 2 * Math.PI * r;
+  const v = Math.min(100, Math.max(0, value));
+  return (
+    <div className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="-rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#242b4a" strokeWidth="5" />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth="5" strokeLinecap="round"
+          strokeDasharray={c} strokeDashoffset={c - (v / 100) * c} className="transition-all duration-700 ease-out" />
+      </svg>
+      <div className="absolute text-center">
+        <div className="font-mono text-[13px] font-bold leading-none text-ink">{Math.round(v)}%</div>
+        {label && <div className="mt-0.5 text-[9px] uppercase tracking-wider text-dim">{label}</div>}
+      </div>
+    </div>
   );
 }
 
@@ -199,38 +206,24 @@ export function Bar({ value, color = '#8f7df0', className }: { value: number; co
 }
 
 export function TimeAgo({ ts, className }: { ts: number; className?: string }) {
+  const [, force] = useState(0);
+  useEffect(() => { const t = setInterval(() => force((x) => x + 1), 5000); return () => clearInterval(t); }, []);
   return <span className={className}>{timeAgo(ts)}</span>;
 }
 
-export function Seg<T extends string>({ options, value, onChange }: { options: { v: T; label: string }[]; value: T; onChange: (v: T) => void }) {
+export function CopyBlock({ code, label }: { code: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch { /* нет доступа к буферу */ }
+  };
   return (
-    <div className="inline-flex rounded-lg border border-line bg-raised/70 p-0.5">
-      {options.map((o) => (
-        <button
-          key={o.v}
-          onClick={() => onChange(o.v)}
-          className={cls(
-            'rounded-md px-2.5 py-1 text-[11px] font-semibold transition-all duration-150',
-            value === o.v ? 'bg-vio/40 text-ink shadow-sm' : 'text-dim hover:text-mut',
-          )}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-export function CopyBlock({ label, code }: { label?: string; code: string }) {
-  return (
-    <div className="group relative overflow-hidden rounded-lg border border-line bg-[#0b0f1f]">
+    <div className="group relative overflow-hidden rounded-lg border border-line bg-[#0b0e1a]">
       {label && <div className="border-b border-line/60 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-dim">{label}</div>}
       <pre className="scroll-thin overflow-x-auto p-3.5 font-mono text-[12px] leading-relaxed text-[#b9c2e8]">{code}</pre>
-      <button
-        onClick={() => navigator.clipboard?.writeText(code)}
-        className="absolute right-2 top-2 rounded-md border border-line bg-raised px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-dim opacity-0 transition-all hover:text-ink group-hover:opacity-100"
-      >
-        Копия
+      <button onClick={copy}
+        className={cls('absolute right-2 top-2 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-wider transition-all',
+          copied ? 'border-ok/50 bg-ok/10 text-ok' : 'border-line bg-raised text-dim opacity-0 hover:text-ink group-hover:opacity-100')}>
+        {copied ? 'Готово' : 'Копия'}
       </button>
     </div>
   );

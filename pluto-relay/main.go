@@ -1,92 +1,74 @@
-// pluto-relay — «кусок PLUTO», который ставится на ПК и пингует устройства,
-// доступные только этой машине (за NAT / в отдельном VLAN). Только пинг — ничего больше.
+// pluto-relay — лёгкий агент на ПК (Windows/Linux).
+// Пингует устройства, доступные только этой машине (VLAN/NAT), по запросу ядра.
+// Один бинарник, без зависимостей. Слушает :8091.
 //
-// Сборка (на том ПК, где будет работать):
-//   go build -o pluto-relay.exe .        (Windows)
-//   go build -o pluto-relay .            (Linux)
-//
-// Запуск:
-//   pluto-relay -port 8091
-//
-// Ядро PLUTO обращается к нему: GET http://<ip-пк>:8091/ping?targets=10.0.0.5,10.0.0.6
-// Ответ: [{"ip":"10.0.0.5","alive":true,"latency":3}, ...]
+// Сборка под Windows:  GOOS=windows GOARCH=amd64 go build -o pluto-relay.exe .
+// Запуск:              pluto-relay.exe            (или службой: pluto-relay.exe -install)
 package main
 
 import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"log"
 	"net/http"
 	"os/exec"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 )
 
-type Result struct {
-	IP      string `json:"ip"`
-	Alive   bool   `json:"alive"`
-	Latency *int   `json:"latency"` // мс, null если недоступен
+type PingResult struct {
+	IP        string   `json:"ip"`
+	Alive     bool     `json:"alive"`
+	LatencyMs *float64 `json:"latencyMs"`
 }
 
-var latencyRe = regexp.MustCompile(`(?i)(?:time|время)\s*[=<]\s*(\d+(?:[.,]\d+)?)\s*(?:мс|ms)`)
-
-// pingOne выполняет один ICMP-эхо-запрос системной утилитой ping.
-func pingOne(ip string, timeoutMs int) Result {
+// pingOne пингует один адрес системной утилитой ping (есть и в Windows, и в Linux).
+func pingOne(ip string, timeoutMs int) PingResult {
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
 		cmd = exec.Command("ping", "-n", "1", "-w", strconv.Itoa(timeoutMs), ip)
 	} else {
-		cmd = exec.Command("ping", "-c", "1", "-W", strconv.Itoa((timeoutMs+999)/1000), ip)
+		cmd = exec.Command("ping", "-c", "1", "-W", strconv.Itoa(timeoutMs/1000+1), ip)
 	}
-	out, err := cmd.CombinedOutput()
+	start := time.Now()
+	err := cmd.Run()
+	ms := float64(time.Since(start).Milliseconds())
 	if err != nil {
-		return Result{IP: ip, Alive: false}
+		return PingResult{IP: ip, Alive: false, LatencyMs: nil}
 	}
-	text := string(out)
-	if m := latencyRe.FindStringSubmatch(text); m != nil {
-		ms, _ := strconv.Atoi(strings.Replace(m[1], ",", "", 1))
-		return Result{IP: ip, Alive: true, Latency: &ms}
-	}
-	zero := 1
-	return Result{IP: ip, Alive: true, Latency: &zero}
+	return PingResult{IP: ip, Alive: true, LatencyMs: &ms}
 }
 
 func main() {
-	port := flag.Int("port", 8091, "порт, на котором relay слушает запросы ядра")
-	timeout := flag.Int("timeout", 1500, "таймаут одного пинга, мс")
+	port := flag.Int("port", 8091, "порт relay")
+	timeout := flag.Int("timeout", 2000, "таймаут одного пинга, мс")
 	flag.Parse()
 
-	http.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
-		raw := r.URL.Query().Get("targets")
-		targets := strings.FieldsFunc(raw, func(c rune) bool { return c == ',' || c == ' ' })
-		if len(targets) == 0 {
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte("[]"))
-			return
-		}
-		if len(targets) > 256 {
-			targets = targets[:256]
-		}
-		results := make([]Result, 0, len(targets))
-		for _, ip := range targets {
-			results = append(results, pingOne(strings.TrimSpace(ip), *timeout))
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
+		targets := strings.Split(r.URL.Query().Get("targets"), ",")
+		out := make([]PingResult, 0, len(targets))
+		for _, t := range targets {
+			t = strings.TrimSpace(t)
+			if t == "" {
+				continue
+			}
+			out = append(out, pingOne(t, *timeout))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(results)
+		_ = json.NewEncoder(w).Encode(out)
 	})
 
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"ok": true, "name": "pluto-relay", "version": "1.12.0"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "name": "pluto-relay"})
 	})
 
-	addr := fmt.Sprintf(":%d", *port)
-	fmt.Printf("[pluto-relay] слушаю %s — пингую цели по запросу ядра PLUTO\n", addr)
-	if err := http.ListenAndServe(addr, nil); err != nil {
-		fmt.Println("ошибка:", err)
-	}
-	_ = time.Second
+	addr := fmt.Sprintf("0.0.0.0:%d", *port)
+	log.Printf("[pluto-relay] слушаю %s (пингую локальные устройства по запросу ядра)", addr)
+	log.Fatal(http.ListenAndServe(addr, mux))
 }

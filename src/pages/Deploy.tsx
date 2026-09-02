@@ -1,80 +1,104 @@
-// ─── PLUTO: развёртывание ────────────────────────────────────────────────────
-import { Rocket, Server, Monitor, LayoutGrid } from 'lucide-react';
+// ─── PLUTO: развёртывание и документация ────────────────────────────────────
+import { Rocket, Server, Monitor, Activity } from 'lucide-react';
 import { Panel, CopyBlock } from '../components/ui';
 
-const COMPOSE_UP = `# На сервере (Ubuntu), из корня репозитория:
+const SERVER_INSTALL = `# Docker (если ещё нет)
+sudo apt update && sudo apt install -y ca-certificates curl gnupg
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg \\
+  | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \\
+  https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \\
+  | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt update && sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+# PLUTO
 git clone https://github.com/pluto-monitor/pluto.git
 cd pluto
-cp .env.example .env        # при желании задайте ADMIN_PASSWORD
-docker compose up -d --build
+cp .env.example .env          # при желании задайте ADMIN_PASSWORD
+docker compose up -d --build  # консоль: http://<IP>:8080, витрина: :8081
 
-# Консоль:   http://<IP-сервера>:8080   (вход admin / пароль из .env, по умолчанию pluto)
-# Витрина:   http://<IP-сервера>:8081   (публично, без входа)`;
+# Проверка версии ядра
+curl -s http://localhost:8080/api/health`;
 
-const RELAY_BUILD = `# На ПК (Windows), в каталоге pluto-relay:
+const RELAY_INSTALL = `# Сборка relay (на машине с Go, затем скопировать pluto-relay.exe на ПК)
+cd pluto-relay
 go build -o pluto-relay.exe .
 
-# Запуск (слушает :8091, пингует цели по запросу ядра):
-pluto-relay.exe -port 8091
+# Запуск на Windows-ПК (слушает :8091, пингует локальные устройства)
+pluto-relay.exe
+# или службой:
+pluto-relay.exe -install`;
 
-# Проверка с этого же ПК:
-curl "http://127.0.0.1:8091/ping?targets=10.0.0.5,10.0.0.6"`;
+const GLANCES_INSTALL = `# Linux (Rocky): веб-интерфейс Glances на :61208
+sudo dnf install glances
+glances -w
 
-const SHOWCASE = `# Порт витрины задаётся в «Настройки -> Витрина» (консоль) и пробрасывается
-# в docker-compose переменной PLUTO_SHOWCASE_PORT (по умолчанию 8081):
-#
-#   PLUTO_SHOWCASE_PORT=8081
-#
-# После смены порта в консоли нажмите «Применить и перезапустить».`;
+# Windows: pip install glances, затем
+glances -w
+
+# В консоли PLUTO: Агенты -> Изменить -> укажите http://<IP-ПК>:61208`;
+
+const ARCH = [
+  { from: 'Консоль (браузер)', to: 'Ядро :8080', what: 'REST API + поллинг состояния' },
+  { from: 'Ядро', to: 'Устройства', what: 'PING / HTTP / API / RTSP / SIP' },
+  { from: 'Ядро', to: 'pluto-relay :8091', what: 'пинг устройств внутри VLAN/NAT' },
+  { from: 'Ядро', to: 'Glances :61208', what: 'телеметрия CPU/GPU/RAM/диски/сеть/температуры' },
+  { from: 'Ядро', to: 'Витрина :8081', what: 'публичный статус без входа' },
+  { from: 'Ядро', to: 'Зеркало (опц.)', what: 'push снапшота на read-only копию' },
+];
 
 export default function Deploy() {
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <Panel title="1 · Серверное ядро" icon={<Rocket className="h-4 w-4" />}>
-        <p className="mb-3 text-[12.5px] leading-relaxed text-dim">
-          Ядро — Node-сервер в Docker: реальные проверки (ping, HTTP, RTSP, SIP), опрос relay-агентов
-          и отдельный публичный порт витрины. Веб-консоль встроена в образ и подключается к ядру сама.
-        </p>
-        <CopyBlock label="bash" code={COMPOSE_UP} />
+    <div className="space-y-4">
+      <Panel title="Архитектура" icon={<Activity className="h-4 w-4" />}>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="border-b border-line/60 text-[10px] font-bold uppercase tracking-[0.12em] text-dim">
+                <th className="py-2 pr-3">Откуда</th><th className="py-2 pr-3">Куда</th><th className="py-2 pr-3">Что передаётся</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ARCH.map((r, i) => (
+                <tr key={i} className="border-b border-line/30 transition-colors hover:bg-raised/40">
+                  <td className="py-2.5 pr-3 font-mono text-[12px] text-vio">{r.from}</td>
+                  <td className="py-2.5 pr-3 font-mono text-[12px] text-blu">{r.to}</td>
+                  <td className="py-2.5 pr-3 text-[12.5px] text-mut">{r.what}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Panel>
 
-      <Panel title="2 · pluto-relay на ПК" icon={<Monitor className="h-4 w-4" />}>
-        <p className="mb-3 text-[12.5px] leading-relaxed text-dim">
-          Relay — крошечный HTTP-сервис (один Go-бинарник) для ПК. Он пингует устройства, доступные
-          только этой машине (за NAT / в отдельном VLAN). Только пинг — ничего больше. Ядро обращается
-          к нему по адресу из карточки агента.
-        </p>
-        <CopyBlock label="powershell / bash" code={RELAY_BUILD} />
-        <p className="mt-3 text-[12px] leading-relaxed text-dim">
-          Затем в консоли: <span className="font-semibold text-mut">Агенты → Добавить агента</span> — укажите IP ПК,
-          адрес relay (<code className="font-mono text-[11px]">http://&lt;ip-пк&gt;:8091</code>) и цели для пинга.
-        </p>
-      </Panel>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Panel title="1 · Сервер (Ubuntu + Docker)" icon={<Server className="h-4 w-4" />}>
+          <CopyBlock label="bash" code={SERVER_INSTALL} />
+        </Panel>
+        <div className="space-y-4">
+          <Panel title="2 · Relay-агент на ПК" icon={<Monitor className="h-4 w-4" />}>
+            <p className="mb-3 text-[12px] leading-relaxed text-dim">
+              Один Go-бинарник без зависимостей. Ставится на ПК внутри VLAN/NAT и пингует устройства,
+              недоступные серверу напрямую. Адрес указывается в «Агенты → Изменить».
+            </p>
+            <CopyBlock label="powershell / bash" code={RELAY_INSTALL} />
+          </Panel>
+          <Panel title="3 · Glances (телеметрия)" icon={<Rocket className="h-4 w-4" />}>
+            <p className="mb-3 text-[12px] leading-relaxed text-dim">
+              Открытый источник телеметрии: CPU по ядрам, GPU, RAM, диски, все сетевые адаптеры и температуры.
+              Хранение истории — 30 дней.
+            </p>
+            <CopyBlock label="bash" code={GLANCES_INSTALL} />
+          </Panel>
+        </div>
+      </div>
 
-      <Panel title="3 · Публичная витрина" icon={<LayoutGrid className="h-4 w-4" />}>
-        <p className="mb-3 text-[12.5px] leading-relaxed text-dim">
-          Витрина — отдельный HTTP-порт ядра со списком отмеченных устройств и их статусом.
-          Работает <span className="font-semibold text-mint">без входа</span>: только список, без меню и управления.
-          Обновляется автоматически каждые 10 секунд.
-        </p>
-        <CopyBlock label="docker-compose" code={SHOWCASE} />
-      </Panel>
-
-      <Panel title="Порты" icon={<Server className="h-4 w-4" />}>
-        <ul className="space-y-2.5 text-[12.5px] text-dim">
-          <li className="flex items-center justify-between gap-3 rounded-lg border border-line bg-raised/40 px-3 py-2">
-            <span>Консоль + API</span><code className="font-mono text-[12px] text-mut">8080</code>
-          </li>
-          <li className="flex items-center justify-between gap-3 rounded-lg border border-line bg-raised/40 px-3 py-2">
-            <span>Публичная витрина</span><code className="font-mono text-[12px] text-mut">8081</code>
-          </li>
-          <li className="flex items-center justify-between gap-3 rounded-lg border border-line bg-raised/40 px-3 py-2">
-            <span>pluto-relay на каждом ПК</span><code className="font-mono text-[12px] text-mut">8091</code>
-          </li>
-        </ul>
-        <p className="mt-3 text-[11.5px] leading-relaxed text-dim">
-          Если 8080 занят (например, Zabbix), задайте <code className="font-mono">PLUTO_HTTP_PORT</code> в <code className="font-mono">.env</code>.
-        </p>
+      <Panel title="Эксплуатация" icon={<Rocket className="h-4 w-4" />}>
+        <CopyBlock label="bash" code={`git pull && docker compose up -d --build   # обновление
+docker compose logs -f core                # логи
+docker compose exec core cp /data/db.json /data/db.backup.json  # бэкап
+docker compose down -v                     # полное удаление с данными`} />
       </Panel>
     </div>
   );

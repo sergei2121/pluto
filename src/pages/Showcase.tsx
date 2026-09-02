@@ -1,15 +1,13 @@
 // ─── PLUTO: публичная витрина ────────────────────────────────────────────────
 import { useMemo, useState } from 'react';
-import { LayoutGrid, ExternalLink, RefreshCw, Eye, EyeOff, Server, Crosshair } from 'lucide-react';
-import { Panel, StatusDot, STATUS_META, TypeBadge, Toggle, EmptyState } from '../components/ui';
-import { store, usePluto, useToasts } from '../lib/store';
-import { api } from '../lib/api';
+import { LayoutGrid, ExternalLink, Eye, EyeOff, Server, Crosshair } from 'lucide-react';
+import { Panel, StatusDot, STATUS_META, TypeBadge, EmptyState } from '../components/ui';
+import { store, usePluto } from '../lib/store';
 import { cls, fmtMs, pingStats } from '../lib/util';
 
 export default function Showcase() {
   const devices = usePluto((s) => s.devices);
   const agents = usePluto((s) => s.agents);
-  const apiMode = usePluto((s) => s.apiMode);
   const settings = usePluto((s) => s.settings);
   const [portDraft, setPortDraft] = useState<string | null>(null);
 
@@ -18,56 +16,32 @@ export default function Showcase() {
   const port = settings.showcase.port || 8081;
   const publicUrl = `http://${window.location.hostname || 'IP-СЕРВЕРА'}:${port}`;
 
-  const restart = async () => {
-    if (apiMode !== 'server') {
-      useToasts.push('warn', 'Перезапуск витрины доступен при работе с серверным ядром');
-      return;
-    }
+  const applyPort = () => {
     const newPort = portDraft != null ? parseInt(portDraft, 10) : port;
-    if (portDraft != null && (!newPort || newPort < 1024 || newPort > 65535)) {
-      useToasts.push('warn', 'Порт должен быть в диапазоне 1024–65535');
-      return;
-    }
-    try {
-      if (newPort !== port) {
-        await store.saveSettings({ ...settings, showcase: { port: newPort } });
-      }
-      const r = await api.restartShowcase();
-      useToasts.push('ok', `Витрина запущена на порту ${r.port}`);
-    } catch (e) {
-      useToasts.push('warn', e instanceof Error ? e.message : 'Не удалось перезапустить витрину');
-    }
+    if (!newPort || newPort < 1024 || newPort > 65535) return;
+    void store.saveSettings({ ...settings, showcase: { port: newPort } });
+    setPortDraft(null);
   };
 
   return (
     <div className="space-y-4">
       <Panel title="Публичная витрина" icon={<LayoutGrid className="h-4 w-4" />}
-        right={
-          <a href={publicUrl} target="_blank" rel="noreferrer"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-mint/50 bg-mint/15 px-3 py-1.5 text-[12.5px] font-bold text-mint transition-all hover:bg-mint/25">
-            <ExternalLink className="h-4 w-4" /> Открыть витрину
-          </a>
-        }>
+        right={<a href={publicUrl} target="_blank" rel="noreferrer"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-mint/50 bg-mint/15 px-3 py-1.5 text-[12.5px] font-bold text-mint transition-all hover:bg-mint/25">
+          <ExternalLink className="h-4 w-4" /> Открыть витрину
+        </a>}>
         <div className="rounded-lg border border-mint/25 bg-mint/5 px-4 py-3 text-[12.5px] leading-relaxed text-mut">
           Витрина доступна <span className="font-bold text-mint">без входа</span> по адресу{' '}
           <code className="rounded bg-void/50 px-1.5 py-0.5 font-mono text-[11.5px] text-ink">{publicUrl}</code>.
-          Это отдельный порт ядра: только список устройств и их статус — без меню, настроек и управления.
-          Отметьте ниже, какие устройства показывать.
+          Это отдельный порт ядра: только список устройств и пингов — без меню, настроек и управления.
         </div>
-
         <div className="mt-4 flex flex-wrap items-end gap-3">
           <label className="block">
             <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Порт витрины</span>
-            <input className="inp w-28 font-mono" type="number" min={1024} max={65535}
-              value={portDraft ?? port} onChange={(e) => setPortDraft(e.target.value)} />
+            <input className="inp w-28 font-mono" type="number" min={1024} max={65535} value={portDraft ?? port} onChange={(e) => setPortDraft(e.target.value)} />
           </label>
-          <button onClick={restart}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-vio/50 bg-vio/20 px-4 py-2 text-[13px] font-bold text-ink transition-all hover:bg-vio/30">
-            <RefreshCw className="h-4 w-4" /> Применить и перезапустить
-          </button>
-          <span className="text-[11.5px] text-dim">
-            Не забудьте пробросить порт в docker-compose (<code className="font-mono">PLUTO_SHOWCASE_PORT</code>).
-          </span>
+          <button onClick={applyPort} className="btn-acc">Применить порт</button>
+          <span className="text-[11.5px] text-dim">В серверном режиме не забудьте пробросить порт (<code className="font-mono">PLUTO_SHOWCASE_PORT</code>).</span>
         </div>
       </Panel>
 
@@ -79,10 +53,7 @@ export default function Showcase() {
             <table className="w-full text-left">
               <thead>
                 <tr className="border-b border-line/60 text-[10px] font-bold uppercase tracking-[0.12em] text-dim">
-                  <th className="py-2 pr-3">На витрине</th>
-                  <th className="py-2 pr-3">Агент</th>
-                  <th className="py-2 pr-3">Устройств</th>
-                  <th className="py-2 pr-3">Онлайн</th>
+                  <th className="py-2 pr-3">На витрине</th><th className="py-2 pr-3">Агент</th><th className="py-2 pr-3">Устройств</th><th className="py-2 pr-3">Онлайн</th>
                 </tr>
               </thead>
               <tbody>
@@ -91,22 +62,15 @@ export default function Showcase() {
                   return (
                     <tr key={a.id} className={cls('border-b border-line/30 transition-colors', a.pingsShowcase ? 'bg-mint/[0.04]' : 'hover:bg-raised/40')}>
                       <td className="py-2.5 pr-3">
-                        <button onClick={() => store.toggleAgentPingsShowcase(a.id)}
-                          title={a.pingsShowcase ? 'Убрать с витрины' : 'Показать на витрине'}
+                        <button onClick={() => store.toggleAgentPingsShowcase(a.id)} title={a.pingsShowcase ? 'Убрать с витрины' : 'Показать на витрине'}
                           className={cls('inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11.5px] font-bold transition-all',
                             a.pingsShowcase ? 'border-mint/50 bg-mint/15 text-mint' : 'border-line bg-raised/50 text-dim hover:text-mut')}>
-                          {a.pingsShowcase ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-                          {a.pingsShowcase ? 'Видно' : 'Скрыто'}
+                          {a.pingsShowcase ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}{a.pingsShowcase ? 'Видно' : 'Скрыто'}
                         </button>
                       </td>
-                      <td className="py-2.5 pr-3">
-                        <div className="text-[13px] font-semibold text-ink">{a.name}</div>
-                        <div className="font-mono text-[11px] text-dim">{a.ip}</div>
-                      </td>
+                      <td className="py-2.5 pr-3"><div className="text-[13px] font-semibold text-ink">{a.name}</div><div className="font-mono text-[11px] text-dim">{a.ip}</div></td>
                       <td className="py-2.5 pr-3 font-mono text-[13px] tabular-nums text-mut">{st.total}</td>
-                      <td className="py-2.5 pr-3">
-                        <span className={cls('font-mono text-[13px] tabular-nums', st.offline > 0 ? 'text-warn' : 'text-ok')}>{st.online}/{st.total}</span>
-                      </td>
+                      <td className="py-2.5 pr-3"><span className={cls('font-mono text-[13px] tabular-nums', st.offline > 0 ? 'text-warn' : 'text-ok')}>{st.online}/{st.total}</span></td>
                     </tr>
                   );
                 })}
@@ -125,11 +89,7 @@ export default function Showcase() {
             <table className="w-full text-left">
               <thead>
                 <tr className="border-b border-line/60 text-[10px] font-bold uppercase tracking-[0.12em] text-dim">
-                  <th className="py-2 pr-3">На витрине</th>
-                  <th className="py-2 pr-3">Устройство</th>
-                  <th className="py-2 pr-3">Тип</th>
-                  <th className="py-2 pr-3">Статус</th>
-                  <th className="py-2 pr-3">Задержка</th>
+                  <th className="py-2 pr-3">На витрине</th><th className="py-2 pr-3">Устройство</th><th className="py-2 pr-3">Тип</th><th className="py-2 pr-3">Статус</th><th className="py-2 pr-3">Задержка</th>
                 </tr>
               </thead>
               <tbody>
@@ -138,28 +98,16 @@ export default function Showcase() {
                   return (
                     <tr key={d.id} className={cls('border-b border-line/30 transition-colors', d.showcase ? 'bg-mint/[0.04]' : 'hover:bg-raised/40')}>
                       <td className="py-2.5 pr-3">
-                        <button onClick={() => store.toggleDeviceShowcase(d.id)}
-                          title={d.showcase ? 'Убрать с витрины' : 'Показать на витрине'}
+                        <button onClick={() => store.toggleDeviceShowcase(d.id)} title={d.showcase ? 'Убрать с витрины' : 'Показать на витрине'}
                           className={cls('inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11.5px] font-bold transition-all',
                             d.showcase ? 'border-mint/50 bg-mint/15 text-mint' : 'border-line bg-raised/50 text-dim hover:text-mut')}>
-                          {d.showcase ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-                          {d.showcase ? 'Видно' : 'Скрыто'}
+                          {d.showcase ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}{d.showcase ? 'Видно' : 'Скрыто'}
                         </button>
                       </td>
-                      <td className="py-2.5 pr-3">
-                        <div className="text-[13px] font-semibold text-ink">{d.name}</div>
-                        <div className="font-mono text-[11px] text-dim">{d.address}</div>
-                      </td>
+                      <td className="py-2.5 pr-3"><div className="text-[13px] font-semibold text-ink">{d.name}</div><div className="font-mono text-[11px] text-dim">{d.address}</div></td>
                       <td className="py-2.5 pr-3"><TypeBadge t={d.type} /></td>
-                      <td className="py-2.5 pr-3">
-                        <span className="flex items-center gap-2">
-                          <StatusDot status={d.status} pulse={d.showcase} />
-                          <span className={cls('text-[12px] font-semibold', m.text)}>{m.label}</span>
-                        </span>
-                      </td>
-                      <td className="py-2.5 pr-3 font-mono text-[13px] tabular-nums text-mut">
-                        {d.status === 'down' ? '—' : fmtMs(d.latency)}
-                      </td>
+                      <td className="py-2.5 pr-3"><span className="flex items-center gap-2"><StatusDot status={d.status} pulse={d.showcase} /><span className={cls('text-[12px] font-semibold', m.text)}>{m.label}</span></span></td>
+                      <td className="py-2.5 pr-3 font-mono text-[13px] tabular-nums text-mut">{d.status === 'down' ? '—' : fmtMs(d.latency)}</td>
                     </tr>
                   );
                 })}

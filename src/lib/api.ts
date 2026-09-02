@@ -1,62 +1,21 @@
-// ─── PLUTO: клиент REST API серверного ядра ──────────────────────────────────
-import type { Agent, Device, EventItem, GlancesPoint, RelayPingResult, Settings, StatsRange, Tag, User } from './types';
+// ─── PLUTO: клиент REST API серверного ядра ─────────────────────────────────
+import type { Agent, Device, EventItem, Settings, SourceTestReport, Tag, User } from './types';
+import { getState, store } from './store';
 
 const TOKEN_KEY = 'pluto_token';
+let token: string | null = null;
 
-export function getApiToken(): string | null {
-  try {
-    return localStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function setApiToken(t: string | null) {
-  try {
-    if (t) localStorage.setItem(TOKEN_KEY, t);
-    else localStorage.removeItem(TOKEN_KEY);
-  } catch { /* noop */ }
-}
+export function setApiToken(t: string | null) { token = t; if (t) localStorage.setItem(TOKEN_KEY, t); else localStorage.removeItem(TOKEN_KEY); }
+export function getApiToken(): string | null { if (token == null) token = localStorage.getItem(TOKEN_KEY); return token; }
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(getApiToken() ? { Authorization: `Bearer ${getApiToken()}` } : {}),
-    },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  let data: unknown = null;
-  try {
-    data = await res.json();
-  } catch {
-    /* пустой ответ */
-  }
-  if (!res.ok) {
-    const msg = (data as { error?: string } | null)?.error || `HTTP ${res.status}`;
-    if (res.status === 401 && getApiToken()) setApiToken(null);
-    throw new Error(msg);
-  }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const t = getApiToken();
+  if (t) headers['Authorization'] = `Bearer ${t}`;
+  const res = await fetch(path, { method, headers, body: body != null ? JSON.stringify(body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as { error?: string }).error || `HTTP ${res.status}`);
   return data as T;
-}
-
-/** Проверка доступности ядра; возвращает версию или null. */
-export async function detectApi(): Promise<string | null> {
-  // Подпись, вшитая ядром в index.html — надёжнее запроса
-  const injected = (window as unknown as { __PLUTO_CORE__?: { v?: string } }).__PLUTO_CORE__;
-  if (injected && typeof injected.v === 'string') return injected.v;
-  try {
-    const ctrl = new AbortController();
-    const to = setTimeout(() => ctrl.abort(), 2000);
-    const res = await fetch('/api/health', { signal: ctrl.signal });
-    clearTimeout(to);
-    if (!res.ok) return null;
-    const j = (await res.json()) as { version?: string };
-    return j.version || 'unknown';
-  } catch {
-    return null;
-  }
 }
 
 export interface ServerState {
@@ -68,39 +27,66 @@ export interface ServerState {
   users?: User[];
 }
 
-export const api = {
-  login: (login: string, password: string) =>
-    req<{ token: string; user: User }>('POST', '/api/auth/login', { login, password }),
-  me: () => req<User>('GET', '/api/auth/me'),
+/** Проверка доступности ядра; возвращает версию или null. */
+export async function detectApi(): Promise<string | null> {
+  try {
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 1500);
+    const res = await fetch('/api/health', { signal: ctrl.signal });
+    clearTimeout(to);
+    if (!res.ok) return null;
+    const d = await res.json();
+    return d && d.version ? String(d.version) : 'legacy';
+  } catch {
+    return null;
+  }
+}
 
+export const api = {
+  login: (loginStr: string, pass: string) => req<{ token: string; user: User }>('POST', '/api/auth/login', { login: loginStr, pass }),
+  me: () => req<User>('GET', '/api/auth/me'),
   state: () => req<ServerState>('GET', '/api/state'),
 
-  addDevice: (d: Partial<Device>) => req<Device>('POST', '/api/devices', d),
-  updateDevice: (id: string, b: Partial<Device>) => req<Device>('PUT', `/api/devices/${id}`, b),
+  addDevice: (b: unknown) => req<Device>('POST', '/api/devices', b),
+  updateDevice: (id: string, b: unknown) => req<Device>('PUT', `/api/devices/${id}`, b),
   deleteDevice: (id: string) => req<{ ok: boolean }>('DELETE', `/api/devices/${id}`),
+  clearDevices: () => req<{ ok: boolean; removed: number }>('DELETE', '/api/devices'),
   checkDevice: (id: string) => req<{ ok: boolean; latency: number }>('POST', `/api/devices/${id}/check`),
 
-  addAgent: (a: Partial<Agent>) => req<Agent>('POST', '/api/agents', a),
-  updateAgent: (id: string, b: Partial<Agent>) => req<Agent>('PUT', `/api/agents/${id}`, b),
+  addAgent: (b: unknown) => req<Agent>('POST', '/api/agents', b),
+  updateAgent: (id: string, b: unknown) => req<Agent>('PUT', `/api/agents/${id}`, b),
   deleteAgent: (id: string) => req<{ ok: boolean }>('DELETE', `/api/agents/${id}`),
   pollAgent: (id: string) => req<Agent>('POST', `/api/agents/${id}/poll`),
-  agentGlances: (id: string, range: StatsRange) =>
-    req<{ range: StatsRange; retentionDays: number; points: GlancesPoint[] }>('GET', `/api/agents/${id}/glances?range=${range}`),
+  agentGlances: (id: string, range: string) =>
+    req<{ range: string; retentionDays: number; points: unknown[] }>('GET', `/api/agents/${id}/glances?range=${encodeURIComponent(range)}`),
+  testAgentSource: (id: string) => req<SourceTestReport>('GET', `/api/agents/${id}/test-glances`),
+
+  addTag: (label: string, color: string) => req<Tag>('POST', '/api/tags', { label, color }),
+  deleteTag: (id: string) => req<{ ok: boolean }>('DELETE', `/api/tags/${id}`),
 
   saveSettings: (s: Settings) => req<Settings>('PUT', '/api/settings', s),
   restartShowcase: () => req<{ ok: boolean; port: number }>('POST', '/api/showcase/restart'),
-
-  relayPing: (agentId: string, targets: string) =>
-    req<RelayPingResult[]>('GET', `/api/agents/${agentId}/relay-ping?targets=${encodeURIComponent(targets)}`),
+  mirrorSyncNow: () => req<{ ok: boolean; error?: string | null }>('POST', '/api/mirror/sync-now'),
 };
 
-export async function apiMe(): Promise<User> {
-  return api.me();
-}
-
-/** Полный снимок состояния ядра → стор. */
+/** Полная синхронизация состояния с ядром. */
 export async function syncAll(): Promise<void> {
-  const { store } = await import('./store');
+  if (getState().apiMode !== 'server') return;
   const st = await api.state();
   store.applyServerState(st);
+}
+
+/** Восстановление сессии по сохранённому токену. */
+export async function restoreServerSession(): Promise<boolean> {
+  const t = getApiToken();
+  if (!t) return false;
+  try {
+    const me = await api.me();
+    store.enterServer(me);
+    await syncAll();
+    return true;
+  } catch {
+    setApiToken(null);
+    return false;
+  }
 }
