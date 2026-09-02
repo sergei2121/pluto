@@ -1,7 +1,7 @@
 // ─── PLUTO: хранилище состояния (pub/sub + useSyncExternalStore) ─────────────
 import { useRef, useSyncExternalStore } from 'react';
 import type {
-  Agent, Device, EventItem, Route, Settings, Severity, StatsView, Tag, User,
+  Agent, AlertRule, AuditEntry, BackupEntry, Device, EventItem, Route, Settings, Severity, StatsView, Tag, User, Webhook,
 } from './types';
 import { uid, TAG_COLORS } from './util';
 
@@ -32,21 +32,25 @@ export function useToastList(): Toast[] {
 
 function defaultSettings(): Settings {
   return {
-    intervals: { ping: 60, http: 60, api: 180, rtsp: 120, sip: 120, agent: 30, glances: 20 },
+    intervals: { ping: 60, http: 60, api: 180, rtsp: 120, sip: 120, snmp: 60, ssl: 3600, agent: 30, glances: 20 },
     timeoutMs: 3000, failThreshold: 3, degradeFactor: 10, degradeMinMs: 250,
     mirror: { enabled: false, url: '', secret: '', interval: 60 },
+    snmp: { community: 'public', timeoutMs: 2000 },
+    backup: { enabled: true, keep: 7, lastAt: null },
+    prometheus: { enabled: false },
+    telegramBot: { enabled: false, token: '' },
     notifications: {
       telegram: { enabled: false, botToken: '', chatId: '' },
       email: { enabled: false, smtp: '', from: '', to: '' },
       push: { enabled: false },
-      on: { down: true, degraded: true, recover: true, agentOff: true, agentOn: false },
+      on: { down: true, degraded: true, recover: true, agentOff: true, agentOn: false, threshold: true },
     },
-    showcase: { port: 8081 },
+    showcase: { port: 8081, fullscreen: false },
   };
 }
 
 function seedAdmin(): User {
-  return { id: 'admin', login: 'admin', name: 'admin', role: 'admin', scope: [], builtIn: true, createdAt: Date.now() };
+  return { id: 'admin', login: 'admin', name: 'admin', role: 'admin', menuScope: [], deviceScope: [], builtIn: true, twoFA: { enabled: false, secret: null }, createdAt: Date.now() };
 }
 
 function mkEvent(sev: Severity, source: EventItem['source'], text: string): EventItem {
@@ -60,6 +64,10 @@ export interface PlutoState {
   agents: Agent[];
   tags: Tag[];
   events: EventItem[];
+  alertRules: AlertRule[];
+  webhooks: Webhook[];
+  audit: AuditEntry[];
+  backups: BackupEntry[];
   settings: Settings;
   route: Route;
   routeParam: string;
@@ -72,6 +80,7 @@ let state: PlutoState = {
   session: null,
   devices: [], agents: [], tags: [],
   events: [mkEvent('info', 'system', 'PLUTO инициализирован — база чистая')],
+  alertRules: [], webhooks: [], audit: [], backups: [],
   settings: defaultSettings(),
   route: 'dashboard', routeParam: '',
   apiMode: 'embedded', coreVersion: null,
@@ -335,6 +344,57 @@ export const store = {
     set({ settings });
     toast('ok', 'Настройки сохранены');
   },
+
+  // ── пороги/алерты ──
+  async saveAlertRule(rule: AlertRule): Promise<void> {
+    const { api } = await import('./api');
+    if (getState().apiMode === 'server') { await api.upsertAlertRule(rule); await syncAll(); }
+    else {
+      const ex = state.alertRules.some((r) => r.id === rule.id);
+      set({ alertRules: ex ? state.alertRules.map((r) => (r.id === rule.id ? rule : r)) : [...state.alertRules, rule] });
+    }
+    toast('ok', 'Правило порога сохранено');
+  },
+  async removeAlertRule(id: string): Promise<void> {
+    if (getState().apiMode === 'server') { const { api } = await import('./api'); await api.deleteAlertRule(id); await syncAll(); }
+    else set({ alertRules: state.alertRules.filter((r) => r.id !== id) });
+  },
+
+  // ── вебхуки ──
+  async saveWebhook(w: Webhook): Promise<void> {
+    if (getState().apiMode === 'server') { const { api } = await import('./api'); await api.upsertWebhook(w); await syncAll(); }
+    else {
+      const ex = state.webhooks.some((x) => x.id === w.id);
+      set({ webhooks: ex ? state.webhooks.map((x) => (x.id === w.id ? w : x)) : [...state.webhooks, w] });
+    }
+    toast('ok', 'Webhook сохранён');
+  },
+  async removeWebhook(id: string): Promise<void> {
+    if (getState().apiMode === 'server') { const { api } = await import('./api'); await api.deleteWebhook(id); await syncAll(); }
+    else set({ webhooks: state.webhooks.filter((x) => x.id !== id) });
+  },
+
+  // ── пользователи (с правами меню) ──
+  async saveUser(u: User, password?: string): Promise<string | null> {
+    if (getState().apiMode === 'server') {
+      try { const { api } = await import('./api'); await api.saveUser(u, password); await syncAll(); toast('ok', 'Пользователь сохранён'); return null; }
+      catch (e) { return e instanceof Error ? e.message : 'Не удалось сохранить'; }
+    }
+    const ex = state.users.some((x) => x.id === u.id);
+    set({ users: ex ? state.users.map((x) => (x.id === u.id ? u : x)) : [...state.users, u] });
+    return null;
+  },
+  async removeUser(id: string): Promise<void> {
+    if (getState().apiMode === 'server') { const { api } = await import('./api'); await api.deleteUser(id); await syncAll(); }
+    else set({ users: state.users.filter((x) => x.id !== id) });
+  },
+
+  // ── журнал действий (audit) ──
+  pushAudit(action: string, detail: string) {
+    const user = state.session ? state.users.find((u) => u.id === state.session?.userId) : null;
+    const entry: AuditEntry = { id: uid('au'), ts: Date.now(), user: user?.login || 'system', action, detail };
+    set({ audit: [entry, ...state.audit].slice(0, 500) });
+  },
 };
 
 function get() { return store; }
@@ -344,13 +404,13 @@ function get() { return store; }
 export function visibleDevices(s: PlutoState, user: User | null): Device[] {
   if (!user) return [];
   if (user.role === 'admin') return s.devices;
-  return s.devices.filter((d) => user.scope.includes(d.type));
+  return s.devices.filter((d) => user.deviceScope.includes(d.type));
 }
 
 export function visibleAgents(s: PlutoState, user: User | null): Agent[] {
   if (!user) return [];
   if (user.role === 'admin') return s.agents;
-  return user.scope.includes('agent' as never) ? s.agents : [];
+  return user.menuScope.includes('agents') ? s.agents : [];
 }
 
 export const FAVORITES_LIMIT = 15;
