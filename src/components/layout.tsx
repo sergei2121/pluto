@@ -2,7 +2,7 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   LayoutDashboard, Server, Monitor, Crosshair, BarChart3, Waves, LayoutGrid, Settings as SettingsIcon,
-  Radio, LogOut, Search, X, AlertTriangle, Bell, Check, Orbit,
+  Radio, LogOut, Search, X, AlertTriangle, Bell, Check, Orbit, Network, FileBarChart,
 } from 'lucide-react';
 import { cls, fmtClock, CONSOLE_VERSION } from '../lib/util';
 import { store, useCurrentUser, usePluto, useToastList, useToasts, visibleAgents, visibleDevices } from '../lib/store';
@@ -47,13 +47,15 @@ export function ToastHost() {
   );
 }
 
-const NAV: { route: Route; label: string; icon: ReactNode; adminOnly?: boolean; needAgent?: boolean }[] = [
+const NAV: { route: Route; label: string; icon: ReactNode; adminOnly?: boolean }[] = [
   { route: 'dashboard', label: 'Главная', icon: <LayoutDashboard className="h-[17px] w-[17px]" /> },
   { route: 'devices', label: 'Устройства', icon: <Server className="h-[17px] w-[17px]" /> },
-  { route: 'agents', label: 'Агенты', icon: <Monitor className="h-[17px] w-[17px]" />, needAgent: true },
-  { route: 'agent-pings', label: 'Пинги агентов', icon: <Crosshair className="h-[17px] w-[17px]" />, needAgent: true },
-  { route: 'stats-bars', label: 'Статистика Bars', icon: <BarChart3 className="h-[17px] w-[17px]" />, needAgent: true },
-  { route: 'stats-ws', label: 'Статистика WS', icon: <Waves className="h-[17px] w-[17px]" />, needAgent: true },
+  { route: 'agents', label: 'Агенты', icon: <Monitor className="h-[17px] w-[17px]" /> },
+  { route: 'agent-pings', label: 'Пинги агентов', icon: <Crosshair className="h-[17px] w-[17px]" /> },
+  { route: 'topology', label: 'Топология', icon: <Network className="h-[17px] w-[17px]" /> },
+  { route: 'stats-bars', label: 'Статистика Bars', icon: <BarChart3 className="h-[17px] w-[17px]" /> },
+  { route: 'stats-ws', label: 'Статистика WS', icon: <Waves className="h-[17px] w-[17px]" /> },
+  { route: 'sla', label: 'SLA-отчёт', icon: <FileBarChart className="h-[17px] w-[17px]" /> },
   { route: 'showcase', label: 'Витрина', icon: <LayoutGrid className="h-[17px] w-[17px]" />, adminOnly: true },
   { route: 'deploy', label: 'Развёртывание', icon: <Radio className="h-[17px] w-[17px]" /> },
   { route: 'settings', label: 'Настройки системы', icon: <SettingsIcon className="h-[17px] w-[17px]" />, adminOnly: true },
@@ -63,7 +65,8 @@ function filterNav(user: ReturnType<typeof useCurrentUser>) {
   return NAV.filter((n) => {
     if (!user) return false;
     if (n.adminOnly && user.role !== 'admin') return false;
-    if (n.needAgent && user.role !== 'admin' && !user.scope.includes('agent' as never)) return false;
+    // viewer видит только те пункты, что ему разрешены (menuScope)
+    if (user.role !== 'admin' && !user.menuScope.includes(n.route)) return false;
     return true;
   });
 }
@@ -136,8 +139,10 @@ const TITLES: Record<Route, string> = {
   devices: 'Устройства',
   agents: 'Агенты и локальные сети',
   'agent-pings': 'Пинги агентов · локальные устройства',
+  topology: 'Топология сети',
   'stats-bars': 'Статистика Bars · Glances',
   'stats-ws': 'Статистика WS · Glances',
+  sla: 'SLA-отчёт · доступность',
   showcase: 'Публичная витрина',
   settings: 'Настройки системы',
   deploy: 'Развёртывание и документация',

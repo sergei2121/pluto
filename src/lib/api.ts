@@ -1,5 +1,5 @@
 // ─── PLUTO: клиент REST API серверного ядра ─────────────────────────────────
-import type { Agent, Device, EventItem, Settings, SourceTestReport, Tag, User } from './types';
+import type { Agent, AlertRule, AuditEntry, BackupEntry, Device, EventItem, Settings, SlaRow, SourceTestReport, Tag, User, Webhook } from './types';
 import { getState, store } from './store';
 
 const TOKEN_KEY = 'pluto_token';
@@ -23,6 +23,10 @@ export interface ServerState {
   agents: Agent[];
   tags: Tag[];
   events: EventItem[];
+  alertRules: AlertRule[];
+  webhooks: Webhook[];
+  audit: AuditEntry[];
+  backups: BackupEntry[];
   settings: Settings;
   users?: User[];
 }
@@ -67,6 +71,38 @@ export const api = {
   saveSettings: (s: Settings) => req<Settings>('PUT', '/api/settings', s),
   restartShowcase: () => req<{ ok: boolean; port: number }>('POST', '/api/showcase/restart'),
   mirrorSyncNow: () => req<{ ok: boolean; error?: string | null }>('POST', '/api/mirror/sync-now'),
+
+  // пороги / алерты
+  upsertAlertRule: (r: AlertRule) => req<AlertRule>('POST', '/api/alerts', r),
+  deleteAlertRule: (id: string) => req<{ ok: boolean }>('DELETE', `/api/alerts/${id}`),
+
+  // вебхуки
+  upsertWebhook: (w: Webhook) => req<Webhook>('POST', '/api/webhooks', w),
+  deleteWebhook: (id: string) => req<{ ok: boolean }>('DELETE', `/api/webhooks/${id}`),
+  testWebhook: (id: string) => req<{ ok: boolean; error?: string | null }>('POST', `/api/webhooks/${id}/test`),
+
+  // пользователи (с правами меню)
+  saveUser: (u: User, password?: string) => req<User>('POST', '/api/users', { ...u, password }),
+  deleteUser: (id: string) => req<{ ok: boolean }>('DELETE', `/api/users/${id}`),
+
+  // 2FA
+  twoFASetup: () => req<{ secret: string; otpauth: string }>('POST', '/api/2fa/setup'),
+  twoFAConfirm: (code: string) => req<{ ok: boolean }>('POST', '/api/2fa/confirm', { code }),
+  twoFADisable: () => req<{ ok: boolean }>('POST', '/api/2fa/disable'),
+
+  // бэкапы
+  backupNow: () => req<BackupEntry>('POST', '/api/backup/now'),
+  downloadBackup: (name: string) => `/api/backup/${encodeURIComponent(name)}`,
+  deleteBackup: (name: string) => req<{ ok: boolean }>('DELETE', `/api/backup/${encodeURIComponent(name)}`),
+
+  // импорт устройств из CSV
+  importDevices: (rows: unknown[]) => req<{ added: number; skipped: number }>('POST', '/api/devices/import', { rows }),
+
+  // SLA
+  sla: (days: number) => req<SlaRow[]>('GET', `/api/sla?days=${days}`),
+
+  // инвентаризация агента
+  collectInventory: (id: string) => req<Agent>('POST', `/api/agents/${id}/inventory`),
 };
 
 /** Полная синхронизация состояния с ядром. */

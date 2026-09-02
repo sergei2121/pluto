@@ -1,7 +1,7 @@
 // ─── PLUTO: публичная витрина ────────────────────────────────────────────────
 import { useMemo, useState } from 'react';
 import { LayoutGrid, ExternalLink, Eye, EyeOff, Server, Crosshair } from 'lucide-react';
-import { Panel, StatusDot, STATUS_META, TypeBadge, EmptyState } from '../components/ui';
+import { Panel, StatusDot, STATUS_META, TypeBadge, EmptyState, Toggle } from '../components/ui';
 import { store, usePluto } from '../lib/store';
 import { cls, fmtMs, pingStats } from '../lib/util';
 
@@ -16,11 +16,17 @@ export default function Showcase() {
   const port = settings.showcase.port || 8081;
   const publicUrl = `http://${window.location.hostname || 'IP-СЕРВЕРА'}:${port}`;
 
+  const fs = !!settings.showcase.fullscreen;
+
   const applyPort = () => {
     const newPort = portDraft != null ? parseInt(portDraft, 10) : port;
     if (!newPort || newPort < 1024 || newPort > 65535) return;
-    void store.saveSettings({ ...settings, showcase: { port: newPort } });
+    void store.saveSettings({ ...settings, showcase: { port: newPort, fullscreen: fs } });
     setPortDraft(null);
+  };
+
+  const applyFullscreen = (v: boolean) => {
+    void store.saveSettings({ ...settings, showcase: { port, fullscreen: v } });
   };
 
   return (
@@ -42,6 +48,13 @@ export default function Showcase() {
           </label>
           <button onClick={applyPort} className="btn-acc">Применить порт</button>
           <span className="text-[11.5px] text-dim">В серверном режиме не забудьте пробросить порт (<code className="font-mono">PLUTO_SHOWCASE_PORT</code>).</span>
+        </div>
+        <div className="mt-4 flex items-center justify-between rounded-lg border border-line bg-raised/40 px-4 py-3">
+          <div>
+            <div className="text-[13px] font-semibold text-ink">Дежурный ТВ-режим</div>
+            <div className="text-[11px] text-dim">Крупные карточки во весь экран — для монитора на стене. Витрина открывается с <code className="font-mono">#full</code>.</div>
+          </div>
+          <Toggle checked={fs} onChange={applyFullscreen} />
         </div>
       </Panel>
 
