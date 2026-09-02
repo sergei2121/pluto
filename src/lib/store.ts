@@ -17,11 +17,17 @@ export const useToasts = {
     emitToast();
   },
 };
-let toastListener: (() => void) | null = null;
-function emitToast() { toastListener?.(); }
+// ВАЖНО: набор подписчиков, а не один listener — useSyncExternalStore
+// подписывает каждый компонент, и одиночный слот перезаписывался последним
+// подписчиком (из-за этого меню не переключалось).
+const toastListeners = new Set<() => void>();
+function emitToast() { toastListeners.forEach((cb) => cb()); }
 
 export function useToastList(): Toast[] {
-  return useSyncExternalStore((cb) => { toastListener = cb; return () => { toastListener = null; }; }, () => useToasts.list);
+  return useSyncExternalStore(
+    (cb) => { toastListeners.add(cb); return () => { toastListeners.delete(cb); }; },
+    () => useToasts.list,
+  );
 }
 
 function defaultSettings(): Settings {
@@ -71,11 +77,14 @@ let state: PlutoState = {
   apiMode: 'embedded', coreVersion: null,
 };
 
-let listener: (() => void) | null = null;
-function emit() { listener?.(); }
+// Набор подписчиков: каждый компонент с usePluto получает свою подписку.
+// Одиночный listener перезаписывался последним подписчиком — обновления
+// не доходили до остальных компонентов (меню не переключалось).
+const listeners = new Set<() => void>();
+function emit() { listeners.forEach((cb) => cb()); }
 function set(patch: Partial<PlutoState>) { state = { ...state, ...patch }; emit(); }
 export function getState(): PlutoState { return state; }
-function subscribe(cb: () => void) { listener = cb; return () => { listener = null; }; }
+function subscribe(cb: () => void) { listeners.add(cb); return () => { listeners.delete(cb); }; }
 
 export function usePluto<T>(selector: (s: PlutoState) => T): T {
   const cache = useRef<{ snap: PlutoState; value: T } | null>(null);
