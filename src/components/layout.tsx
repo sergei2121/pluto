@@ -74,6 +74,9 @@ function filterNav(user: ReturnType<typeof useCurrentUser>) {
 export function Sidebar() {
   const route = usePluto((s) => s.route);
   const user = useCurrentUser();
+  const apiMode = usePluto((s) => s.apiMode);
+  const coreVersion = usePluto((s) => s.coreVersion);
+  const serverMode = apiMode === 'server';
   const critCount = usePluto((s) => s.devices.filter((d) => d.status === 'down').length + s.agents.filter((a) => !a.online && a.lastPoll > 0).length);
   const items = filterNav(user);
 
@@ -106,13 +109,15 @@ export function Sidebar() {
       </nav>
 
       <div className="space-y-3 border-t border-line/60 p-4">
-        <div className="rounded-lg border border-line bg-raised/50 px-3 py-2.5">
+        <div className={cls('rounded-lg border px-3 py-2.5 transition-colors', serverMode ? 'border-ok/30 bg-ok/5' : 'border-warn/30 bg-warn/5')}>
           <div className="flex items-center gap-2">
-            <span className="dot-live h-2 w-2 shrink-0 rounded-full bg-ok" />
-            <span className="text-[11px] font-semibold text-mut">Ядро: встроенное</span>
-            <span className="ml-auto font-mono text-[10px] text-dim">v{CONSOLE_VERSION}</span>
+            <span className={cls('h-2 w-2 shrink-0 rounded-full', serverMode ? 'dot-live bg-ok' : 'dot-crit bg-warn')} />
+            <span className="text-[11px] font-semibold text-mut">{serverMode ? 'Ядро: серверное' : 'Ядро: встроенное'}</span>
+            <span className="ml-auto font-mono text-[10px] text-dim">v{serverMode && coreVersion ? coreVersion : CONSOLE_VERSION}</span>
           </div>
-          <p className="mt-1 text-[10.5px] leading-relaxed text-dim">движок опроса активен</p>
+          <p className="mt-1 text-[10.5px] leading-relaxed text-dim">
+            {serverMode ? 'данные реальные · опрос по расписанию' : 'эмуляция · подключите серверное ядро'}
+          </p>
         </div>
 
         {user && (
