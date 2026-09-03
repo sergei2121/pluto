@@ -76,6 +76,7 @@ export function Sidebar() {
   const user = useCurrentUser();
   const apiMode = usePluto((s) => s.apiMode);
   const coreVersion = usePluto((s) => s.coreVersion);
+  const coreDiag = usePluto((s) => s.coreDiag);
   const serverMode = apiMode === 'server';
   const critCount = usePluto((s) => s.devices.filter((d) => d.status === 'down').length + s.agents.filter((a) => !a.online && a.lastPoll > 0).length);
   const items = filterNav(user);
@@ -116,7 +117,9 @@ export function Sidebar() {
             <span className="ml-auto font-mono text-[10px] text-dim">v{serverMode && coreVersion ? coreVersion : CONSOLE_VERSION}</span>
           </div>
           <p className="mt-1 text-[10.5px] leading-relaxed text-dim">
-            {serverMode ? 'данные реальные · опрос по расписанию' : 'эмуляция · подключите серверное ядро'}
+            {serverMode
+              ? 'данные реальные · опрос по расписанию'
+              : coreDiag || 'эмуляция · подключите серверное ядро'}
           </p>
         </div>
 

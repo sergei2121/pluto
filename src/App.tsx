@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { Orbit } from 'lucide-react';
 import { getState, store, useCurrentUser, usePluto } from './lib/store';
 import { startEngine, stopEngine } from './lib/engine';
-import { detectApi, restoreServerSession, syncAll } from './lib/api';
+import { detectApi, getApiToken, restoreServerSession, syncAll } from './lib/api';
 import { Shell } from './components/layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -24,20 +24,35 @@ export default function App() {
   const user = useCurrentUser();
   const [booting, setBooting] = useState(true);
 
-  // Определение режима: есть ли серверное ядро рядом?
+  // Определение режима: есть ли серверное ядро рядом? Повторяем пробу, пока
+  // ядро не найдено — «встроенный» режим не застрянет, если контейнер прогрелся
+  // позже страницы или сеть моргнула при первом запросе.
   useEffect(() => {
     let alive = true;
-    (async () => {
-      const ver = await detectApi();
+    const probe = async () => {
+      const r = await detectApi();
       if (!alive) return;
-      if (ver) {
-        store.setCoreVersion(ver);
-        if (!getState().session) await restoreServerSession();
-        else void syncAll();
+      if (r.ver) {
+        store.setCoreVersion(r.ver, r.diag || null);
+        if (!getState().session) {
+          await restoreServerSession(); // молча, по сохранённому токену
+        } else if (!getApiToken()) {
+          // Сессия встроенная (логин без ядра): выходим, чтобы войти через ядро —
+          // данные станут реальными. Токен сохранится, повторный вход не понадобится.
+          store.logout();
+        } else {
+          void syncAll();
+        }
+      } else {
+        store.setCoreVersion(null, r.diag);
       }
-      setBooting(false);
-    })();
-    return () => { alive = false; };
+      if (alive) setBooting(false);
+    };
+    void probe();
+    const t = window.setInterval(() => {
+      if (getState().apiMode === 'embedded') void probe();
+    }, 4000);
+    return () => { alive = false; window.clearInterval(t); };
   }, []);
 
   // Встроенный движок — только когда нет серверного ядра

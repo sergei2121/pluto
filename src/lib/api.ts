@@ -31,18 +31,35 @@ export interface ServerState {
   users?: User[];
 }
 
-/** Проверка доступности ядра; возвращает версию или null. */
-export async function detectApi(): Promise<string | null> {
+/** Результат проверки ядра: версия (или 'legacy' для старых ядер) + диагноз. */
+export interface DetectResult { ver: string | null; diag: string; }
+
+/**
+ * Проверка доступности ядра. Не падает ни на чём:
+ *  - JSON с version → актуальное ядро;
+ *  - JSON без version → старое ядро ('legacy');
+ *  - чистый текст «ok» (ранние server.js) → тоже старое ядро ('legacy');
+ *  - всё остальное → ver: null + диагноз, который показывается в индикаторе.
+ */
+export async function detectApi(): Promise<DetectResult> {
   try {
     const ctrl = new AbortController();
-    const to = setTimeout(() => ctrl.abort(), 1500);
+    const to = setTimeout(() => ctrl.abort(), 2500);
     const res = await fetch('/api/health', { signal: ctrl.signal });
     clearTimeout(to);
-    if (!res.ok) return null;
-    const d = await res.json();
-    return d && d.version ? String(d.version) : 'legacy';
-  } catch {
-    return null;
+    if (!res.ok) return { ver: null, diag: `health: HTTP ${res.status}` };
+    const text = await res.text();
+    try {
+      const d = JSON.parse(text);
+      if (d && typeof d === 'object' && d.version) return { ver: String(d.version), diag: '' };
+      return { ver: 'legacy', diag: 'health: JSON без поля version (старое ядро)' };
+    } catch {
+      if (/^\s*"?ok"?\s*$/i.test(text)) return { ver: 'legacy', diag: 'health: текстовый ok (старое ядро)' };
+      return { ver: null, diag: `health: неожиданный ответ «${text.trim().slice(0, 28)}»` };
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'нет ответа';
+    return { ver: null, diag: /abort/i.test(msg) ? 'health: таймаут 2.5 с' : `health: ${msg}` };
   }
 }
 
