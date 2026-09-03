@@ -73,6 +73,7 @@ export interface PlutoState {
   routeParam: string;
   apiMode: 'embedded' | 'server';
   coreVersion: string | null;
+  coreDiag: string | null; // почему ядро не видно (показывается в индикаторе)
 }
 
 let state: PlutoState = {
@@ -83,7 +84,7 @@ let state: PlutoState = {
   alertRules: [], webhooks: [], audit: [], backups: [],
   settings: defaultSettings(),
   route: 'dashboard', routeParam: '',
-  apiMode: 'embedded', coreVersion: null,
+  apiMode: 'embedded', coreVersion: null, coreDiag: null,
 };
 
 // Набор подписчиков: каждый компонент с usePluto получает свою подписку.
@@ -137,7 +138,9 @@ function safeAgent(a: Agent): Agent {
 
 export const store = {
   nav(route: Route, routeParam = '') { set({ route, routeParam }); },
-  setCoreVersion(v: string | null) { set({ coreVersion: v, apiMode: v ? 'server' : 'embedded' }); },
+  setCoreVersion(v: string | null, diag: string | null = null) {
+    set({ coreVersion: v, apiMode: v ? 'server' : 'embedded', coreDiag: diag });
+  },
 
   enterServer(user: User) {
     set({ apiMode: 'server', users: [user], session: { userId: user.id, at: Date.now() } });
