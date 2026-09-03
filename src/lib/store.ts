@@ -402,8 +402,10 @@ export const store = {
       try { const { api } = await import('./api'); await api.saveUser(u, password); await syncAll(); toast('ok', 'Пользователь сохранён'); return null; }
       catch (e) { return e instanceof Error ? e.message : 'Не удалось сохранить'; }
     }
+    // встроенный режим: сохраняем хэш пароля, чтобы созданный пользователь мог войти
+    const withHash = (x: User) => (password ? ({ ...x, passHash: embedHash(password) } as User) : x);
     const ex = state.users.some((x) => x.id === u.id);
-    set({ users: ex ? state.users.map((x) => (x.id === u.id ? u : x)) : [...state.users, u] });
+    set({ users: ex ? state.users.map((x) => (x.id === u.id ? withHash(u) : x)) : [...state.users, withHash(u)] });
     return null;
   },
   async removeUser(id: string): Promise<void> {
