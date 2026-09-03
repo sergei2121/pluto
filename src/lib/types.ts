@@ -79,13 +79,24 @@ export interface GlancesPoint {
   diskUsed: number | null; // заполненность основной ФС, %
 }
 
-export interface GlancesDisk { mnt: string; percent: number | null; usedGB: number | null; sizeGB: number | null; }
-export interface GlancesAdapter { name: string; rx: number | null; tx: number | null; } // КБ/с
-export interface GlancesSensor { label: string; value: number; unit: string; kind: string; } // температуры, вент.
+/** Диск: монтирование, занятость и (если Glances видит) температура + скорости I/O. */
+export interface GlancesDisk {
+  mnt: string;
+  percent: number | null;
+  usedGB: number | null;
+  sizeGB: number | null;
+  temp: number | null; // °C — из sensors (diskio)
+  readKBs: number | null; // скорость чтения, КБ/с — из diskio
+  writeKBs: number | null; // скорость записи, КБ/с
+}
+export interface GlancesAdapter { name: string; rx: number | null; tx: number | null; virtual?: boolean; } // КБ/с
+export interface GlancesSensor { label: string; value: number; unit: string; kind: string; } // температуры, вент., батареи…
 
 /** Полный снимок Glances (последний опрос — для карточки агента). */
 export interface GlancesSnapshot {
   t: number;
+  hostname: string | null;
+  os: string | null;
   cpu: number | null;
   cpuCores: number[]; // загрузка каждого ядра, %
   gpu: number | null;
@@ -94,12 +105,16 @@ export interface GlancesSnapshot {
   ramUsedGB: number | null;
   ramTotalGB: number | null;
   swap: number | null;
+  swapUsedGB: number | null;
+  swapTotalGB: number | null;
   load1: number | null;
   load5: number | null;
+  load15: number | null;
+  procCount: number | null;
   cput: number | null; // Package / CPU
   ssdt: number | null;
-  disks: GlancesDisk[];
-  adapters: GlancesAdapter[]; // все сетевые адаптеры
+  disks: GlancesDisk[]; // ВСЕ диски
+  adapters: GlancesAdapter[]; // ВСЕ сетевые адаптеры
   mainAdapter: string | null; // выбранный реальный адаптер
   rx: number | null; // основной адаптер, КБ/с
   tx: number | null;

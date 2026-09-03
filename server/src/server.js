@@ -163,21 +163,49 @@ function glancesFromApi(data) {
   const gpuList = data.gpu || [];
   const gpu = gpuList.length ? gpuList[0] : null;
   const sensors = (data.sensors || []).filter((s) => s && s.value != null);
+  const system = data.system || {};
 
   const toGB = (b) => (b != null ? Math.round((b / 1024 ** 3) * 10) / 10 : null);
+  const toKBs = (b) => (b != null ? Math.round((b / 1024) * 10) / 10 : null);
+  const isVirtual = (name) => /lo$|^lo\b|veth|docker|br-|virbr|vmnet|vboxnet|tap|tun|vir|virtual|wsl|hyper/i.test(name || '');
 
-  const mainAdapterSel = (data.network || []).filter((n) => n && !/lo|veth|docker|br-|virbr|vmnet|virtual/i.test(n.interface_name || n.key || ''))
-    .sort((a, b) => ((b.rx || 0) + (b.tx || 0)) - ((a.rx || 0) + (a.tx || 0)))[0] || (data.network || [])[0] || null;
+  const network = (data.network || []).filter((n) => n);
+  const mainAdapterSel = network.filter((n) => !isVirtual(n.interface_name || n.key || ''))
+    .sort((a, b) => ((b.rx || 0) + (b.tx || 0)) - ((a.rx || 0) + (a.tx || 0)))[0] || network[0] || null;
 
   const temp = (re) => {
     const s = sensors.find((x) => re.test(x.label || ''));
     return s ? Math.round(s.value * 10) / 10 : null;
   };
 
+  // диск → температура из sensors: ищем сенсоры diskio/temperature, чья метка
+  // содержит имя устройства (sda, nvme0, /dev/sda, C: …)
+  const diskTemp = (f) => {
+    const dev = String(f.device_name || f.mnt_point || '').replace(/^\/dev\//, '').replace(/[\\/:].*$/, '');
+    if (!dev) return null;
+    const s = sensors.find((x) => /disk|ssd|nvme|hdd|temp/i.test(x.kind || '') && new RegExp(`(^|[^a-z0-9])${dev}([^a-z0-9]|$)`, 'i').test(x.label || ''));
+    return s ? Math.round(s.value * 10) / 10 : null;
+  };
+
+  // диск → скорости чтения/записи из плагина diskio (Glances отдаёт байты/с)
+  const diskio = Array.isArray(data.diskio) ? data.diskio : [];
+  const ioFor = (f) => {
+    const dev = String(f.device_name || '').replace(/^\/dev\//, '');
+    const byDev = diskio.find((d) => (d.disk_name || d.key || '') === dev);
+    const byMnt = !byDev ? diskio.find((d) => (d.disk_name || d.key || '') === f.mnt_point) : null;
+    const io = byDev || byMnt;
+    if (!io) return { readKBs: null, writeKBs: null };
+    const r = io.read_bytes != null ? io.read_bytes : io.read_count;
+    const w = io.write_bytes != null ? io.write_bytes : io.write_count;
+    return { readKBs: toKBs(r), writeKBs: toKBs(w) };
+  };
+
   const fsArr = Array.isArray(data.fs) ? data.fs : [];
   const mainFs = fsArr.find((f) => f.mnt_point === '/' || /^[A-Za-z]:\\?$/.test(f.mnt_point || '')) || fsArr[0] || null;
 
   return {
+    hostname: system.hostname || null,
+    os: system.os_name ? `${system.os_name}${system.os_version ? ' ' + system.os_version : ''}` : null,
     cpu: cpu.total != null ? Math.round(cpu.total * 10) / 10 : null,
     cpuCores: (data.percpu || []).map((c) => Math.round((c.total || 0) * 10) / 10),
     gpu: gpu && gpu.gpu != null ? Math.round(gpu.gpu * 10) / 10 : null,
@@ -185,12 +213,27 @@ function glancesFromApi(data) {
     ram: mem.percent != null ? Math.round(mem.percent * 10) / 10 : null,
     ramUsedGB: toGB(mem.used), ramTotalGB: toGB(mem.total),
     swap: data.memswap && data.memswap.percent != null ? Math.round(data.memswap.percent * 10) / 10 : null,
+    swapUsedGB: data.memswap ? toGB(data.memswap.used) : null,
+    swapTotalGB: data.memswap ? toGB(data.memswap.total) : null,
     load1: data.load && data.load.min1 != null ? data.load.min1 : null,
     load5: data.load && data.load.min5 != null ? data.load.min5 : null,
+    load15: data.load && data.load.min15 != null ? data.load.min15 : null,
+    procCount: data.processcount && data.processcount.total != null ? data.processcount.total : null,
     cput: temp(/package|cpu/i),
     ssdt: temp(/ssd|nvme|disk/i),
-    disks: fsArr.map((f) => ({ mnt: f.mnt_point, percent: f.percent != null ? Math.round(f.percent * 10) / 10 : null, usedGB: toGB(f.used), sizeGB: toGB(f.size) })),
-    adapters: (data.network || []).map((n) => ({ name: n.interface_name || n.key, rx: n.rx != null ? Math.round((n.rx / 1024) * 10) / 10 : null, tx: n.tx != null ? Math.round((n.tx / 1024) * 10) / 10 : null })),
+    // ВСЕ диски: занятость + температура + скорости I/O (если Glances их видит)
+    disks: fsArr.map((f) => ({
+      mnt: f.mnt_point,
+      percent: f.percent != null ? Math.round(f.percent * 10) / 10 : null,
+      usedGB: toGB(f.used), sizeGB: toGB(f.size),
+      temp: diskTemp(f),
+      ...ioFor(f),
+    })),
+    // ВСЕ сетевые адаптеры, виртуальные помечены
+    adapters: network.map((n) => {
+      const name = n.interface_name || n.key || '?';
+      return { name, rx: toKBs(n.rx), tx: toKBs(n.tx), virtual: isVirtual(name) };
+    }),
     mainAdapter: mainAdapterSel ? (mainAdapterSel.interface_name || mainAdapterSel.key) : null,
     rx: mainAdapterSel && mainAdapterSel.rx != null ? Math.round((mainAdapterSel.rx / 1024) * 10) / 10 : null,
     tx: mainAdapterSel && mainAdapterSel.tx != null ? Math.round((mainAdapterSel.tx / 1024) * 10) / 10 : null,

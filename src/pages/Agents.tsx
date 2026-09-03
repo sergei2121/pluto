@@ -6,7 +6,7 @@ import {
 import { Panel, StatusDot, Modal, Drawer, Field, EmptyState, Ring, Bar, TimeAgo } from '../components/ui';
 import { store, useCurrentUser, usePluto, useToasts, visibleAgents } from '../lib/store';
 import { cls, fmtMs, fmtUp, fmtNet, isIp, isTarget, expandTargets, pingStats } from '../lib/util';
-import type { Agent, StatsView } from '../lib/types';
+import type { Agent, GlancesSensor, StatsView } from '../lib/types';
 
 function StatsViewPicker({ value, onChange, compact }: { value: StatsView; onChange: (v: StatsView) => void; compact?: boolean }) {
   const opts: { v: StatsView; icon: React.ReactNode; label: string; on: string }[] = [
@@ -164,12 +164,74 @@ function AgentCard({ a, onEdit, onOpen }: { a: Agent; onEdit: (a: Agent) => void
   );
 }
 
+/** Все сенсоры Glances, сгруппированные по типу: t°C, RPM, %, прочее. */
+function SensorGroups({ sensors }: { sensors: GlancesSensor[] }) {
+  if (!sensors.length) {
+    return (
+      <Panel title="Датчики · 0" icon={<Thermometer className="h-4 w-4" />}>
+        <p className="text-[12px] text-dim">Датчики не найдены — Glances видит их, только если запущен от администратора и установлены psutil/batinfo.</p>
+      </Panel>
+    );
+  }
+  const temps = sensors.filter((s) => /temp|thermal/i.test(s.kind) || s.unit === 'C' || s.unit === '°C');
+  const fans = sensors.filter((s) => /fan/i.test(s.kind) || /rpm/i.test(s.unit));
+  const batts = sensors.filter((s) => /batt/i.test(s.kind) || s.unit === '%');
+  const rest = sensors.filter((s) => !temps.includes(s) && !fans.includes(s) && !batts.includes(s));
+
+  const Chip = ({ s, color }: { s: GlancesSensor; color: string }) => (
+    <div className="flex items-center justify-between rounded-lg border border-line/60 bg-raised/30 px-2.5 py-1.5 transition-colors hover:border-line">
+      <span className="truncate pr-2 font-mono text-[11px] text-mut" title={`${s.label} (${s.kind || s.unit})`}>{s.label}</span>
+      <span className={cls('shrink-0 font-mono text-[12px] font-bold', color)}>
+        {Math.round(s.value * 10) / 10}<span className="ml-0.5 text-[9px] font-normal text-dim">{s.unit}</span>
+      </span>
+    </div>
+  );
+
+  return (
+    <Panel title={`Датчики · ${sensors.length}`} icon={<Thermometer className="h-4 w-4" />}>
+      <div className="space-y-3">
+        {temps.length > 0 && (
+          <div>
+            <p className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.12em] text-dim">Температуры</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              {temps.map((s, i) => <Chip key={`t${i}`} s={s} color={s.value > 75 ? 'text-crit' : s.value > 60 ? 'text-warn' : 'text-ok'} />)}
+            </div>
+          </div>
+        )}
+        {fans.length > 0 && (
+          <div>
+            <p className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.12em] text-dim">Вентиляторы</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              {fans.map((s, i) => <Chip key={`f${i}`} s={s} color="text-blu" />)}
+            </div>
+          </div>
+        )}
+        {batts.length > 0 && (
+          <div>
+            <p className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.12em] text-dim">Батареи</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              {batts.map((s, i) => <Chip key={`b${i}`} s={s} color={s.value < 20 ? 'text-crit' : 'text-mint'} />)}
+            </div>
+          </div>
+        )}
+        {rest.length > 0 && (
+          <div>
+            <p className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.12em] text-dim">Прочее</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              {rest.map((s, i) => <Chip key={`r${i}`} s={s} color="text-mut" />)}
+            </div>
+          </div>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
 function AgentDrawer({ id, onClose, onEdit }: { id: string; onClose: () => void; onEdit: (a: Agent) => void }) {
   const a = usePluto((s) => s.agents.find((x) => x.id === id));
   if (!a) return null;
   const g = a.glancesLatest;
   const st = pingStats(a.targets);
-  const tempSensors = g?.sensors.filter((s) => s.unit === 'C') ?? [];
 
   return (
     <Drawer open onClose={onClose} title={
@@ -187,9 +249,22 @@ function AgentDrawer({ id, onClose, onEdit }: { id: string; onClose: () => void;
           </button>
         </div>
 
+        {/* системная строка */}
+        {(g?.os || g?.hostname) && (
+          <div className="rise flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-line/60 bg-raised/30 px-3.5 py-2.5 font-mono text-[11px] text-dim">
+            {g.hostname && <span className="text-mut">{g.hostname}</span>}
+            {g.os && <span>{g.os}</span>}
+            {g.procCount != null && <span>{g.procCount} процессов</span>}
+            {g.uptimeSec != null && <span>аптайм {fmtUp(g.uptimeSec * 1000)}</span>}
+            <span className="ml-auto text-[9.5px] uppercase tracking-wider text-dim/70">Glances {g.via}</span>
+          </div>
+        )}
+
         <Panel title="Сводка" icon={<Gauge className="h-4 w-4" />} bodyClass="grid grid-cols-2 gap-3 p-4">
-          <div className="flex items-center gap-3"><Ring value={g?.cpu ?? 0} size={56} label="CPU" /><div className="font-mono text-[12px] text-mut">{g?.cpu != null ? `${g.cpu}%` : '—'}</div></div>
-          <div className="flex items-center gap-3"><Ring value={g?.ram ?? 0} size={56} color="#5fc6d8" label="RAM" /><div className="font-mono text-[12px] text-mut">{g?.ramUsedGB != null && g?.ramTotalGB != null ? `${g.ramUsedGB}/${g.ramTotalGB} ГБ` : '—'}</div></div>
+          <div className="flex items-center gap-3"><Ring value={g?.cpu ?? 0} size={56} label="CPU" /><div className="font-mono text-[11px] leading-snug text-mut">{g?.cpu != null ? `${g.cpu}%` : '—'}{g?.cput != null && <><br /><span className="text-warn">{g.cput}°C</span></>}</div></div>
+          <div className="flex items-center gap-3"><Ring value={g?.ram ?? 0} size={56} color="#5fc6d8" label="RAM" /><div className="font-mono text-[11px] leading-snug text-mut">{g?.ramUsedGB != null && g?.ramTotalGB != null ? `${g.ramUsedGB}/${g.ramTotalGB} ГБ` : '—'}{g?.swap != null && <><br />swap {g.swap}%</>}</div></div>
+          <div className="flex items-center gap-3"><Ring value={g?.gpu ?? 0} size={56} color="#8f7df0" label="GPU" /><div className="font-mono text-[11px] leading-snug text-mut">{g?.gpu != null ? `${g.gpu}%` : '—'}{g?.gpuTemp != null && <><br /><span className="text-warn">{g.gpuTemp}°C</span></>}</div></div>
+          <div className="flex items-center gap-3"><Ring value={g?.disks?.[0]?.percent ?? 0} size={56} color="#e0b65e" label="Диск" /><div className="font-mono text-[11px] leading-snug text-mut">{g?.disks?.length ? `${g.disks.length} шт.` : '—'}{g?.disks?.[0]?.percent != null && <><br />{g.disks[0].mnt} {Math.round(g.disks[0].percent)}%</>}</div></div>
         </Panel>
 
         {a.glancesError && <p className="rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-[12px] text-warn">{a.glancesError}</p>}
@@ -205,48 +280,53 @@ function AgentDrawer({ id, onClose, onEdit }: { id: string; onClose: () => void;
               ))}
             </div>
           ) : <p className="text-[12px] text-dim">Нет данных по ядрам{a.glancesUrl ? '' : ' — укажите адрес Glances в «Изменить»'}</p>}
-          {g?.load1 != null && <p className="mt-2 font-mono text-[11px] text-dim">LA 1м {g.load1} · 5м {g.load5 ?? '—'}{g.gpu != null ? ` · GPU ${g.gpu}%` : ''}</p>}
+          {g?.load1 != null && <p className="mt-2 font-mono text-[11px] text-dim">LA 1м {g.load1} · 5м {g.load5 ?? '—'} · 15м {g.load15 ?? '—'}</p>}
         </Panel>
 
-        <Panel title="Диски" icon={<HardDrive className="h-4 w-4" />}>
+        <Panel title={`Диски · ${g?.disks?.length ?? 0}`} icon={<HardDrive className="h-4 w-4" />}>
           {g?.disks?.length ? (
-            <div className="space-y-2">
+            <div className="space-y-2.5">
               {g.disks.map((d) => (
-                <div key={d.mnt} className="flex items-center gap-2">
-                  <span className="w-20 truncate font-mono text-[11px] text-mut" title={d.mnt}>{d.mnt}</span>
-                  <Bar value={d.percent ?? 0} className="flex-1" color="#e0b65e" />
-                  <span className="w-24 text-right font-mono text-[11px] text-dim">{d.percent != null ? `${Math.round(d.percent)}%` : '—'}{d.sizeGB != null ? ` · ${Math.round(d.sizeGB)}ГБ` : ''}</span>
+                <div key={d.mnt} className="rounded-lg border border-line/50 bg-raised/30 px-3 py-2">
+                  <div className="mb-1.5 flex items-center gap-2">
+                    <span className="truncate font-mono text-[11.5px] font-semibold text-mut" title={d.mnt}>{d.mnt}</span>
+                    {d.temp != null && <span className={cls('font-mono text-[10.5px]', d.temp > 60 ? 'text-crit' : 'text-warn')}>{d.temp}°C</span>}
+                    <span className="ml-auto font-mono text-[11px] text-dim">
+                      {d.usedGB != null && d.sizeGB != null ? `${Math.round(d.usedGB)}/${Math.round(d.sizeGB)} ГБ` : d.percent != null ? `${Math.round(d.percent)}%` : '—'}
+                    </span>
+                  </div>
+                  <Bar value={d.percent ?? 0} color="#e0b65e" />
+                  {(d.readKBs != null || d.writeKBs != null) && (
+                    <div className="mt-1 flex justify-between font-mono text-[10px] text-dim">
+                      <span className="text-ok">↓ чтение {fmtNet(d.readKBs)}</span>
+                      <span className="text-blu">↑ запись {fmtNet(d.writeKBs)}</span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
           ) : <p className="text-[12px] text-dim">Нет данных о дисках</p>}
         </Panel>
 
-        <Panel title="Сеть · адаптеры" icon={<Network className="h-4 w-4" />}>
+        <Panel title={`Сеть · адаптеры · ${g?.adapters?.length ?? 0}`} icon={<Network className="h-4 w-4" />}>
           {g?.adapters?.length ? (
             <div className="space-y-1.5">
               {g.adapters.map((ad) => (
-                <div key={ad.name} className={cls('flex items-center justify-between rounded-lg border px-2.5 py-1.5', ad.name === g.mainAdapter ? 'border-mint/40 bg-mint/5' : 'border-line/60 bg-raised/30')}>
-                  <span className="font-mono text-[11.5px] text-mut">{ad.name}{ad.name === g.mainAdapter && <span className="ml-1.5 text-[9px] font-bold text-mint">основной</span>}</span>
-                  <span className="font-mono text-[11px] text-ok">↓{fmtNet(ad.rx)} <span className="text-blu">↑{fmtNet(ad.tx)}</span></span>
+                <div key={ad.name} className={cls('flex items-center justify-between rounded-lg border px-2.5 py-1.5',
+                  ad.name === g.mainAdapter ? 'border-mint/40 bg-mint/5' : ad.virtual ? 'border-line/30 bg-raised/20 opacity-60' : 'border-line/60 bg-raised/30')}>
+                  <span className="flex min-w-0 items-center gap-1.5 font-mono text-[11.5px] text-mut">
+                    <span className="truncate">{ad.name}</span>
+                    {ad.name === g.mainAdapter && <span className="shrink-0 rounded bg-mint/15 px-1 py-0.5 text-[8.5px] font-bold uppercase text-mint">основной</span>}
+                    {ad.virtual && <span className="shrink-0 rounded bg-line/40 px-1 py-0.5 text-[8.5px] font-bold uppercase text-dim">вирт</span>}
+                  </span>
+                  <span className="shrink-0 font-mono text-[11px] text-ok">↓{fmtNet(ad.rx)} <span className="text-blu">↑{fmtNet(ad.tx)}</span></span>
                 </div>
               ))}
             </div>
           ) : <p className="text-[12px] text-dim">Нет данных об адаптерах</p>}
         </Panel>
 
-        <Panel title="Температуры · все датчики" icon={<Thermometer className="h-4 w-4" />}>
-          {tempSensors.length ? (
-            <div className="grid grid-cols-2 gap-2">
-              {tempSensors.map((s, i) => (
-                <div key={i} className="flex items-center justify-between rounded-lg border border-line/60 bg-raised/30 px-2.5 py-1.5">
-                  <span className="truncate font-mono text-[11px] text-mut" title={s.label}>{s.label}</span>
-                  <span className={cls('font-mono text-[12px] font-bold', s.value > 75 ? 'text-crit' : s.value > 60 ? 'text-warn' : 'text-ok')}>{Math.round(s.value)}°C</span>
-                </div>
-              ))}
-            </div>
-          ) : <p className="text-[12px] text-dim">Датчики температуры не найдены</p>}
-        </Panel>
+        <SensorGroups sensors={g?.sensors ?? []} />
 
         <Panel title={`Пинги локальных устройств · ${st.online}/${st.total} онлайн`} icon={<Monitor className="h-4 w-4" />}>
           {a.targets.length === 0 ? (
