@@ -45,7 +45,8 @@ export function loadDb() {
   };
   if (db.users.length === 0) {
     db.users.push({
-      id: uid(), login: 'admin', name: 'admin', role: 'admin', scope: [],
+      id: uid(), login: 'admin', name: 'admin', role: 'admin',
+      menuScope: [], deviceScope: [], twoFA: { enabled: false, secret: null },
       passHash: hashPass(process.env.ADMIN_PASSWORD || 'pluto'), builtIn: true, createdAt: Date.now(),
     });
     pushEvent('info', 'system', 'Первый запуск ядра: создан администратор admin');
@@ -64,6 +65,16 @@ export function loadDb() {
     relayUrl: a.relayUrl || '', glancesUrl: a.glancesUrl || '', lastGlances: a.lastGlances || 0,
     favorite: !!a.favorite, pingsFavorite: !!a.pingsFavorite, pingsShowcase: !!a.pingsShowcase,
     statsView: a.statsView === 'bars' || a.statsView === 'ws' ? a.statsView : (a.stats ? 'ws' : ''),
+  }));
+  // пользователи: миграция со старой модели (scope) на новую (menuScope/deviceScope/twoFA)
+  db.users = (db.users || []).map((u) => ({
+    ...u,
+    menuScope: Array.isArray(u.menuScope) ? u.menuScope
+      : (u.role === 'admin' ? [] : Array.isArray(u.scope) ? u.scope.filter((s) => s !== 'agent' && s !== 'glances') : []),
+    deviceScope: Array.isArray(u.deviceScope) ? u.deviceScope
+      : (Array.isArray(u.scope) ? u.scope.filter((s) => ['ping', 'http', 'api', 'rtsp', 'sip', 'snmp', 'ssl'].includes(s)) : []),
+    twoFA: u.twoFA && typeof u.twoFA === 'object' ? { enabled: !!u.twoFA.enabled, secret: u.twoFA.secret || null } : { enabled: false, secret: null },
+    builtIn: !!u.builtIn,
   }));
   db.devices.forEach((d) => (d.checking = false));
   return db;

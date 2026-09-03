@@ -63,7 +63,14 @@ function fetchText(rawUrl, timeoutMs = 7000) {
   });
 }
 
-const publicUser = (u) => ({ id: u.id, login: u.login, name: u.name, role: u.role, scope: u.scope, builtIn: u.builtIn, createdAt: u.createdAt });
+const publicUser = (u) => ({
+  id: u.id, login: u.login, name: u.name, role: u.role,
+  menuScope: Array.isArray(u.menuScope) ? u.menuScope : [],
+  deviceScope: Array.isArray(u.deviceScope) ? u.deviceScope : [],
+  builtIn: !!u.builtIn,
+  twoFA: { enabled: !!(u.twoFA && u.twoFA.enabled), secret: null }, // секрет не отдаём
+  createdAt: u.createdAt,
+});
 
 // ─── Проверки устройств ─────────────────────────────────────────────────────
 
@@ -507,9 +514,69 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/auth/me') return json(res, 200, publicUser(user));
 
+    // ── пользователи (только админ) ──
+    if (p === '/api/users' && method === 'POST' && isAdmin) {
+      const b = await readBody(req);
+      const login = String(b.login || '').trim().toLowerCase();
+      const name = String(b.name || '').trim();
+      if (!login) return json(res, 400, { error: 'Укажите логин' });
+      if (!name) return json(res, 400, { error: 'Укажите имя' });
+      const dup = db.users.find((x) => x.login.toLowerCase() === login && x.id !== b.id);
+      if (dup) return json(res, 400, { error: 'Такой логин уже занят' });
+
+      const menuScope = Array.isArray(b.menuScope) ? b.menuScope.map(String) : [];
+      const deviceScope = Array.isArray(b.deviceScope) ? b.deviceScope.map(String) : [];
+      const twoFA = b.twoFA && typeof b.twoFA === 'object'
+        ? { enabled: !!b.twoFA.enabled, secret: b.twoFA.secret || null }
+        : { enabled: false, secret: null };
+
+      const existing = b.id ? db.users.find((x) => x.id === b.id) : null;
+      let saved;
+      if (existing) {
+        // Обновление: пароль меняем только если прислан непустой
+        existing.name = name;
+        existing.role = b.role === 'admin' ? 'admin' : 'viewer';
+        existing.menuScope = menuScope;
+        existing.deviceScope = deviceScope;
+        existing.twoFA = twoFA;
+        if (b.password && String(b.password).length > 0) existing.passHash = hashPass(String(b.password));
+        saved = existing;
+        pushEvent('info', 'system', `Пользователь «${name}» обновлён (админ: ${user.login})`);
+      } else {
+        if (!b.password || String(b.password).length < 4) return json(res, 400, { error: 'Пароль от 4 символов' });
+        saved = {
+          id: uid('u'), login, name,
+          role: b.role === 'admin' ? 'admin' : 'viewer',
+          menuScope, deviceScope,
+          builtIn: false, twoFA,
+          passHash: hashPass(String(b.password)),
+          createdAt: Date.now(),
+        };
+        db.users.push(saved);
+        pushEvent('info', 'system', `Создан пользователь «${name}» (${login}, роль: ${saved.role})`);
+      }
+      saveDb();
+      return json(res, 200, publicUser(saved));
+    }
+
+    const um = p.match(/^\/api\/users\/([^/]+)$/);
+    if (um && method === 'DELETE' && isAdmin) {
+      const target = db.users.find((x) => x.id === um[1]);
+      if (!target) return json(res, 404, { error: 'Пользователь не найден' });
+      if (target.builtIn) return json(res, 400, { error: 'Системного администратора удалить нельзя' });
+      if (target.id === user.id) return json(res, 400, { error: 'Нельзя удалить самого себя' });
+      db.users = db.users.filter((x) => x.id !== um[1]);
+      db.sessions = (db.sessions || []).filter((s) => s.userId !== um[1]);
+      pushEvent('warn', 'system', `Пользователь «${target.name}» удалён (админ: ${user.login})`);
+      saveDb();
+      return json(res, 200, { ok: true });
+    }
+
     if (p === '/api/state' && method === 'GET') {
-      const devices = isAdmin ? db.devices : db.devices.filter((d) => user.scope.includes(d.type));
-      const agentsRaw = isAdmin || user.scope.includes('agent') ? db.agents : [];
+      const deviceScope = Array.isArray(user.deviceScope) ? user.deviceScope : [];
+      const menuScope = Array.isArray(user.menuScope) ? user.menuScope : [];
+      const devices = isAdmin ? db.devices : db.devices.filter((d) => deviceScope.includes(d.type));
+      const agentsRaw = isAdmin || menuScope.includes('agents') ? db.agents : [];
       const agents = agentsRaw.map((a) => ({
         id: a.id, name: a.name, ip: a.ip, relayUrl: a.relayUrl || '', glancesUrl: a.glancesUrl || '',
         pingTargets: a.pingTargets || [], targets: a.targets || [], tags: a.tags || [],
