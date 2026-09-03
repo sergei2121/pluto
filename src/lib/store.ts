@@ -3,7 +3,7 @@ import { useRef, useSyncExternalStore } from 'react';
 import type {
   Agent, AlertRule, AuditEntry, BackupEntry, Device, EventItem, Route, Settings, Severity, StatsView, Tag, User, Webhook,
 } from './types';
-import { uid, TAG_COLORS } from './util';
+import { uid, TAG_COLORS, embedHash, verifyTotp } from './util';
 
 export interface Toast { id: string; kind: Severity; text: string; }
 
@@ -143,11 +143,33 @@ export const store = {
     set({ apiMode: 'server', users: [user], session: { userId: user.id, at: Date.now() } });
   },
 
-  login(loginStr: string, pass: string): string | null {
+  /** Вход. code — одноразовый код 2FA, если у пользователя включена защита.
+   *  Возвращает null при успехе, строку ошибки или '2FA' (нужен код). */
+  async login(loginStr: string, pass: string, code?: string): Promise<string | '2FA' | null> {
+    if (getState().apiMode === 'server') {
+      const { api, setApiToken } = await import('./api');
+      try {
+        const r = await api.login(loginStr, pass, code);
+        if ((r as { requires2FA?: boolean }).requires2FA) return '2FA';
+        setApiToken(r.token);
+        store.enterServer(r.user);
+        get().pushEvent('ok', 'system', `Вход: ${r.user.login}`);
+        return null;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Ошибка входа';
+        return /2fa/i.test(msg) ? '2FA' : msg;
+      }
+    }
+    // встроенный режим
     const u = state.users.find((x) => x.login.toLowerCase() === loginStr.trim().toLowerCase());
     if (!u) return 'Пользователь не найден';
-    if (u.login === 'admin' && pass !== 'pluto') return 'Неверный пароль';
-    set({ session: { userId: u.id, at: Date.now() }, route: 'dashboard' });
+    const expected = u.id === 'admin' ? embedHash('pluto') : (u as User & { passHash?: string }).passHash;
+    if (expected && embedHash(pass) !== expected) return 'Неверный пароль';
+    if (u.twoFA?.enabled && u.twoFA.secret) {
+      if (!code || !verifyTotp(u.twoFA.secret, code)) return '2FA';
+    }
+    set({ users: state.users, session: { userId: u.id, at: Date.now() }, route: 'dashboard' });
+    get().pushEvent('ok', 'system', `Вход: ${u.login}`);
     return null;
   },
 
@@ -380,8 +402,10 @@ export const store = {
       try { const { api } = await import('./api'); await api.saveUser(u, password); await syncAll(); toast('ok', 'Пользователь сохранён'); return null; }
       catch (e) { return e instanceof Error ? e.message : 'Не удалось сохранить'; }
     }
+    // встроенный режим: сохраняем хэш пароля, чтобы созданный пользователь мог войти
+    const withHash = (x: User) => (password ? ({ ...x, passHash: embedHash(password) } as User) : x);
     const ex = state.users.some((x) => x.id === u.id);
-    set({ users: ex ? state.users.map((x) => (x.id === u.id ? u : x)) : [...state.users, u] });
+    set({ users: ex ? state.users.map((x) => (x.id === u.id ? withHash(u) : x)) : [...state.users, withHash(u)] });
     return null;
   },
   async removeUser(id: string): Promise<void> {

@@ -31,12 +31,19 @@ function Planet() {
 export default function Login() {
   const [l, setL] = useState('');
   const [p, setP] = useState('');
+  const [code, setCode] = useState('');
+  const [need2FA, setNeed2FA] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [shake, setShake] = useState(0);
 
-  const submit = (e: FormEvent) => {
+  const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const res = store.login(l, p);
+    if (busy) return;
+    setBusy(true);
+    const res = await store.login(l, p, code.trim() || undefined);
+    setBusy(false);
+    if (res === '2FA') { setNeed2FA(true); setErr(null); return; }
     if (res) { setErr(res); setShake((x) => x + 1); }
   };
 
@@ -68,15 +75,25 @@ export default function Login() {
               <input className="inp" type="password" value={p} onChange={(e) => { setP(e.target.value); setErr(null); }} autoComplete="current-password" />
             </label>
 
+            {need2FA && (
+              <label className="block">
+                <span className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-vio">
+                  <Shield className="h-3.5 w-3.5" /> Код двухфакторной аутентификации
+                </span>
+                <input className="inp font-mono tracking-[0.3em]" value={code} onChange={(e) => { setCode(e.target.value); setErr(null); }} placeholder="000000" inputMode="numeric" autoFocus />
+              </label>
+            )}
+
             {err && (
               <p className="flex items-center gap-2 rounded-lg border border-crit/40 bg-crit/10 px-3 py-2 text-[12.5px] text-crit">
                 <AlertTriangle className="h-4 w-4 shrink-0" />{err}
               </p>
             )}
 
-            <button type="submit" className="group relative w-full overflow-hidden rounded-lg border border-vio/50 bg-vio/20 py-2.5 font-display text-[14px] font-bold text-ink transition-all hover:border-vio hover:bg-vio/30">
+            <button type="submit" disabled={busy} className="group relative w-full overflow-hidden rounded-lg border border-vio/50 bg-vio/20 py-2.5 font-display text-[14px] font-bold text-ink transition-all hover:border-vio hover:bg-vio/30 disabled:opacity-60">
               <span className="relative z-10 flex items-center justify-center gap-2">
-                Войти в систему <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                {busy ? 'Проверка…' : need2FA ? 'Подтвердить код' : 'Войти в систему'}
+                {!busy && <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />}
               </span>
             </button>
           </form>

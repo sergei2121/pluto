@@ -138,6 +138,39 @@ export const LINE_COLORS = ['#8f7df0', '#7ba4e6', '#5fc6d8', '#55c795', '#e0b65e
 
 // ─── Агрегации ───────────────────────────────────────────────────────────────
 
+// ─── 2FA (TOTP, RFC 6238) — для встроенного режима ──────────────────────────
+
+const B32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+
+export function base32Random(len = 16): string {
+  let s = '';
+  for (let i = 0; i < len; i++) s += B32_ALPHABET[Math.floor(Math.random() * 32)];
+  return s;
+}
+
+/** Простой детерминированный TOTP на строке (встроенный режим, без WebCrypto). */
+export function totpCode(secret: string, timeStep = 30): string {
+  const counter = Math.floor(Date.now() / 1000 / timeStep);
+  let h = hashStr(secret + ':' + counter);
+  h = (h ^ (h >>> 13)) >>> 0;
+  return String(h % 1000000).padStart(6, '0');
+}
+
+export function verifyTotp(secret: string, code: string): boolean {
+  const now = Math.floor(Date.now() / 1000 / 30);
+  for (const drift of [-1, 0, 1]) {
+    let h = hashStr(secret + ':' + (now + drift));
+    h = (h ^ (h >>> 13)) >>> 0;
+    if (String(h % 1000000).padStart(6, '0') === code) return true;
+  }
+  return false;
+}
+
+/** Хэш пароля встроенного режима (не криптостойкий — только локальная демонстрация). */
+export function embedHash(pass: string): string {
+  return 'e' + hashStr('pluto-salt::' + pass).toString(36);
+}
+
 /** Агрегированная ping-статистика агента по всем его целям. */
 export function pingStats(targets: { results: { alive: boolean; latency: number | null }[] }[]): {
   total: number; online: number; offline: number; avg: number | null; max: number | null;
