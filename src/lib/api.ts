@@ -47,7 +47,8 @@ export async function detectApi(): Promise<string | null> {
 }
 
 export const api = {
-  login: (loginStr: string, pass: string) => req<{ token: string; user: User }>('POST', '/api/auth/login', { login: loginStr, pass }),
+  login: (loginStr: string, pass: string, code?: string) =>
+    req<{ token: string; user: User; requires2FA?: boolean }>('POST', '/api/auth/login', { login: loginStr, pass, code }),
   me: () => req<User>('GET', '/api/auth/me'),
   state: () => req<ServerState>('GET', '/api/state'),
 
