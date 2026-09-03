@@ -99,11 +99,36 @@ function stepAgent(id: string, now: number) {
   let glances = a.glances;
   if (online && dueGl) {
     const pt = mockGlancesPoint(now);
+    const seed = mulberry32(hashStr(a.id));
+    const disks = ['C:', 'D:'].map((mnt, i) => ({
+      mnt, percent: Math.round(rnd(30, 85)), usedGB: Math.round(rnd(100, 700)), sizeGB: 931 - i * 400,
+      temp: Math.round(rnd(32, 52) * 10) / 10, readKBs: Math.round(rnd(0, 30000) * 10) / 10, writeKBs: Math.round(rnd(0, 12000) * 10) / 10,
+    }));
+    const adapters = [
+      { name: 'Ethernet', rx: pt.rx, tx: pt.tx, virtual: false },
+      { name: 'Wi-Fi', rx: Math.round(rnd(0, 800) * 10) / 10, tx: Math.round(rnd(0, 200) * 10) / 10, virtual: false },
+      { name: 'vEthernet (WSL)', rx: Math.round(rnd(0, 100)), tx: Math.round(rnd(0, 40)), virtual: true },
+    ];
+    const cput = pt.cput ?? 48;
     glancesLatest = {
-      t: now, cpu: pt.cpu, cpuCores: [], gpu: pt.gpu, gpuTemp: null, ram: pt.ram,
-      ramUsedGB: null, ramTotalGB: null, swap: null, load1: null, load5: null,
-      cput: pt.cput, ssdt: pt.ssdt, disks: [], adapters: [], mainAdapter: null,
-      rx: pt.rx, tx: pt.tx, sensors: [], uptimeSec: Math.floor((now - a.createdAt) / 1000), via: 'emu',
+      t: now, hostname: `PC-${a.name.replace(/[^a-z0-9]/gi, '').slice(0, 6).toUpperCase() || 'EMU'}`,
+      os: 'Microsoft Windows 11 Pro 23H2',
+      cpu: pt.cpu, cpuCores: Array.from({ length: 8 }, () => Math.round(rnd(5, 90) * 10) / 10),
+      gpu: pt.gpu, gpuTemp: Math.round(rnd(38, 62) * 10) / 10, ram: pt.ram,
+      ramUsedGB: 12.4, ramTotalGB: 32, swap: 3.2, swapUsedGB: 0.4, swapTotalGB: 12.8,
+      load1: Math.round(rnd(0.2, 2.4) * 100) / 100, load5: Math.round(rnd(0.2, 1.8) * 100) / 100, load15: Math.round(rnd(0.2, 1.2) * 100) / 100,
+      procCount: Math.round(rnd(180, 320)),
+      cput, ssdt: pt.ssdt,
+      disks, adapters, mainAdapter: 'Ethernet',
+      rx: pt.rx, tx: pt.tx,
+      sensors: [
+        { label: 'Package id 0', value: cput, unit: '°C', kind: 'temperature_core' },
+        { label: 'GPU', value: Math.round(rnd(38, 62) * 10) / 10, unit: '°C', kind: 'temperature_gpu' },
+        { label: 'ST2000 SSD', value: pt.ssdt ?? 41, unit: '°C', kind: 'temperature_disk' },
+        { label: 'CPU Fan', value: Math.round(rnd(700, 1600)), unit: 'RPM', kind: 'fan_speed' },
+        { label: 'Battery', value: Math.round(rnd(60, 100)), unit: '%', kind: 'battery' },
+      ],
+      uptimeSec: Math.floor((now - a.createdAt) / 1000), via: `emu${seed() > 0.5 ? 4 : 3}`,
     };
     glances = [...glances, pt].slice(-4000);
   }
