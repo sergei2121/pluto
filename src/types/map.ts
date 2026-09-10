@@ -2,7 +2,7 @@
 
 export interface MapNode {
   id: string;
-  type: 'core' | 'agent' | 'glances' | 'ping' | 'custom';
+  type: 'core' | 'agent' | 'glances' | 'ping' | 'custom' | 'camera' | 'switch' | 'router' | 'server';
   name: string;
   address?: string;
   x: number;
@@ -15,6 +15,7 @@ export interface MapNode {
     latency?: number;
   };
   templateId?: string;
+  comment?: string;
 }
 
 export interface MapLink {
@@ -47,29 +48,57 @@ export const NODE_TYPES: Record<MapNode['type'], NodeDefinition> = {
   core: {
     type: 'core',
     label: 'Ядро системы',
-    icon: '⚡',
+    icon: '🛡️',
     color: '#3b82f6',
     requiresAddress: false,
+  },
+  server: {
+    type: 'server',
+    label: 'Сервер',
+    icon: '🖥️',
+    color: '#10b981',
+    requiresAddress: true,
   },
   agent: {
     type: 'agent',
     label: 'PLUTO Агент',
-    icon: '🤖',
-    color: '#10b981',
+    icon: '⚙️',
+    color: '#06b6d4',
     requiresAddress: true,
   },
   glances: {
     type: 'glances',
     label: 'Glances Monitor',
-    icon: '👁️',
+    icon: '📊',
     color: '#f59e0b',
+    requiresAddress: true,
+  },
+  switch: {
+    type: 'switch',
+    label: 'Коммутатор',
+    icon: '🔀',
+    color: '#8b5cf6',
+    requiresAddress: true,
+  },
+  router: {
+    type: 'router',
+    label: 'Маршрутизатор',
+    icon: '🌐',
+    color: '#6366f1',
+    requiresAddress: true,
+  },
+  camera: {
+    type: 'camera',
+    label: 'IP Камера',
+    icon: '📹',
+    color: '#ec4899',
     requiresAddress: true,
   },
   ping: {
     type: 'ping',
     label: 'Ping Устройство',
     icon: '📡',
-    color: '#8b5cf6',
+    color: '#14b8a6',
     requiresAddress: true,
   },
   custom: {

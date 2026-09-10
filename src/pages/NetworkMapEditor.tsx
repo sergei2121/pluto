@@ -14,7 +14,8 @@ import { NODE_TYPES } from '../types/map';
 import { 
   Plus, Trash2, Save, FolderOpen, Settings, X, Check, 
   Move, Zap, Eye, EyeOff, Search, Filter, ChevronDown,
-  Server, Monitor, Wifi, WifiOff, Activity
+  Server, Monitor, Wifi, WifiOff, Activity, Camera, Network,
+  HardDrive, Router, Database, Shield, Cpu
 } from 'lucide-react';
 import { cls } from '../lib/util';
 
@@ -295,6 +296,16 @@ export default function NetworkMapEditor() {
           </div>
           
           <div className="flex items-center gap-2">
+            {/* Кнопка Сохранить */}
+            <button
+              onClick={saveCurrentMap}
+              className="flex items-center gap-1.5 rounded-lg border border-ok/30 bg-ok/20 px-3 py-1.5 text-[11.5px] font-semibold text-ok hover:bg-ok/30 transition-colors"
+              title="Сохранить карту"
+            >
+              <Save className="h-3.5 w-3.5" />
+              Сохранить
+            </button>
+
             {/* Выбор карты */}
             <div className="relative">
               <button
@@ -307,8 +318,8 @@ export default function NetworkMapEditor() {
               </button>
               
               {showTemplatesPanel && (
-                <div className="absolute right-0 top-full z-50 mt-1 min-w-[250px] rounded-lg border border-line bg-panel shadow-xl">
-                  <div className="p-2 border-b border-line">
+                <div className="absolute right-0 top-full z-[60] mt-1 min-w-[250px] rounded-lg border border-line bg-panel shadow-xl max-h-[400px] overflow-y-auto">
+                  <div className="p-2 border-b border-line sticky top-0 bg-panel z-10">
                     <button
                       onClick={() => {
                         const name = prompt('Название новой карты:');
@@ -395,7 +406,7 @@ export default function NetworkMapEditor() {
       </div>
 
       {/* Панель карты */}
-      <div className="rise relative overflow-hidden rounded-xl border border-line bg-panel/90" style={{ height: '600px' }}>
+      <div className="rise relative overflow-hidden rounded-xl border border-line bg-panel/90" style={{ height: '750px' }}>
         <div className="absolute inset-0 opacity-30" style={{
           backgroundImage: 'radial-gradient(circle, #6366f1 1px, transparent 1px)',
           backgroundSize: `${20 * zoom}px ${20 * zoom}px`,
@@ -473,13 +484,18 @@ export default function NetworkMapEditor() {
                     <span className="text-2xl">{def.icon}</span>
                   </div>
                   
-                  <div className="mt-2 rounded bg-panel/90 px-2 py-1 text-center backdrop-blur border border-line">
-                    <div className="text-[10px] font-bold text-ink max-w-[120px] truncate">
+                  <div className="mt-2 rounded bg-panel/90 px-2 py-1 text-center backdrop-blur border border-line max-w-[150px]">
+                    <div className="text-[10px] font-bold text-ink truncate">
                       {node.name}
                     </div>
                     {node.address && (
-                      <div className="text-[9px] font-mono text-dim">
+                      <div className="text-[9px] font-mono text-dim truncate">
                         {node.address}
+                      </div>
+                    )}
+                    {node.comment && (
+                      <div className="mt-1 text-[8px] text-dim italic truncate" title={node.comment}>
+                        📝 {node.comment}
                       </div>
                     )}
                     {node.metrics && (
@@ -666,6 +682,17 @@ export default function NetworkMapEditor() {
                 />
               </div>
             )}
+            
+            <div>
+              <label className="text-[9px] uppercase tracking-[0.1em] text-dim">Комментарий</label>
+              <textarea
+                value={selectedNode.comment || ''}
+                onChange={(e) => updateNode(selectedNode.id, { comment: e.target.value })}
+                placeholder="Описание оборудования, характеристики..."
+                rows={3}
+                className="mt-1 w-full rounded border border-line bg-raised px-2 py-1.5 text-[11px] text-ink focus:border-vio/50 focus:outline-none resize-none"
+              />
+            </div>
             
             <div>
               <label className="text-[9px] uppercase tracking-[0.1em] text-dim">Тип</label>
