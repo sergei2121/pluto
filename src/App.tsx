@@ -79,7 +79,8 @@ export default function App() {
       {page === 'devices' && <Devices key={`dev-${user.id}`} />}
       {page === 'agents' && <Agents key={`ag-${user.id}`} />}
       {page === 'agent-pings' && <AgentPings key={`ap-${user.id}`} />}
-      {page === 'topology' && <Topology key={`top-${user.id}`} />}
+      {page === 'topology-map' && <Topology key={`map-${user.id}`} />}
+      {page === 'topology-summary' && <Topology key={`top-${user.id}`} />}
       {page === 'stats-bars' && <Stats key="stats-bars" mode="bars" />}
       {page === 'stats-ws' && <Stats key="stats-ws" mode="ws" />}
       {page === 'sla' && <Sla key={`sla-${user.id}`} />}
