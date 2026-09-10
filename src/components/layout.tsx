@@ -56,7 +56,6 @@ const NAV: { route: Route; label: string; icon: ReactNode; adminOnly?: boolean }
   { route: 'stats-bars', label: 'Статистика Bars', icon: <BarChart3 className="h-[17px] w-[17px]" /> },
   { route: 'stats-ws', label: 'Статистика WS', icon: <Waves className="h-[17px] w-[17px]" /> },
   { route: 'sla', label: 'SLA-отчёт', icon: <FileBarChart className="h-[17px] w-[17px]" /> },
-  { route: 'showcase', label: 'Витрина', icon: <LayoutGrid className="h-[17px] w-[17px]" />, adminOnly: true },
   { route: 'deploy', label: 'Развёртывание', icon: <Radio className="h-[17px] w-[17px]" /> },
   { route: 'settings', label: 'Настройки системы', icon: <SettingsIcon className="h-[17px] w-[17px]" />, adminOnly: true },
 ];
@@ -151,7 +150,6 @@ const TITLES: Record<Route, string> = {
   'stats-bars': 'Статистика Bars · Glances',
   'stats-ws': 'Статистика WS · Glances',
   sla: 'SLA-отчёт · доступность',
-  showcase: 'Публичная витрина',
   settings: 'Настройки системы',
   deploy: 'Развёртывание и документация',
 };

@@ -12,7 +12,6 @@ import AgentPings from './pages/AgentPings';
 import Stats from './pages/Stats';
 import Topology from './pages/Topology';
 import Sla from './pages/Sla';
-import Showcase from './pages/Showcase';
 import SettingsPage from './pages/Settings';
 import Deploy from './pages/Deploy';
 
@@ -69,9 +68,9 @@ export default function App() {
   if (!hasSession || !user) return <Login />;
 
   // контроль доступа по ролям:
-  //  admin — всё; showcase/settings — только admin; viewer — только разрешённые пункты меню
+  //  admin — всё; settings — только admin; viewer — только разрешённые пункты меню
   let page = route;
-  if (user.role !== 'admin' && (page === 'settings' || page === 'showcase')) page = 'dashboard';
+  if (user.role !== 'admin' && (page === 'settings')) page = 'dashboard';
   else if (user.role !== 'admin' && !user.menuScope.includes(page)) page = 'dashboard';
 
   return (
@@ -84,7 +83,6 @@ export default function App() {
       {page === 'stats-bars' && <Stats key="stats-bars" mode="bars" />}
       {page === 'stats-ws' && <Stats key="stats-ws" mode="ws" />}
       {page === 'sla' && <Sla key={`sla-${user.id}`} />}
-      {page === 'showcase' && <Showcase />}
       {page === 'settings' && <SettingsPage />}
       {page === 'deploy' && <Deploy />}
     </Shell>
