@@ -100,7 +100,7 @@ export function isTarget(s: string): boolean {
 }
 
 export function expandTargets(target: string): string[] {
-  const t = target.trim();
+  const t = (typeof target === 'string' ? target : '').trim();
   if (isIp(t)) return [t];
   const range = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.)(\d{1,3})-(\d{1,3})$/.exec(t);
   if (range) {

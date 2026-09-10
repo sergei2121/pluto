@@ -322,7 +322,7 @@ export const store = {
 
   // ── теги ──
   async addTag(label: string, color?: string): Promise<string | null> {
-    const l = label.trim();
+    const l = (typeof label === 'string' ? label : '').trim();
     if (!l) return 'Укажите название тега';
     if (state.tags.some((t) => t.label.toLowerCase() === l.toLowerCase())) return 'Такой тег уже есть';
     const c = color || TAG_COLORS[state.tags.length % TAG_COLORS.length];
