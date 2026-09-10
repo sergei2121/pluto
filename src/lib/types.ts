@@ -4,7 +4,7 @@ export type DeviceType = 'ping' | 'http' | 'api' | 'rtsp' | 'sip' | 'snmp' | 'ss
 export type DeviceStatus = 'up' | 'down' | 'degraded' | 'unknown';
 export type Route =
   | 'dashboard' | 'devices' | 'agents' | 'agent-pings' 
-  | 'topology' | 'topology-map' | 'topology-summary'
+  | 'topology' | 'topology-map' | 'topology-summary' | 'network-map'
   | 'stats-bars' | 'stats-ws' | 'sla' | 'settings' | 'deploy' | 'showcase';
 export type Severity = 'ok' | 'warn' | 'crit' | 'info';
 export type Role = 'admin' | 'viewer';
