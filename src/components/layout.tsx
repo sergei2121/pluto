@@ -52,7 +52,15 @@ const NAV: { route: Route; label: string; icon: ReactNode; adminOnly?: boolean }
   { route: 'devices', label: 'Устройства', icon: <Server className="h-[17px] w-[17px]" /> },
   { route: 'agents', label: 'Агенты', icon: <Monitor className="h-[17px] w-[17px]" /> },
   { route: 'agent-pings', label: 'Пинги агентов', icon: <Crosshair className="h-[17px] w-[17px]" /> },
-  { route: 'topology', label: 'Топология', icon: <Network className="h-[17px] w-[17px]" /> },
+  { 
+    route: 'topology-map', 
+    label: 'Топология', 
+    icon: <Network className="h-[17px] w-[17px]" />,
+    submenu: [
+      { route: 'topology-map', label: 'Карта сети' },
+      { route: 'topology-summary', label: 'Сводка' },
+    ]
+  },
   { route: 'stats-bars', label: 'Статистика Bars', icon: <BarChart3 className="h-[17px] w-[17px]" /> },
   { route: 'stats-ws', label: 'Статистика WS', icon: <Waves className="h-[17px] w-[17px]" /> },
   { route: 'sla', label: 'SLA-отчёт', icon: <FileBarChart className="h-[17px] w-[17px]" /> },

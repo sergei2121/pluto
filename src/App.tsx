@@ -10,7 +10,8 @@ import Devices from './pages/Devices';
 import Agents from './pages/Agents';
 import AgentPings from './pages/AgentPings';
 import Stats from './pages/Stats';
-import Topology from './pages/Topology';
+import NetworkMap from './pages/NetworkMap';
+import TopologySummary from './pages/Topology';
 import Sla from './pages/Sla';
 import SettingsPage from './pages/Settings';
 import Deploy from './pages/Deploy';
@@ -79,7 +80,8 @@ export default function App() {
       {page === 'devices' && <Devices key={`dev-${user.id}`} />}
       {page === 'agents' && <Agents key={`ag-${user.id}`} />}
       {page === 'agent-pings' && <AgentPings key={`ap-${user.id}`} />}
-      {page === 'topology' && <Topology key={`top-${user.id}`} />}
+      {page === 'topology-map' && <NetworkMap key={`map-${user.id}`} />}
+      {page === 'topology-summary' && <TopologySummary key={`top-${user.id}`} />}
       {page === 'stats-bars' && <Stats key="stats-bars" mode="bars" />}
       {page === 'stats-ws' && <Stats key="stats-ws" mode="ws" />}
       {page === 'sla' && <Sla key={`sla-${user.id}`} />}

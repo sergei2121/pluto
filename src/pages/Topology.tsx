@@ -1,4 +1,4 @@
-// ─── PLUTO: топология сети v2.0.1 ────────────────────────────────────────────
+// ─── PLUTO: Топология-сводка v2.0.1 ────────────────────────────────────────────────
 // Минималистичный вид: только пингуемые IP через агентов + события статусов справа.
 import { useMemo, useState, useEffect } from 'react';
 import { store, useCurrentUser, usePluto, visibleAgents, visibleDevices } from '../lib/store';
@@ -25,7 +25,6 @@ interface LeafNode {
 }
 
 function buildGraph(devices: Device[], agents: Agent[]) {
-  // ядро → агенты; агент → цели пинга; ядро → одиночные устройства
   const hubs = agents.map((a) => {
     const st = pingStats(a.targets);
     const leaves: LeafNode[] = [];
@@ -46,21 +45,18 @@ function buildGraph(devices: Device[], agents: Agent[]) {
   return { hubs, standalone };
 }
 
-export default function Topology() {
+export default function TopologySummary() {
   const user = useCurrentUser();
   const devices = usePluto((s) => visibleDevices(s, user));
   const allAgents = usePluto((s) => visibleAgents(s, user));
   const tags = usePluto((s) => s.tags);
   const events = usePluto((s) => s.events);
-  const [showMap, setShowMap] = useState(false);
   const [selectedTag, setSelectedTag] = useState<string>('all');
   const [showTagFilter, setShowTagFilter] = useState(false);
   
-  // Состояние для отслеживания статусов IP (для генерации событий)
   const [prevIpStatuses, setPrevIpStatuses] = useState<Map<string, { alive: boolean; lastEventTs: number }>>(new Map());
   const [ipEvents, setIpEvents] = useState<IpStatusEvent[]>([]);
 
-  // Фильтрация агентов по тегу
   const agents = useMemo(() => {
     if (selectedTag === 'all') return allAgents;
     return allAgents.filter(a => a.tags.includes(selectedTag));
@@ -68,11 +64,9 @@ export default function Topology() {
 
   const graph = useMemo(() => buildGraph(devices, agents), [devices, agents]);
 
-  // Получение объекта тега по ID
   const getTagObj = (id: string) => tags.find(t => t.id === id);
   const selectedTagObj = selectedTag !== 'all' ? getTagObj(selectedTag) : null;
 
-  // Сбор всех пингуемых IP с их статусами
   const allIpResults = useMemo(() => {
     const results: Array<{ ip: string; alive: boolean; latency: number | null; agentName: string; agentId: string }> = [];
     for (const hub of graph.hubs) {
@@ -89,21 +83,18 @@ export default function Topology() {
     return results;
   }, [graph.hubs]);
 
-  // Генерация событий при изменении статуса IP
   useEffect(() => {
     const now = Date.now();
     const newEvents: IpStatusEvent[] = [];
     const newPrevStatuses = new Map<string, { alive: boolean; lastEventTs: number }>();
     
-    // Определяем период опроса (берём среднее из последних опросов агентов, или дефолт 60 сек)
-    const pollInterval = 60000; // 60 секунд по умолчанию
+    const pollInterval = 60000;
     
     for (const result of allIpResults) {
       const key = `${result.agentId}:${result.ip}`;
       const prev = prevIpStatuses.get(key);
       
       if (!prev) {
-        // Первое обнаружение IP - создаём событие
         newEvents.push({
           id: `${now}-${key}`,
           ip: result.ip,
@@ -115,7 +106,6 @@ export default function Topology() {
         });
         newPrevStatuses.set(key, { alive: result.alive, lastEventTs: now });
       } else if (prev.alive !== result.alive) {
-        // Статус изменился - создаём событие
         newEvents.push({
           id: `${now}-${key}`,
           ip: result.ip,
@@ -127,10 +117,8 @@ export default function Topology() {
         });
         newPrevStatuses.set(key, { alive: result.alive, lastEventTs: now });
       } else {
-        // Статус не изменился - проверяем, нужно ли повторить событие
         const timeSinceLastEvent = now - prev.lastEventTs;
         if (timeSinceLastEvent >= pollInterval) {
-          // Повторяем событие с периодичностью опроса
           newEvents.push({
             id: `${now}-${key}-repeat`,
             ip: result.ip,
@@ -147,38 +135,25 @@ export default function Topology() {
       }
     }
     
-    // Удаляем из prevIpStatuses ключи, которых больше нет
     for (const [key, value] of prevIpStatuses.entries()) {
       if (!allIpResults.some(r => `${r.agentId}:${r.ip}` === key)) {
-        // IP исчез - можно добавить событие об удалении
+        // IP исчез
       }
     }
     
     if (newEvents.length > 0) {
-      // Добавляем новые события в начало списка, ограничиваем 50 последними
       setIpEvents(prev => [...newEvents, ...prev].slice(0, 50));
     }
     
     setPrevIpStatuses(newPrevStatuses);
   }, [allIpResults]);
 
-  const W = 960, H = 640, cx = W / 2, cy = H / 2;
-  const hubR = 210; // орбита агентов
-  const leafR = 92; // радиус листьев вокруг хаба
-
-  const hubPos = graph.hubs.map((h, i) => {
-    const ang = (i / Math.max(1, graph.hubs.length)) * Math.PI * 2 - Math.PI / 2;
-    return { ...h, x: cx + Math.cos(ang) * hubR, y: cy + Math.sin(ang) * hubR, ang };
-  });
-
-  // Подсчёт уникальных пингуемых IP
   const totalUniqueIps = new Set(allIpResults.map(r => `${r.agentId}:${r.ip}`)).size;
   const onlineIps = allIpResults.filter(r => r.alive).length;
   const offlineIps = totalUniqueIps - onlineIps;
 
   return (
     <div className="space-y-4">
-      {/* Упрощённый вид: только пингуемые IP и события */}
       <div className="rise relative overflow-hidden rounded-xl border border-line bg-panel/90 p-5">
         <div className="pointer-events-none absolute inset-0 nebula" />
         <div className="pointer-events-none absolute inset-0 stars" />
@@ -188,7 +163,6 @@ export default function Topology() {
             <p className="text-[11.5px] text-dim">пингуемые IP через агентов{selectedTagObj && ` · тег: ${selectedTagObj.label}`}</p>
           </div>
           <div className="flex items-center gap-2">
-            {/* Выпадающий список с тегами для фильтрации */}
             <div className="relative">
               <button 
                 onClick={() => setShowTagFilter(!showTagFilter)}
@@ -220,13 +194,9 @@ export default function Topology() {
                 </div>
               )}
             </div>
-            <button onClick={() => setShowMap(!showMap)} className="rounded-lg border border-vio/30 bg-vio/10 px-3 py-1.5 text-[11.5px] font-semibold text-vio transition-colors hover:bg-vio/20">
-              {showMap ? 'Скрыть карту' : 'Показать карту'}
-            </button>
           </div>
         </div>
 
-        {/* Статистика только по пингуемым IP */}
         <div className="mt-5 grid grid-cols-3 gap-3">
           <div className="rounded-lg border border-line bg-raised/50 p-3 text-center">
             <div className="flex items-center justify-center gap-1.5">
@@ -251,7 +221,6 @@ export default function Topology() {
           </div>
         </div>
 
-        {/* Список пингуемых IP через агентов */}
         <div className="mt-5">
           <h3 className="mb-3 text-[12px] font-semibold uppercase tracking-[0.1em] text-dim">Пингуемые IP</h3>
           <div className="max-h-[400px] overflow-y-auto space-y-1.5 pr-2">
@@ -297,7 +266,6 @@ export default function Topology() {
         </div>
       </div>
 
-      {/* Панель событий справа - статусы IP */}
       <div className="rise relative overflow-hidden rounded-xl border border-line bg-panel/90 p-5">
         <div className="pointer-events-none absolute inset-0 nebula" />
         <div className="relative flex items-center justify-between mb-4">
