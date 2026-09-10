@@ -4,7 +4,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { store, useCurrentUser, usePluto, visibleAgents, visibleDevices } from '../lib/store';
 import { cls, fmtMs, pingStats } from '../lib/util';
 import type { Agent, Device, Tag, RelayPingResult } from '../lib/types';
-import { Wifi, WifiOff, Globe, ChevronDown, Filter, Activity, Clock, Network, Eye, EyeOff, Search, Navigate } from 'lucide-react';
+import { Wifi, WifiOff, Globe, ChevronDown, Filter, Activity, Clock, Network, Eye, EyeOff, Search, ArrowRight } from 'lucide-react';
 
 interface IpStatusEvent {
   id: string;
@@ -377,94 +377,6 @@ function TopologySummaryTab() {
                 </div>
                 <div className="flex flex-col items-end gap-1 shrink-0">
                   <span className="text-[10px] font-bold uppercase text-crit">офлайн</span>
-                  <span className="text-[9px] text-dim font-mono">
-                    {new Date(evt.ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                  </span>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-                      <div className="flex items-center gap-2">
-                        <span className={cls("h-1.5 w-1.5 rounded-full", leaf.alive ? "bg-ok" : "bg-crit")} />
-                        <span className="font-mono font-semibold text-ink">{leaf.label}</span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        {leaf.latency != null && (
-                          <span className="font-mono text-[10px] text-blu">{leaf.latency} мс</span>
-                        )}
-                        <span className={cls("text-[9px] font-semibold uppercase", leaf.alive ? "text-ok" : "text-crit")}>
-                          {leaf.alive ? 'онлайн' : 'офлайн'}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-            {graph.hubs.length === 0 && (
-              <p className="py-6 text-center text-[12.5px] text-dim">
-                {selectedTag !== 'all' ? `Агентов с тегом "${selectedTagObj?.label}" не найдено.` : 'Агентов пока нет — добавьте их на странице «Агенты».'}
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="rise relative overflow-hidden rounded-xl border border-line bg-panel/90 p-5">
-        <div className="pointer-events-none absolute inset-0 nebula" />
-        <div className="relative flex items-center justify-between mb-4">
-          <div>
-            <h2 className="font-display text-[15px] font-bold text-ink">События статусов IP</h2>
-            <p className="text-[11.5px] text-dim">появление / пропадание пинга</p>
-          </div>
-          <Clock className="h-5 w-5 text-dim" />
-        </div>
-        <div className="max-h-[500px] overflow-y-auto space-y-2 pr-2">
-          {ipEvents.length === 0 ? (
-            <p className="py-6 text-center text-[12.5px] text-dim">Ожидание событий...</p>
-          ) : (
-            ipEvents.map((evt) => (
-              <div 
-                key={evt.id} 
-                className={cls(
-                  "flex items-center justify-between rounded-lg border px-3 py-2.5 transition-colors",
-                  evt.repeated ? "bg-raised/30" : "bg-raised/60",
-                  evt.alive ? "border-ok/30" : "border-crit/30"
-                )}
-              >
-                <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                  <div className={cls(
-                    "flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
-                    evt.alive ? "bg-ok/15" : "bg-crit/15"
-                  )}>
-                    {evt.alive ? (
-                      <Wifi className="h-4 w-4 text-ok" />
-                    ) : (
-                      <WifiOff className="h-4 w-4 text-crit" />
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-[12px] font-bold text-ink truncate">{evt.ip}</span>
-                      {evt.repeated && (
-                        <span className="rounded bg-vio/15 px-1.5 py-px text-[8px] font-semibold text-vio">повтор</span>
-                      )}
-                    </div>
-                    <div className="text-[10px] text-dim truncate">агент: {evt.agentName}</div>
-                  </div>
-                </div>
-                <div className="flex flex-col items-end gap-1 shrink-0">
-                  <span className={cls(
-                    "text-[10px] font-bold uppercase",
-                    evt.alive ? "text-ok" : "text-crit"
-                  )}>
-                    {evt.alive ? 'онлайн' : 'офлайн'}
-                  </span>
                   <span className="text-[9px] text-dim font-mono">
                     {new Date(evt.ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                   </span>
