@@ -1,7 +1,7 @@
 // ─── PLUTO: relay-агенты (пинг через ПК + Glances) ──────────────────────────
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Plus, Star, Trash2, RefreshCw, Monitor, Search, Pencil, Cpu, Thermometer, HardDrive, Network, Gauge, BarChart3, Waves,
+  Plus, Star, Trash2, RefreshCw, Monitor, Search, Pencil, Cpu, Thermometer, HardDrive, Network, Gauge, BarChart3, Waves, Server,
 } from 'lucide-react';
 import { Panel, StatusDot, Modal, Drawer, Field, EmptyState, Ring, Bar, TimeAgo } from '../components/ui';
 import { store, useCurrentUser, usePluto, useToasts, visibleAgents } from '../lib/store';
@@ -293,8 +293,39 @@ export default function Agents() {
 
   const onEdit = (a: Agent) => setModal({ open: true, initial: a });
 
+  // Упрощённый вид по умолчанию: агент + количество пингуемых IP
+  const summary = useMemo(() => {
+    const totalPings = agents.reduce((sum, a) => sum + expandTargets(a.pingTargets).length, 0);
+    return { count: agents.length, pings: totalPings };
+  }, [agents]);
+
   return (
     <div className="space-y-4">
+      {/* Упрощённая сводка — вид по умолчанию */}
+      <Panel title="Телеметрия · Агенты" icon={<Server className="h-4 w-4" />}>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-xl border border-line bg-panel/60 p-4 text-center">
+            <div className="font-mono text-[28px] font-bold text-vio">{summary.count}</div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-dim">Агентов всего</div>
+          </div>
+          <div className="rounded-xl border border-line bg-panel/60 p-4 text-center">
+            <div className="font-mono text-[28px] font-bold text-blu">{summary.pings}</div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-dim">IP под пингом</div>
+          </div>
+          <div className="rounded-xl border border-line bg-panel/60 p-4 text-center">
+            <div className="font-mono text-[28px] font-bold text-ok">{agents.filter(a => a.online).length}</div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-dim">В сети</div>
+          </div>
+          <div className="rounded-xl border border-line bg-panel/60 p-4 text-center">
+            <div className="font-mono text-[28px] font-bold text-crit">{agents.filter(a => !a.online && a.lastPoll > 0).length}</div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-dim">Офлайн</div>
+          </div>
+        </div>
+        <p className="mt-3 text-[12px] text-dim">
+          Это упрощённый вид телеметрии. Подробная информация по каждому агенту — в списке ниже.
+        </p>
+      </Panel>
+
       <Panel title={`Relay-агенты · ${list.length}`} icon={<Monitor className="h-4 w-4" />}
         right={isAdmin ? <button onClick={() => setModal({ open: true, initial: null })} className="btn-acc"><Plus className="h-4 w-4" />Добавить агента</button> : undefined}>
         <div className="mb-3 flex flex-wrap items-center gap-2">
