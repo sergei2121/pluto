@@ -1,10 +1,11 @@
-// ─── PLUTO: Редактируемая карта сети v1.0.0 ──────────────────────────────────
+// ─── PLUTO: Редактируемая карта сети v2.0.0 ──────────────────────────────────
 // Интерактивная карта с возможностью добавления узлов вручную
 // - Ядро системы в центре
 // - Добавление агентов, Glances, Ping устройств
 // - Создание и сохранение шаблонов карт
-// - Перетаскивание узлов
-// - Настройка имен и связей
+// - Перетаскивание узлов с привязкой линий связи
+// - Настройка имен, адресов и комментариев
+// - Улучшенный интерфейс с градиентами и анимациями
 
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { store, useCurrentUser, usePluto, visibleAgents, visibleDevices } from '../lib/store';
@@ -284,14 +285,19 @@ export default function NetworkMapEditor() {
     <div className="space-y-4">
       {/* Заголовок */}
       <div className="rise relative overflow-hidden rounded-xl border border-line bg-panel/90 p-5">
-        <div className="pointer-events-none absolute inset-0 nebula" />
+        {/* Декоративный градиент */}
+        <div className="pointer-events-none absolute inset-0 opacity-20" style={{
+          background: 'linear-gradient(135deg, rgba(124, 58, 237, 0.1) 0%, transparent 50%, rgba(6, 182, 212, 0.1) 100%)'
+        }} />
+        
         <div className="relative flex items-center justify-between">
           <div>
-            <h2 className="font-display text-[15px] font-bold text-ink">
-              Карта сети · редактор v1.0.0
+            <h2 className="font-display text-[16px] font-bold text-ink flex items-center gap-2">
+              <Network className="h-5 w-5 text-vio" />
+              Карта сети · редактор v2.0.0
             </h2>
-            <p className="text-[11.5px] text-dim">
-              {currentMap?.name || 'Карта'} • {nodes.length} узлов • {links.length} связей
+            <p className="text-[11.5px] text-dim mt-1">
+              {currentMap?.name || 'Карта'} • <span className="text-ok">{nodes.length}</span> узлов • <span className="text-blu">{links.length}</span> связей
             </p>
           </div>
           
@@ -420,31 +426,81 @@ export default function NetworkMapEditor() {
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
+          style={{
+            background: 'radial-gradient(circle at center, rgba(124, 58, 237, 0.03) 0%, transparent 70%)'
+          }}
         >
+          {/* Сетка фона */}
+          <div className="absolute inset-0 opacity-20 pointer-events-none" style={{
+            backgroundImage: `
+              linear-gradient(rgba(124, 58, 237, 0.1) 1px, transparent 1px),
+              linear-gradient(90deg, rgba(124, 58, 237, 0.1) 1px, transparent 1px)
+            `,
+            backgroundSize: `${30 * zoom}px ${30 * zoom}px`,
+            backgroundPosition: `${pan.x}px ${pan.y}px`,
+          }} />
+          
           <div style={{
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
             transformOrigin: '0 0',
             width: '100%',
             height: '100%',
+            position: 'relative',
           }}>
-            {/* Связи */}
-            <svg className="absolute inset-0 pointer-events-none" style={{ width: '100%', height: '100%' }}>
+            {/* Связи - рендерим первыми чтобы были под узлами */}
+            <svg className="absolute inset-0 pointer-events-none" style={{ 
+              width: '100%', 
+              height: '100%',
+              overflow: 'visible'
+            }}>
+              <defs>
+                <linearGradient id="linkGradient-active" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="#22c55e" stopOpacity="0.8" />
+                  <stop offset="100%" stopColor="#22c55e" stopOpacity="0.4" />
+                </linearGradient>
+                <linearGradient id="linkGradient-inactive" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="#ef4444" stopOpacity="0.8" />
+                  <stop offset="100%" stopColor="#ef4444" stopOpacity="0.4" />
+                </linearGradient>
+                <linearGradient id="linkGradient-warning" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.8" />
+                  <stop offset="100%" stopColor="#f59e0b" stopOpacity="0.4" />
+                </linearGradient>
+              </defs>
               {links.map(link => {
                 const source = nodes.find(n => n.id === link.source);
                 const target = nodes.find(n => n.id === link.target);
                 if (!source || !target) return null;
                 
+                const gradientId = link.status === 'active' ? 'url(#linkGradient-active)' : 
+                                   link.status === 'warning' ? 'url(#linkGradient-warning)' : 
+                                   'url(#linkGradient-inactive)';
+                
                 return (
                   <g key={link.id}>
+                    {/* Тень линии */}
                     <line
-                      x1={source.x + 300}
-                      y1={source.y + 300}
-                      x2={target.x + 300}
-                      y2={target.y + 300}
+                      x1={source.x}
+                      y1={source.y}
+                      x2={target.x}
+                      y2={target.y}
+                      stroke="rgba(0,0,0,0.3)"
+                      strokeWidth="4"
+                      strokeDasharray={link.status === 'inactive' ? '5,5' : 'none'}
+                      opacity="0.3"
+                      className="transition-all duration-300"
+                    />
+                    {/* Основная линия */}
+                    <line
+                      x1={source.x}
+                      y1={source.y}
+                      x2={target.x}
+                      y2={target.y}
                       stroke={link.status === 'active' ? '#22c55e' : link.status === 'warning' ? '#f59e0b' : '#ef4444'}
                       strokeWidth="2"
                       strokeDasharray={link.status === 'inactive' ? '5,5' : 'none'}
-                      opacity="0.6"
+                      opacity="0.7"
+                      className="transition-all duration-300"
                     />
                   </g>
                 );
@@ -460,12 +516,12 @@ export default function NetworkMapEditor() {
                 <div
                   key={node.id}
                   className={cls(
-                    'absolute flex flex-col items-center cursor-move transition-shadow',
-                    isSelected ? 'z-50' : 'z-10'
+                    'absolute flex flex-col items-center cursor-move transition-all duration-200',
+                    isSelected ? 'z-50 scale-110' : 'z-10 hover:scale-105'
                   )}
                   style={{
-                    left: node.x + 300,
-                    top: node.y + 300,
+                    left: node.x,
+                    top: node.y,
                     transform: 'translate(-50%, -50%)',
                   }}
                   onMouseDown={(e) => handleMouseDown(e, node.id)}
