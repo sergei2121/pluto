@@ -73,7 +73,7 @@ export default function AgentPings() {
   const [onlyIssues, setOnlyIssues] = useState(false);
 
   const list = useMemo(() => {
-    const query = q.trim().toLowerCase();
+    const query = typeof q === 'string' ? q.trim().toLowerCase() : '';
     return agents.filter((a) => {
       if (query && !a.name.toLowerCase().includes(query) && !a.ip.includes(query)) return false;
       if (onlyIssues && pingStats(a.targets).offline === 0) return false;
