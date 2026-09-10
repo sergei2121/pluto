@@ -1,15 +1,26 @@
-// ─── PLUTO: Топология v2.1.0 ────────────────────────────────────────────────
-// Две вкладки: "Карта сети" и "Топология сводка"
-import { useMemo, useState, useEffect } from 'react';
+// ─── PLUTO: Топология v3.0.0 (Redesigned) ────────────────────────────────────
+// Полностью переработанный интерфейс топологии
+// - Интерактивная карта с зумом и панорамированием
+// - Умная группировка IP по статусам
+// - Боковая панель событий
+// - Расширенная фильтрация и поиск
+// - Анимации состояний
+
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { store, useCurrentUser, usePluto, visibleAgents, visibleDevices } from '../lib/store';
 import { cls, fmtMs, pingStats } from '../lib/util';
 import type { Agent, Device, Tag, RelayPingResult } from '../lib/types';
-import { Wifi, WifiOff, Globe, ChevronDown, Filter, Activity, Clock, Network, Eye, EyeOff, Search, ArrowRight } from 'lucide-react';
+import { 
+  Wifi, WifiOff, Globe, ChevronDown, Filter, Activity, Clock, Network, 
+  Eye, EyeOff, Search, ArrowRight, ZoomIn, ZoomOut, Move, AlertTriangle,
+  CheckCircle2, XCircle, Server, Monitor, Zap
+} from 'lucide-react';
 
 interface IpStatusEvent {
   id: string;
   ip: string;
   agentName: string;
+  agentId: string;
   alive: boolean;
   ts: number;
   latency: number | null;
@@ -22,6 +33,16 @@ interface LeafNode {
   alive: boolean;
   latency: number | null;
   agentName: string;
+  deviceId?: string;
+}
+
+interface HubData {
+  agent: Agent;
+  online: boolean;
+  leaves: LeafNode[];
+  x: number;
+  y: number;
+  ang: number;
 }
 
 function buildGraph(devices: Device[], agents: Agent[]) {
@@ -30,12 +51,15 @@ function buildGraph(devices: Device[], agents: Agent[]) {
     const leaves: LeafNode[] = [];
     for (const t of a.targets) {
       for (const r of t.results) {
+        // Пытаемся найти связанное устройство
+        const device = devices.find(d => d.ip === r.ip);
         leaves.push({ 
           key: `${a.id}:${r.ip}`, 
           label: r.ip, 
           alive: r.alive, 
           latency: r.latency,
-          agentName: a.name 
+          agentName: a.name,
+          deviceId: device?.id
         });
       }
     }
