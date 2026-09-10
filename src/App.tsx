@@ -11,6 +11,7 @@ import Agents from './pages/Agents';
 import AgentPings from './pages/AgentPings';
 import Stats from './pages/Stats';
 import Topology from './pages/Topology';
+import NetworkMapEditor from './pages/NetworkMapEditor';
 import Sla from './pages/Sla';
 import SettingsPage from './pages/Settings';
 import Deploy from './pages/Deploy';
@@ -81,6 +82,7 @@ export default function App() {
       {page === 'agent-pings' && <AgentPings key={`ap-${user.id}`} />}
       {page === 'topology-map' && <Topology key={`map-${user.id}`} />}
       {page === 'topology-summary' && <Topology key={`top-${user.id}`} />}
+      {page === 'network-map' && <NetworkMapEditor key={`netmap-${user.id}`} />}
       {page === 'stats-bars' && <Stats key="stats-bars" mode="bars" />}
       {page === 'stats-ws' && <Stats key="stats-ws" mode="ws" />}
       {page === 'sla' && <Sla key={`sla-${user.id}`} />}

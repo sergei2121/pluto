@@ -2,7 +2,7 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   LayoutDashboard, Server, Monitor, Crosshair, BarChart3, Waves, LayoutGrid, Settings as SettingsIcon,
-  Radio, LogOut, Search, X, AlertTriangle, Bell, Check, Orbit, Network, FileBarChart,
+  Radio, LogOut, Search, X, AlertTriangle, Bell, Check, Orbit, Network, FileBarChart, Map,
 } from 'lucide-react';
 import { cls, fmtClock, CONSOLE_VERSION } from '../lib/util';
 import { store, useCurrentUser, usePluto, useToastList, useToasts, visibleAgents, visibleDevices } from '../lib/store';
@@ -56,6 +56,11 @@ const NAV: { route: Route; label: string; icon: ReactNode; adminOnly?: boolean }
     route: 'topology-map', 
     label: 'Топология', 
     icon: <Network className="h-[17px] w-[17px]" />
+  },
+  { 
+    route: 'network-map', 
+    label: 'Карта сети', 
+    icon: <Map className="h-[17px] w-[17px]" />
   },
   { route: 'stats-bars', label: 'Статистика Bars', icon: <BarChart3 className="h-[17px] w-[17px]" /> },
   { route: 'stats-ws', label: 'Статистика WS', icon: <Waves className="h-[17px] w-[17px]" /> },
@@ -153,6 +158,7 @@ const TITLES: Record<Route, string> = {
   topology: 'Топология сети',
   'topology-map': 'Карта сети',
   'topology-summary': 'Сводка топологии',
+  'network-map': 'Редактор карты сети',
   'stats-bars': 'Статистика Bars · Glances',
   'stats-ws': 'Статистика WS · Glances',
   sla: 'SLA-отчёт · доступность',
