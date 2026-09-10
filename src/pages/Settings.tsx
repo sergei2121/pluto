@@ -251,7 +251,7 @@ function UserEditor({ initial, onClose }: { initial: User | null; onClose: () =>
                 <CheckPill key={m.route} on={menuScope.includes(m.route)} label={m.label} onClick={() => toggleMenu(m.route)} />
               ))}
             </div>
-            <p className="mt-1.5 text-[11px] text-dim">«Главная» добавляется всегда. «Настройки» и «Витрина» доступны только администраторам.</p>
+            <p className="mt-1.5 text-[11px] text-dim">«Главная» добавляется всегда. «Настройки» доступны только администраторам.</p>
           </div>
 
           <div className="mt-5">
