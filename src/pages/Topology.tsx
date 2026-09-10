@@ -1,10 +1,10 @@
-// ─── PLUTO: Топология v2.0.1 ────────────────────────────────────────────────
+// ─── PLUTO: Топология v2.1.0 ────────────────────────────────────────────────
 // Две вкладки: "Карта сети" и "Топология сводка"
 import { useMemo, useState, useEffect } from 'react';
 import { store, useCurrentUser, usePluto, visibleAgents, visibleDevices } from '../lib/store';
 import { cls, fmtMs, pingStats } from '../lib/util';
 import type { Agent, Device, Tag, RelayPingResult } from '../lib/types';
-import { Wifi, WifiOff, Globe, ChevronDown, Filter, Activity, Clock, Network } from 'lucide-react';
+import { Wifi, WifiOff, Globe, ChevronDown, Filter, Activity, Clock, Network, Eye, EyeOff, Search, ArrowRight } from 'lucide-react';
 
 interface IpStatusEvent {
   id: string;
@@ -50,9 +50,12 @@ function TopologySummaryTab() {
   const devices = usePluto((s) => visibleDevices(s, user));
   const allAgents = usePluto((s) => visibleAgents(s, user));
   const tags = usePluto((s) => s.tags);
-  const events = usePluto((s) => s.events);
   const [selectedTag, setSelectedTag] = useState<string>('all');
   const [showTagFilter, setShowTagFilter] = useState(false);
+  
+  // Состояние видимости агентов на странице топологии
+  const [visibleAgentIds, setVisibleAgentIds] = useState<Set<string>>(new Set());
+  const [searchQuery, setSearchQuery] = useState('');
   
   const [prevIpStatuses, setPrevIpStatuses] = useState<Map<string, { alive: boolean; lastEventTs: number }>>(new Map());
   const [ipEvents, setIpEvents] = useState<IpStatusEvent[]>([]);
@@ -82,6 +85,18 @@ function TopologySummaryTab() {
     }
     return results;
   }, [graph.hubs]);
+
+  // Фильтрация по поиску
+  const filteredHubs = useMemo(() => {
+    if (!searchQuery.trim()) return graph.hubs;
+    const query = searchQuery.toLowerCase().trim();
+    return graph.hubs.filter(hub => {
+      const agentMatch = hub.agent.name.toLowerCase().includes(query) || 
+                         hub.agent.ip.toLowerCase().includes(query);
+      const leavesMatch = hub.leaves.some(leaf => leaf.label.toLowerCase().includes(query));
+      return agentMatch || leavesMatch;
+    });
+  }, [graph.hubs, searchQuery]);
 
   useEffect(() => {
     const now = Date.now();
@@ -148,9 +163,32 @@ function TopologySummaryTab() {
     setPrevIpStatuses(newPrevStatuses);
   }, [allIpResults]);
 
+  // Фильтруем события - только потеря связи
+  const connectionLossEvents = useMemo(() => {
+    return ipEvents.filter(e => !e.alive);
+  }, [ipEvents]);
+
   const totalUniqueIps = new Set(allIpResults.map(r => `${r.agentId}:${r.ip}`)).size;
   const onlineIps = allIpResults.filter(r => r.alive).length;
   const offlineIps = totalUniqueIps - onlineIps;
+
+  // Переключатель видимости агента
+  const toggleAgentVisibility = (agentId: string) => {
+    setVisibleAgentIds(prev => {
+      const next = new Set(prev);
+      if (next.has(agentId)) {
+        next.delete(agentId);
+      } else {
+        next.add(agentId);
+      }
+      return next;
+    });
+  };
+
+  // Навигация к агенту
+  const navigateToAgent = (agentId: string) => {
+    store.nav('agents', agentId);
+  };
 
   return (
     <div className="space-y-4">
@@ -159,10 +197,21 @@ function TopologySummaryTab() {
         <div className="pointer-events-none absolute inset-0 stars" />
         <div className="relative flex items-center justify-between">
           <div>
-            <h2 className="font-display text-[15px] font-bold text-ink">Топология · сводка v2.0.1</h2>
+            <h2 className="font-display text-[15px] font-bold text-ink">Топология · сводка v2.1.0</h2>
             <p className="text-[11.5px] text-dim">пингуемые IP через агентов{selectedTagObj && ` · тег: ${selectedTagObj.label}`}</p>
           </div>
           <div className="flex items-center gap-2">
+            {/* Поиск */}
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Поиск IP или агента..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-48 rounded-lg border border-line bg-raised px-3 py-1.5 pl-9 text-[11.5px] text-ink placeholder:text-dim/50 focus:border-vio/50 focus:outline-none"
+              />
+              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-dim" />
+            </div>
             <div className="relative">
               <button 
                 onClick={() => setShowTagFilter(!showTagFilter)}
@@ -223,99 +272,111 @@ function TopologySummaryTab() {
 
         <div className="mt-5">
           <h3 className="mb-3 text-[12px] font-semibold uppercase tracking-[0.1em] text-dim">Пингуемые IP</h3>
-          <div className="max-h-[400px] overflow-y-auto space-y-1.5 pr-2">
-            {graph.hubs.map((hub) => (
-              <div key={hub.agent.id} className="mb-3">
-                <div className="sticky top-0 z-10 flex items-center gap-2 rounded-md bg-panel/95 px-2 py-1.5 backdrop-blur">
-                  <span className={cls('h-2 w-2 shrink-0 rounded-full', hub.online ? 'bg-blu' : 'bg-crit')} />
-                  <span className="text-[11.5px] font-bold text-ink">{hub.agent.name}</span>
-                  <span className="font-mono text-[10px] text-dim">{hub.agent.ip}</span>
-                </div>
-                <div className="space-y-1">
-                  {hub.leaves.map((leaf) => (
-                    <div 
-                      key={leaf.key} 
-                      className={cls(
-                        "flex items-center justify-between rounded-md border px-3 py-2 text-[11.5px] transition-colors",
-                        leaf.alive ? "border-ok/30 bg-ok/5" : "border-crit/30 bg-crit/5"
-                      )}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className={cls("h-1.5 w-1.5 rounded-full", leaf.alive ? "bg-ok" : "bg-crit")} />
-                        <span className="font-mono font-semibold text-ink">{leaf.label}</span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        {leaf.latency != null && (
-                          <span className="font-mono text-[10px] text-blu">{leaf.latency} мс</span>
-                        )}
-                        <span className={cls("text-[9px] font-semibold uppercase", leaf.alive ? "text-ok" : "text-crit")}>
-                          {leaf.alive ? 'онлайн' : 'офлайн'}
-                        </span>
-                      </div>
+          <div className="max-h-[500px] overflow-y-auto space-y-3 pr-2">
+            {filteredHubs.map((hub) => {
+              const isVisible = visibleAgentIds.has(hub.agent.id);
+              return (
+                <div key={hub.agent.id} className="mb-3">
+                  <div className="sticky top-0 z-10 flex items-center gap-2 rounded-md bg-panel/95 px-3 py-2 backdrop-blur border border-line">
+                    <span className={cls('h-2.5 w-2.5 shrink-0 rounded-full', hub.online ? 'bg-ok' : 'bg-crit')} 
+                          style={{ boxShadow: hub.online ? '0 0 8px #22c55e' : '0 0 8px #ef4444' }} />
+                    <span className="text-[12px] font-bold text-ink">{hub.agent.name}</span>
+                    <span className="font-mono text-[10.5px] text-dim">{hub.agent.ip}</span>
+                    <div className="ml-auto flex items-center gap-1.5">
+                      <button
+                        onClick={() => navigateToAgent(hub.agent.id)}
+                        className="rounded p-1 text-dim transition-colors hover:bg-vio/10 hover:text-vio"
+                        title="Перейти к агенту"
+                      >
+                        <Navigate className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={() => toggleAgentVisibility(hub.agent.id)}
+                        className="rounded p-1 text-dim transition-colors hover:bg-vio/10 hover:text-vio"
+                        title={isVisible ? 'Скрыть' : 'Показать'}
+                      >
+                        {isVisible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                      </button>
                     </div>
-                  ))}
+                  </div>
+                  {isVisible && (
+                    <div className="mt-2 space-y-1.5 pl-2">
+                      {hub.leaves.map((leaf) => (
+                        <div 
+                          key={leaf.key} 
+                          className={cls(
+                            "flex items-center justify-between rounded-md border px-3 py-2.5 text-[11.5px] transition-colors",
+                            leaf.alive ? "border-ok/30 bg-ok/5" : "border-crit/30 bg-crit/10"
+                          )}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span className={cls("h-2 w-2 rounded-full", leaf.alive ? "bg-ok" : "bg-crit")} 
+                                  style={{ boxShadow: leaf.alive ? '0 0 6px #22c55e' : '0 0 6px #ef4444' }} />
+                            <span className="font-mono text-[12px] font-semibold text-ink">{leaf.label}</span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            {leaf.latency != null && (
+                              <span className={cls("font-mono text-[11px]", leaf.alive ? "text-blu" : "text-crit")}>
+                                {leaf.latency} мс
+                              </span>
+                            )}
+                            <span className={cls("text-[10px] font-bold uppercase", leaf.alive ? "text-ok" : "text-crit")}>
+                              {leaf.alive ? 'онлайн' : 'офлайн'}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
-            {graph.hubs.length === 0 && (
+              );
+            })}
+            {filteredHubs.length === 0 && (
               <p className="py-6 text-center text-[12.5px] text-dim">
-                {selectedTag !== 'all' ? `Агентов с тегом "${selectedTagObj?.label}" не найдено.` : 'Агентов пока нет — добавьте их на странице «Агенты».'}
+                {searchQuery ? 'Ничего не найдено по запросу.' : 
+                 selectedTag !== 'all' ? `Агентов с тегом "${selectedTagObj?.label}" не найдено.` : 
+                 'Агентов пока нет — добавьте их на странице «Агенты».'}
               </p>
             )}
           </div>
         </div>
       </div>
 
+      {/* Окно событий справа - только потеря связи */}
       <div className="rise relative overflow-hidden rounded-xl border border-line bg-panel/90 p-5">
         <div className="pointer-events-none absolute inset-0 nebula" />
         <div className="relative flex items-center justify-between mb-4">
           <div>
-            <h2 className="font-display text-[15px] font-bold text-ink">События статусов IP</h2>
-            <p className="text-[11.5px] text-dim">появление / пропадание пинга</p>
+            <h2 className="font-display text-[15px] font-bold text-ink">Потеря связи</h2>
+            <p className="text-[11.5px] text-dim">события офлайн</p>
           </div>
-          <Clock className="h-5 w-5 text-dim" />
+          <Clock className="h-5 w-5 text-crit" />
         </div>
-        <div className="max-h-[500px] overflow-y-auto space-y-2 pr-2">
-          {ipEvents.length === 0 ? (
-            <p className="py-6 text-center text-[12.5px] text-dim">Ожидание событий...</p>
+        <div className="max-h-[400px] overflow-y-auto space-y-2 pr-2">
+          {connectionLossEvents.length === 0 ? (
+            <p className="py-6 text-center text-[12.5px] text-dim">Нет событий потери связи</p>
           ) : (
-            ipEvents.map((evt) => (
+            connectionLossEvents.map((evt) => (
               <div 
                 key={evt.id} 
-                className={cls(
-                  "flex items-center justify-between rounded-lg border px-3 py-2.5 transition-colors",
-                  evt.repeated ? "bg-raised/30" : "bg-raised/60",
-                  evt.alive ? "border-ok/30" : "border-crit/30"
-                )}
+                className="flex items-center justify-between rounded-lg border border-crit/30 bg-crit/10 px-3 py-2.5 transition-colors"
               >
                 <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                  <div className={cls(
-                    "flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
-                    evt.alive ? "bg-ok/15" : "bg-crit/15"
-                  )}>
-                    {evt.alive ? (
-                      <Wifi className="h-4 w-4 text-ok" />
-                    ) : (
-                      <WifiOff className="h-4 w-4 text-crit" />
-                    )}
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-crit/15">
+                    <WifiOff className="h-4 w-4 text-crit" />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-[12px] font-bold text-ink truncate">{evt.ip}</span>
                       {evt.repeated && (
-                        <span className="rounded bg-vio/15 px-1.5 py-px text-[8px] font-semibold text-vio">повтор</span>
+                        <span className="rounded bg-crit/20 px-1.5 py-px text-[8px] font-semibold text-crit">повтор</span>
                       )}
                     </div>
                     <div className="text-[10px] text-dim truncate">агент: {evt.agentName}</div>
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-1 shrink-0">
-                  <span className={cls(
-                    "text-[10px] font-bold uppercase",
-                    evt.alive ? "text-ok" : "text-crit"
-                  )}>
-                    {evt.alive ? 'онлайн' : 'офлайн'}
-                  </span>
+                  <span className="text-[10px] font-bold uppercase text-crit">офлайн</span>
                   <span className="text-[9px] text-dim font-mono">
                     {new Date(evt.ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                   </span>
