@@ -52,7 +52,7 @@ function buildGraph(devices: Device[], agents: Agent[]) {
     for (const t of a.targets) {
       for (const r of t.results) {
         // Пытаемся найти связанное устройство
-        const device = devices.find(d => d.ip === r.ip);
+        const device = devices.find(d => d.address === r.ip);
         leaves.push({ 
           key: `${a.id}:${r.ip}`, 
           label: r.ip, 
@@ -138,6 +138,7 @@ function TopologySummaryTab() {
           id: `${now}-${key}`,
           ip: result.ip,
           agentName: result.agentName,
+          agentId: result.agentId,
           alive: result.alive,
           ts: now,
           latency: result.latency,
@@ -149,6 +150,7 @@ function TopologySummaryTab() {
           id: `${now}-${key}`,
           ip: result.ip,
           agentName: result.agentName,
+          agentId: result.agentId,
           alive: result.alive,
           ts: now,
           latency: result.latency,
@@ -162,6 +164,7 @@ function TopologySummaryTab() {
             id: `${now}-${key}-repeat`,
             ip: result.ip,
             agentName: result.agentName,
+            agentId: result.agentId,
             alive: result.alive,
             ts: now,
             latency: result.latency,
