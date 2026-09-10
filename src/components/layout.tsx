@@ -173,7 +173,7 @@ export function Topbar() {
   const boxRef = useRef<HTMLDivElement>(null);
 
   const results = useMemo(() => {
-    const query = q.trim().toLowerCase();
+    const query = typeof q === 'string' ? q.trim().toLowerCase() : '';
     if (!query) return { devs: [], ags: [] };
     const tagIds = tags.filter((t) => t.label.toLowerCase().includes(query)).map((t) => t.id);
     const devs = devices.filter((d) => d.name.toLowerCase().includes(query) || d.address.toLowerCase().includes(query) || d.tags.some((t) => tagIds.includes(t))).slice(0, 6);
@@ -196,7 +196,7 @@ export function Topbar() {
           {q && <button onClick={() => setQ('')} className="text-dim hover:text-ink"><X className="h-3.5 w-3.5" /></button>}
         </div>
 
-        {focus && q.trim() && (
+        {focus && (typeof q === 'string' ? q.trim() : '') && (
           <div className="pop absolute left-0 right-0 top-[calc(100%+6px)] overflow-hidden rounded-lg border border-line bg-panel shadow-[0_24px_60px_-12px_rgba(0,0,0,.85)]">
             {!hasResults && <p className="px-4 py-4 text-center text-[12.5px] text-dim">Ничего не найдено по запросу «{q}»</p>}
             {results.devs.length > 0 && (

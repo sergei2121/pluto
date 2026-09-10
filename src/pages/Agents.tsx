@@ -286,7 +286,7 @@ export default function Agents() {
   const [drawer, setDrawer] = useState<string | null>(null);
 
   const list = useMemo(() => {
-    const query = q.trim().toLowerCase();
+    const query = typeof q === 'string' ? q.trim().toLowerCase() : '';
     if (!query) return agents;
     return agents.filter((a) => a.name.toLowerCase().includes(query) || a.ip.includes(query));
   }, [agents, q]);

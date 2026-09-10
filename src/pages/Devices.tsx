@@ -203,7 +203,7 @@ export default function Devices() {
   useEffect(() => { if (routeParam === 'down') setStatusFilter('down'); if (routeParam === 'new') setModal({ open: true, initial: null }); }, [routeParam]);
 
   const list = useMemo(() => {
-    const query = q.trim().toLowerCase();
+    const query = typeof q === 'string' ? q.trim().toLowerCase() : '';
     return devices.filter((d) => {
       if (statusFilter !== 'all' && d.status !== statusFilter) return false;
       if (query && !d.name.toLowerCase().includes(query) && !d.address.toLowerCase().includes(query)) return false;
