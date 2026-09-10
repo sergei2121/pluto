@@ -55,11 +55,7 @@ const NAV: { route: Route; label: string; icon: ReactNode; adminOnly?: boolean }
   { 
     route: 'topology-map', 
     label: 'Топология', 
-    icon: <Network className="h-[17px] w-[17px]" />,
-    submenu: [
-      { route: 'topology-map', label: 'Карта сети' },
-      { route: 'topology-summary', label: 'Сводка' },
-    ]
+    icon: <Network className="h-[17px] w-[17px]" />
   },
   { route: 'stats-bars', label: 'Статистика Bars', icon: <BarChart3 className="h-[17px] w-[17px]" /> },
   { route: 'stats-ws', label: 'Статистика WS', icon: <Waves className="h-[17px] w-[17px]" /> },
@@ -155,11 +151,14 @@ const TITLES: Record<Route, string> = {
   agents: 'Агенты и локальные сети',
   'agent-pings': 'Пинги агентов · локальные устройства',
   topology: 'Топология сети',
+  'topology-map': 'Карта сети',
+  'topology-summary': 'Сводка топологии',
   'stats-bars': 'Статистика Bars · Glances',
   'stats-ws': 'Статистика WS · Glances',
   sla: 'SLA-отчёт · доступность',
   settings: 'Настройки системы',
   deploy: 'Развёртывание и документация',
+  showcase: 'Публичная витрина',
 };
 
 function Clock() {

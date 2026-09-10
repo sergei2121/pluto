@@ -295,7 +295,10 @@ export default function Agents() {
 
   // Упрощённый вид по умолчанию: агент + количество пингуемых IP
   const summary = useMemo(() => {
-    const totalPings = agents.reduce((sum, a) => sum + expandTargets(a.pingTargets).length, 0);
+    const totalPings = agents.reduce((sum, a) => sum + a.pingTargets.reduce((s, t) => {
+      const expanded = expandTargets(t);
+      return s + (Array.isArray(expanded) ? expanded.length : 1);
+    }, 0), 0);
     return { count: agents.length, pings: totalPings };
   }, [agents]);
 

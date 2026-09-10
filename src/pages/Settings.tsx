@@ -156,6 +156,8 @@ const MENU_GRANTS: { route: Route; label: string }[] = [
   { route: 'agents', label: 'Агенты' },
   { route: 'agent-pings', label: 'Пинги агентов' },
   { route: 'topology', label: 'Топология' },
+  { route: 'topology-map', label: 'Карта сети' },
+  { route: 'topology-summary', label: 'Сводка топологии' },
   { route: 'stats-bars', label: 'Статистика Bars' },
   { route: 'stats-ws', label: 'Статистика WS' },
   { route: 'sla', label: 'SLA-отчёт' },
