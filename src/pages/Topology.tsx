@@ -288,7 +288,7 @@ function TopologySummaryTab() {
                         className="rounded p-1 text-dim transition-colors hover:bg-vio/10 hover:text-vio"
                         title="Перейти к агенту"
                       >
-                        <Navigate className="h-3.5 w-3.5" />
+                        <ArrowRight className="h-3.5 w-3.5" />
                       </button>
                       <button
                         onClick={() => toggleAgentVisibility(hub.agent.id)}
