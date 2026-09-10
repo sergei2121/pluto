@@ -2,7 +2,6 @@
 import { useEffect, useState } from 'react';
 import { Orbit } from 'lucide-react';
 import { getState, store, useCurrentUser, usePluto } from './lib/store';
-import { startEngine, stopEngine } from './lib/engine';
 import { detectApi, getApiToken, restoreServerSession, syncAll } from './lib/api';
 import { Shell } from './components/layout';
 import Login from './pages/Login';
@@ -24,9 +23,7 @@ export default function App() {
   const user = useCurrentUser();
   const [booting, setBooting] = useState(true);
 
-  // Определение режима: есть ли серверное ядро рядом? Повторяем пробу, пока
-  // ядро не найдено — «встроенный» режим не застрянет, если контейнер прогрелся
-  // позже страницы или сеть моргнула при первом запросе.
+  // Проверка доступности серверного ядра
   useEffect(() => {
     let alive = true;
     const probe = async () => {
@@ -35,11 +32,7 @@ export default function App() {
       if (r.ver) {
         store.setCoreVersion(r.ver, r.diag || null);
         if (!getState().session) {
-          await restoreServerSession(); // молча, по сохранённому токену
-        } else if (!getApiToken()) {
-          // Сессия встроенная (логин без ядра): выходим, чтобы войти через ядро —
-          // данные станут реальными. Токен сохранится, повторный вход не понадобится.
-          store.logout();
+          await restoreServerSession();
         } else {
           void syncAll();
         }
@@ -50,17 +43,10 @@ export default function App() {
     };
     void probe();
     const t = window.setInterval(() => {
-      if (getState().apiMode === 'embedded') void probe();
+      if (apiMode !== 'server') void probe();
     }, 4000);
     return () => { alive = false; window.clearInterval(t); };
   }, []);
-
-  // Встроенный движок — только когда нет серверного ядра
-  useEffect(() => {
-    if (hasSession && apiMode === 'embedded') startEngine();
-    else stopEngine();
-    return () => { stopEngine(); };
-  }, [hasSession, apiMode]);
 
   // Серверный режим: поллинг состояния ядра
   useEffect(() => {

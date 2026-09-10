@@ -100,7 +100,7 @@ export default function Login() {
 
           <div className="mt-6 rounded-lg border border-vio/25 bg-vio/5 px-4 py-3">
             <p className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.12em] text-vio">
-              <Shield className="h-3.5 w-3.5" /> Первый запуск — чистая база
+              <Shield className="h-3.5 w-3.5" /> Вход через серверное ядро
             </p>
             <p className="mt-1.5 font-mono text-[12px] text-mut">
               администратор: <span className="text-ink">admin</span> / <span className="text-ink">pluto</span>
