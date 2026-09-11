@@ -2,50 +2,15 @@
 # Build artifacts
 dist/
 build/
-*.o
-*.obj
-*.out
 
 # Dependencies
 node_modules/
-.venv/
-venv/
-__pycache__/
 
-# Logs and temporary files
+# Logs and temp files
 *.log
 *.tmp
-*.swp
-
-# Environment variables
-.env
-.env.local
-*.env.*
 
 # Editors
 .vscode/
 .idea/
-
-# Coverage reports
-coverage/
-htmlcov/
-.coverage
-
-# Python specific
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.so
-
-# Compressed files
-*.zip
-*.gz
-*.tar
-*.tgz
-*.bz2
-*.xz
-*.7z
-*.rar
-*.zst
 ```
