@@ -741,7 +741,7 @@ export default function NetworkMap() {
           </div>
         </div>
 
-        {graph.hubs.length === 0 && (
+        {agentHierarchy.length === 0 && (
           <div className="py-20 text-center">
             <div className="flex h-20 w-20 mx-auto items-center justify-center rounded-2xl bg-raised/50 border border-line mb-5">
               <Network className="h-10 w-10 text-dim opacity-40" />
