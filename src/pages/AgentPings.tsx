@@ -10,8 +10,7 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
   const allTargets = Array.isArray(a.targets) ? a.targets : [];
   
   // Считаем общую статистику по всем целям
-  const allResults = allTargets.flatMap((t) => (Array.isArray(t.results) ? t.results : []));
-  const st = pingStats(allResults);
+  const st = pingStats(allTargets);
   
   const onFav = () => store.toggleAgentPingsFav(a.id);
   const onShowcase = () => store.toggleAgentPingsShowcase(a.id);
@@ -47,12 +46,12 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
         <div className="rounded-lg border border-line/60 bg-raised/40 py-2"><div className="font-mono text-[17px] font-bold text-blu">{st.avg != null ? st.avg : '—'}</div><div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">ср. мс</div></div>
       </div>
 
-      {allTargets.length === 0 || allResults.length === 0 ? (
-        <p className="mt-3 text-[12px] text-dim">Цели не заданы или ещё не опрошены. Добавьте IP/диапазоны в «Агенты → Изменить».</p>
+      {allTargets.length === 0 ? (
+        <p className="mt-3 text-[12px] text-dim">Цели не заданы. Добавьте IP/диапазоны в «Агенты → Изменить».</p>
       ) : (
         <div className="mt-3 space-y-3">
           {allTargets.map((target) => {
-            const targetStats = pingStats(Array.isArray(target.results) ? target.results : []);
+            const targetStats = pingStats([target]);
             const displayName = target.name || target.target || target.range || 'Без имени';
             const hasResults = Array.isArray(target.results) && target.results.length > 0;
             
@@ -112,22 +111,19 @@ export default function AgentPings() {
     return agents.filter((a) => {
       if (query && !a.name.toLowerCase().includes(query) && !a.ip.includes(query)) return false;
       const targetsList = Array.isArray(a.targets) ? a.targets : [];
-      const allResults = targetsList.flatMap(t => Array.isArray(t.results) ? t.results : []);
-      if (onlyIssues && pingStats(allResults).offline === 0) return false;
+      if (onlyIssues && pingStats(targetsList).offline === 0) return false;
       return true;
     });
   }, [agents, q, onlyIssues]);
 
   const totalDevices = useMemo(() => agents.reduce((acc, a) => {
     const targetsList = Array.isArray(a.targets) ? a.targets : [];
-    const allResults = targetsList.flatMap(t => Array.isArray(t.results) ? t.results : []);
-    return acc + pingStats(allResults).total;
+    return acc + pingStats(targetsList).total;
   }, 0), [agents]);
   
   const totalOnline = useMemo(() => agents.reduce((acc, a) => {
     const targetsList = Array.isArray(a.targets) ? a.targets : [];
-    const allResults = targetsList.flatMap(t => Array.isArray(t.results) ? t.results : []);
-    return acc + pingStats(allResults).online;
+    return acc + pingStats(targetsList).online;
   }, 0), [agents]);
 
   return (
