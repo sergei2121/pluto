@@ -1,6 +1,6 @@
 // ─── PLUTO: настройки системы ───────────────────────────────────────────────
 import { useEffect, useState } from 'react';
-import { Send, Tag as TagIcon, Bell, Users, Radio, Plus, Trash2, Monitor, Server, Check, Pencil, ShieldCheck, KeyRound, X } from 'lucide-react';
+import { Send, Tag as TagIcon, Bell, Users, Radio, Plus, Trash2, Monitor, Server, Check, Pencil, ShieldCheck, KeyRound, X, Eye, EyeOff } from 'lucide-react';
 import { Panel, Field, Toggle, EmptyState } from '../components/ui';
 import { store, useCurrentUser, usePluto, useToasts } from '../lib/store';
 import { sendTestNotification, requestPushPermission } from '../lib/engine';
@@ -53,7 +53,7 @@ function TagsTab() {
   const [color, setColor] = useState(TAG_COLORS[0]);
 
   const add = async () => {
-    const err = await store.addTag(label, color);
+    const err = await store.addTag(label, color, true);
     if (err) useToasts.push('warn', err);
     else setLabel('');
   };
@@ -82,6 +82,9 @@ function TagsTab() {
           {tags.map((t) => (
             <span key={t.id} className="group inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[12px] font-semibold" style={{ borderColor: t.color, color: t.color }}>
               {t.label}
+              <button onClick={() => void store.toggleTagVisibility(t.id)} className="opacity-50 transition-opacity hover:opacity-100" title={t.visible ? 'Скрыть на странице Устройства' : 'Показать на странице Устройства'}>
+                {t.visible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+              </button>
               <button onClick={() => void store.removeTag(t.id)} className="opacity-50 transition-opacity hover:opacity-100" title="Удалить тег"><Trash2 className="h-3 w-3" /></button>
             </span>
           ))}

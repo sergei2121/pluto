@@ -175,7 +175,7 @@ export const store = {
     const patch: Partial<PlutoState> = {
       devices: (st.devices || []).map((d) => ({ ...d, checking: false, tags: Array.isArray(d.tags) ? d.tags : [], history: Array.isArray(d.history) ? d.history : [] })),
       agents: (st.agents || []).map(safeAgent),
-      tags: Array.isArray(st.tags) ? st.tags : [],
+      tags: Array.isArray(st.tags) ? st.tags.map((t) => ({ ...t, visible: typeof t.visible === 'boolean' ? t.visible : true })) : [],
       events: st.events || [],
     };
     if (JSON.stringify(st.settings) !== JSON.stringify(state.settings)) patch.settings = st.settings;
@@ -314,7 +314,7 @@ export const store = {
   },
 
   // ── теги ──
-  async addTag(label: string, color?: string): Promise<string | null> {
+  async addTag(label: string, color?: string, visible: boolean = true): Promise<string | null> {
     const l = (typeof label === 'string' ? label : '').trim();
     if (!l) return 'Укажите название тега';
     if (state.tags.some((t) => t.label.toLowerCase() === l.toLowerCase())) return 'Такой тег уже есть';
@@ -325,9 +325,22 @@ export const store = {
       await syncAll();
       return null;
     }
-    set({ tags: [...state.tags, { id: uid('tg'), label: l, color: c }] });
+    set({ tags: [...state.tags, { id: uid('tg'), label: l, color: c, visible }] });
     get().pushEvent('info', 'system', `Создан тег «${l}»`);
     return null;
+  },
+
+  async toggleTagVisibility(id: string): Promise<void> {
+    const tag = state.tags.find((t) => t.id === id);
+    if (!tag) return;
+    const newVisible = !tag.visible;
+    if (getState().apiMode === 'server') {
+      const { api } = await import('./api');
+      await api.updateTag(id, { visible: newVisible });
+      await syncAll();
+    } else {
+      set({ tags: state.tags.map((t) => t.id === id ? { ...t, visible: newVisible } : t) });
+    }
   },
 
   async removeTag(id: string): Promise<void> {
