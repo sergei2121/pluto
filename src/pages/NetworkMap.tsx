@@ -22,7 +22,8 @@ function buildGraph(devices: Device[], agents: Agent[]) {
     const st = pingStats(a.targets);
     const leaves: LeafNode[] = [];
     for (const t of a.targets) {
-      for (const r of t.results) {
+      const results = Array.isArray(t.results) ? t.results : [];
+      for (const r of results) {
         leaves.push({ 
           key: `${a.id}:${r.ip}`, 
           label: r.ip, 

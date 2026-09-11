@@ -172,12 +172,13 @@ export function embedHash(pass: string): string {
 }
 
 /** Агрегированная ping-статистика агента по всем его целям. */
-export function pingStats(targets: { results: { alive: boolean; latency: number | null }[] }[]): {
+export function pingStats(targets: { results?: { alive: boolean; latency: number | null }[] }[]): {
   total: number; online: number; offline: number; avg: number | null; max: number | null;
 } {
   let total = 0, online = 0, sum = 0, cnt = 0, max: number | null = null;
   for (const t of targets) {
-    for (const r of t.results) {
+    const results = Array.isArray(t.results) ? t.results : [];
+    for (const r of results) {
       total++;
       if (r.alive) {
         online++;
