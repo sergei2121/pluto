@@ -8,7 +8,7 @@ import { useMemo, useState } from 'react';
 import { store, useCurrentUser, usePluto, visibleAgents, visibleDevices } from '../lib/store';
 import { cls, fmtMs, pingStats } from '../lib/util';
 import type { Agent, Device, Tag } from '../lib/types';
-import { Wifi, WifiOff, Globe, ChevronDown, Filter, Activity, Network, Zap, Server, Monitor, X, ExternalLink, Layers } from 'lucide-react';
+import { Wifi, WifiOff, Globe, ChevronDown, Filter, Activity, Network, Zap, Server, Monitor, X, ExternalLink, Layers, Gauge } from 'lucide-react';
 
 interface RangeNode {
   name: string;
