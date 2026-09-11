@@ -191,24 +191,30 @@ const DeviceRow = memo(function DeviceRow({ d, isAdmin, onEdit }: { d: Device; i
 
 export default function Devices() {
   const user = useCurrentUser();
-  const devices = usePluto((s) => visibleDevices(s, user));
+  const plutoState = usePluto((s) => s);
+  const allDevices = usePluto((s) => visibleDevices(s, user));
+  const tags = usePluto((s) => s.tags);
   const routeParam = usePluto((s) => s.routeParam);
   const isAdmin = user?.role === 'admin';
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'down' | 'degraded'>('all');
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [modal, setModal] = useState<{ open: boolean; initial: Device | null }>({ open: false, initial: null });
 
   useEffect(() => { if (routeParam === 'down') setStatusFilter('down'); if (routeParam === 'new') setModal({ open: true, initial: null }); }, [routeParam]);
 
+  const visibleTags = useMemo(() => tags.filter((t) => t.visible), [tags]);
+
   const list = useMemo(() => {
     const query = typeof q === 'string' ? q.trim().toLowerCase() : '';
-    return devices.filter((d) => {
+    return allDevices.filter((d) => {
       if (statusFilter !== 'all' && d.status !== statusFilter) return false;
+      if (selectedTag && !d.tags.includes(selectedTag)) return false;
       if (query && !d.name.toLowerCase().includes(query) && !d.address.toLowerCase().includes(query)) return false;
       return true;
     });
-  }, [devices, q, statusFilter]);
+  }, [allDevices, q, statusFilter, selectedTag]);
 
   const pageCount = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount - 1);
@@ -220,7 +226,7 @@ export default function Devices() {
       <Panel title={`Устройства · ${list.length}`} icon={<Plus className="h-4 w-4" />}
         right={isAdmin ? (
           <div className="flex items-center gap-2">
-            <ClearAllButton count={devices.length} />
+            <ClearAllButton count={allDevices.length} />
             <button onClick={() => setModal({ open: true, initial: null })} className="btn-acc"><Plus className="h-4 w-4" />Добавить</button>
           </div>
         ) : undefined}>
@@ -237,12 +243,27 @@ export default function Devices() {
               </button>
             ))}
           </div>
+          {visibleTags.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button onClick={() => setSelectedTag(null)}
+                className={cls('rounded-full border px-3 py-1.5 text-[11.5px] font-semibold transition-all', selectedTag === null ? 'bg-vio/25 text-ink border-vio/40' : 'border-line bg-raised/50 text-mut hover:text-ink')}>
+                Все
+              </button>
+              {visibleTags.map((t) => (
+                <button key={t.id} onClick={() => setSelectedTag(selectedTag === t.id ? null : t.id)}
+                  className={cls('rounded-full border px-3 py-1.5 text-[11.5px] font-semibold transition-all', selectedTag === t.id ? 'text-void' : 'text-mut hover:text-ink')}
+                  style={{ borderColor: t.color, background: selectedTag === t.id ? t.color : 'transparent' }}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {list.length === 0 ? (
-          <EmptyState icon={<Search className="h-6 w-6" />} title={devices.length ? 'Ничего не найдено' : 'Устройств пока нет'}
-            text={devices.length ? 'Попробуйте другой запрос или сбросьте фильтры.' : 'Добавьте первое устройство — PING, HTTP, API, RTSP или SIP.'}
-            action={isAdmin && !devices.length ? (
+          <EmptyState icon={<Search className="h-6 w-6" />} title={allDevices.length ? 'Ничего не найдено' : 'Устройств пока нет'}
+            text={allDevices.length ? 'Попробуйте другой запрос или сбросьте фильтры.' : 'Добавьте первое устройство — PING, HTTP, API, RTSP или SIP.'}
+            action={isAdmin && !allDevices.length ? (
               <button onClick={() => setModal({ open: true, initial: null })} className="rounded-lg border border-vio/50 bg-vio/20 px-4 py-2 text-[13px] font-bold text-ink transition-all hover:bg-vio/30">Добавить устройство</button>
             ) : undefined} />
         ) : (

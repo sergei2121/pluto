@@ -85,6 +85,7 @@ export const api = {
 
   addTag: (label: string, color: string) => req<Tag>('POST', '/api/tags', { label, color }),
   deleteTag: (id: string) => req<{ ok: boolean }>('DELETE', `/api/tags/${id}`),
+  updateTag: (id: string, patch: Partial<Tag>) => req<Tag>('PATCH', `/api/tags/${id}`, patch),
 
   saveSettings: (s: Settings) => req<Settings>('PUT', '/api/settings', s),
   restartShowcase: () => req<{ ok: boolean; port: number }>('POST', '/api/showcase/restart'),
