@@ -63,7 +63,7 @@ export interface RelayTargetResult {
   name?: string; // кастомное имя группы
   range?: string; // диапазон IP
   lastCheck: number;
-  results: RelayPingResult[];
+  results?: RelayPingResult[];
 }
 
 // ─── Телеметрия Glances ──────────────────────────────────────────────────────
