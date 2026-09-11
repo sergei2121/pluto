@@ -1,4 +1,3 @@
-// ─── PLUTO: корень приложения ────────────────────────────────────────────────
 import { useEffect, useState } from 'react';
 import { Orbit } from 'lucide-react';
 import { getState, store, useCurrentUser, usePluto } from './lib/store';
@@ -10,7 +9,6 @@ import Devices from './pages/Devices';
 import Agents from './pages/Agents';
 import AgentPings from './pages/AgentPings';
 import Stats from './pages/Stats';
-import Topology from './pages/Topology';
 import NetworkMapEditor from './pages/NetworkMapEditor';
 import Sla from './pages/Sla';
 import SettingsPage from './pages/Settings';
@@ -80,8 +78,6 @@ export default function App() {
       {page === 'devices' && <Devices key={`dev-${user.id}`} />}
       {page === 'agents' && <Agents key={`ag-${user.id}`} />}
       {page === 'agent-pings' && <AgentPings key={`ap-${user.id}`} />}
-      {page === 'topology-map' && <Topology key={`map-${user.id}`} />}
-      {page === 'topology-summary' && <Topology key={`top-${user.id}`} />}
       {page === 'network-map' && <NetworkMapEditor key={`netmap-${user.id}`} />}
       {page === 'stats-bars' && <Stats key="stats-bars" mode="bars" />}
       {page === 'stats-ws' && <Stats key="stats-ws" mode="ws" />}

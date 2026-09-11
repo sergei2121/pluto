@@ -4,7 +4,7 @@ export type DeviceType = 'ping' | 'http' | 'api' | 'rtsp' | 'sip' | 'snmp' | 'ss
 export type DeviceStatus = 'up' | 'down' | 'degraded' | 'unknown';
 export type Route =
   | 'dashboard' | 'devices' | 'agents' | 'agent-pings' 
-  | 'topology' | 'topology-map' | 'topology-summary' | 'network-map'
+  | 'network-map'
   | 'stats-bars' | 'stats-ws' | 'sla' | 'settings' | 'deploy' | 'showcase';
 export type Severity = 'ok' | 'warn' | 'crit' | 'info';
 export type Role = 'admin' | 'viewer';
@@ -296,7 +296,7 @@ export const MENU_ITEMS: { route: Route; label: string; adminOnly?: boolean }[] 
   { route: 'devices', label: 'Устройства' },
   { route: 'agents', label: 'Агенты' },
   { route: 'agent-pings', label: 'Пинги агентов' },
-  { route: 'topology', label: 'Топология' },
+  { route: 'network-map', label: 'Карта сети' },
   { route: 'stats-bars', label: 'Статистика Bars' },
   { route: 'stats-ws', label: 'Статистика WS' },
   { route: 'sla', label: 'SLA-отчёт' },
