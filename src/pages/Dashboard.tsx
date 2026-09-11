@@ -135,7 +135,6 @@ function Onboarding() {
   const steps = [
     { icon: <Server className="h-4 w-4" />, title: 'Добавьте устройство', text: 'PING, HTTP, API, RTSP или SIP — с тегами, интервалом и диапазоном IP.', act: () => store.nav('devices', 'new'), label: 'Добавить устройство' },
     { icon: <Monitor className="h-4 w-4" />, title: 'Поставьте relay на ПК', text: 'pluto-relay пингует устройства, доступные только этой машине (NAT/VLAN).', act: () => store.nav('agents', 'new'), label: 'Добавить агента' },
-    { icon: <LayoutGrid className="h-4 w-4" />, title: 'Соберите витрину', text: 'Публичный статус без входа — на отдельном порту, только список.', act: () => store.nav('showcase'), label: 'Открыть витрину' },
     { icon: <Rocket className="h-4 w-4" />, title: 'Разверните ядро', text: 'docker compose up -d --build на Ubuntu; консоль подключится сама.', act: () => store.nav('deploy'), label: 'Инструкция' },
   ];
   return (

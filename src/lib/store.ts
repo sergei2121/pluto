@@ -45,7 +45,6 @@ function defaultSettings(): Settings {
       push: { enabled: false },
       on: { down: true, degraded: true, recover: true, agentOff: true, agentOn: false, threshold: true },
     },
-    showcase: { port: 8081, fullscreen: false },
   };
 }
 
@@ -238,12 +237,6 @@ export const store = {
     const d = state.devices.find((x) => x.id === id);
     if (!d) return;
     void store.updateDevice(id, { favorite: !d.favorite });
-  },
-
-  toggleDeviceShowcase(id: string) {
-    const d = state.devices.find((x) => x.id === id);
-    if (!d) return;
-    void store.updateDevice(id, { showcase: !d.showcase });
   },
 
   // ── агенты ──

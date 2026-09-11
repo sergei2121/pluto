@@ -5,7 +5,7 @@ export type DeviceStatus = 'up' | 'down' | 'degraded' | 'unknown';
 export type Route =
   | 'dashboard' | 'devices' | 'agents' | 'agent-pings' 
   | 'network-map'
-  | 'stats-bars' | 'stats-ws' | 'sla' | 'settings' | 'deploy' | 'showcase';
+  | 'stats-bars' | 'stats-ws' | 'sla' | 'settings' | 'deploy';
 export type Severity = 'ok' | 'warn' | 'crit' | 'info';
 export type Role = 'admin' | 'viewer';
 
@@ -31,7 +31,6 @@ export interface Device {
   interval: number; // сек
   tags: string[];
   favorite: boolean;
-  showcase: boolean; // показывать на публичной витрине
   status: DeviceStatus;
   latency: number | null; // мс, null = нет ответа
   baseline: number | null; // скользящая базовая задержка
@@ -275,7 +274,6 @@ export interface Settings {
     push: { enabled: boolean };
     on: { down: boolean; degraded: boolean; recover: boolean; agentOff: boolean; agentOn: boolean; threshold: boolean };
   };
-  showcase: { port: number; fullscreen: boolean }; // fullscreen — дежурный ТВ-режим
 }
 
 export const DEVICE_TYPE_META: Record<DeviceType, { label: string; desc: string }> = {
