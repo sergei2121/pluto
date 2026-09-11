@@ -7,10 +7,10 @@ import { cls, fmtMs, pingStats } from '../lib/util';
 import type { Agent } from '../lib/types';
 
 const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
-  const allTargets = a.targets;
+  const allTargets = Array.isArray(a.targets) ? a.targets : [];
   
   // Считаем общую статистику по всем целям
-  const allResults = allTargets.flatMap((t) => t.results ?? []);
+  const allResults = allTargets.flatMap((t) => (Array.isArray(t.results) ? t.results : []));
   const st = pingStats(allResults);
   
   const onFav = () => store.toggleAgentPingsFav(a.id);
@@ -52,9 +52,9 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
       ) : (
         <div className="mt-3 space-y-3">
           {allTargets.map((target) => {
-            const targetStats = pingStats(target.results ?? []);
+            const targetStats = pingStats(Array.isArray(target.results) ? target.results : []);
             const displayName = target.name || target.target || target.range || 'Без имени';
-            const hasResults = (target.results?.length ?? 0) > 0;
+            const hasResults = Array.isArray(target.results) && target.results.length > 0;
             
             return (
               <div key={target.target || displayName} className="rounded-lg border border-line/40 bg-raised/30">
@@ -75,7 +75,7 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
                 {/* Список устройств в подгруппе */}
                 {hasResults ? (
                   <div className="max-h-40 space-y-1 overflow-y-auto scroll-thin p-2">
-                    {(target.results ?? []).map((r) => (
+                    {target.results.map((r) => (
                       <div key={r.ip} className="flex items-center justify-between rounded border border-line/40 bg-panel/50 px-2.5 py-1.5 transition-colors hover:bg-raised/60">
                         <span className="flex items-center gap-2 font-mono text-[11.5px] text-mut">
                           {r.alive ? <Wifi className="h-3.5 w-3.5 text-ok" /> : <WifiOff className="h-3.5 w-3.5 text-crit" />}{r.ip}
@@ -111,13 +111,24 @@ export default function AgentPings() {
     const query = typeof q === 'string' ? q.trim().toLowerCase() : '';
     return agents.filter((a) => {
       if (query && !a.name.toLowerCase().includes(query) && !a.ip.includes(query)) return false;
-      if (onlyIssues && pingStats(a.targets.flatMap(t => t.results ?? [])).offline === 0) return false;
+      const targetsList = Array.isArray(a.targets) ? a.targets : [];
+      const allResults = targetsList.flatMap(t => Array.isArray(t.results) ? t.results : []);
+      if (onlyIssues && pingStats(allResults).offline === 0) return false;
       return true;
     });
   }, [agents, q, onlyIssues]);
 
-  const totalDevices = useMemo(() => agents.reduce((acc, a) => acc + pingStats(a.targets.flatMap(t => t.results ?? [])).total, 0), [agents]);
-  const totalOnline = useMemo(() => agents.reduce((acc, a) => acc + pingStats(a.targets.flatMap(t => t.results ?? [])).online, 0), [agents]);
+  const totalDevices = useMemo(() => agents.reduce((acc, a) => {
+    const targetsList = Array.isArray(a.targets) ? a.targets : [];
+    const allResults = targetsList.flatMap(t => Array.isArray(t.results) ? t.results : []);
+    return acc + pingStats(allResults).total;
+  }, 0), [agents]);
+  
+  const totalOnline = useMemo(() => agents.reduce((acc, a) => {
+    const targetsList = Array.isArray(a.targets) ? a.targets : [];
+    const allResults = targetsList.flatMap(t => Array.isArray(t.results) ? t.results : []);
+    return acc + pingStats(allResults).online;
+  }, 0), [agents]);
 
   return (
     <div className="space-y-4">
