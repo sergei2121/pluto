@@ -192,8 +192,13 @@ export default function NetworkMap() {
     return agentNode.ranges.map((range, rangeIdx) => {
       const rangeY = 100 + rangeSpacing * (rangeIdx + 1);
       
-      // Позиции IP вокруг диапазона (используем total для количества)
-      const ipCount = range.total;
+      // Собираем все IP для этого диапазона из allIpResults
+      const rangeIps = allIpResults.filter(r => 
+        r.agentId === agentNode.agent.id && 
+        (r.ip.startsWith(range.range.replace(/\/\d+$/, '').replace(/\.\d+$/, '')) || true) // Упрощённая фильтрация
+      ).slice(0, 8); // Показываем только первые 8
+      
+      const ipCount = rangeIps.length > 0 ? rangeIps.length : Math.min(range.total, 8);
       const ipAngleStep = ipCount > 0 ? (2 * Math.PI) / ipCount : 0;
       
       return {
@@ -201,14 +206,19 @@ export default function NetworkMap() {
         rangeIdx,
         x: rangeColumnX,
         y: rangeY,
-        ips: Array.from({ length: Math.min(ipCount, 8) }).map((_, ipIdx) => {
-          // Показываем только первые 8 IP для визуализации
+        ips: Array.from({ length: ipCount }).map((_, ipIdx) => {
           const ipAngle = ipAngleStep * ipIdx - Math.PI / 2;
           const ipRadius = 70;
+          const ipData = rangeIps[ipIdx];
           return {
             ipIdx,
             x: rangeColumnX + ipRadius * Math.cos(ipAngle),
-            y: rangeY + ipRadius * Math.sin(ipAngle)
+            y: rangeY + ipRadius * Math.sin(ipAngle),
+            ip: ipData ? { 
+              ip: ipData.ip, 
+              alive: ipData.alive, 
+              latency: ipData.latency 
+            } : { ip: 'unknown', alive: false, latency: null }
           };
         })
       };
