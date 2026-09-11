@@ -2,7 +2,7 @@
 import { memo, useMemo, useState } from 'react';
 import { Crosshair, Star, Eye, RefreshCw, Search, Wifi, WifiOff, Activity, LayoutGrid } from 'lucide-react';
 import { Panel, StatusDot, EmptyState, TimeAgo } from '../components/ui';
-import { store, useCurrentUser, usePluto, useToasts, visibleAgents } from '../lib/store';
+import { store, useCurrentUser, usePluto, useToasts, agentsWithPings } from '../lib/store';
 import { cls, fmtMs, pingStats } from '../lib/util';
 import type { Agent } from '../lib/types';
 
@@ -68,7 +68,7 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
 
 export default function AgentPings() {
   const user = useCurrentUser();
-  const agents = usePluto((s) => visibleAgents(s, user));
+  const agents = usePluto((s) => agentsWithPings(s, user));
   const [q, setQ] = useState('');
   const [onlyIssues, setOnlyIssues] = useState(false);
 
