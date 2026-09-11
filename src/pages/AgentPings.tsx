@@ -7,8 +7,12 @@ import { cls, fmtMs, pingStats } from '../lib/util';
 import type { Agent } from '../lib/types';
 
 const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
-  const st = pingStats(a.targets);
-  const all = a.targets.flatMap((t) => t.results);
+  const allTargets = a.targets;
+  
+  // Считаем общую статистику по всем целям
+  const allResults = allTargets.flatMap((t) => t.results);
+  const st = pingStats(allResults);
+  
   const onFav = () => store.toggleAgentPingsFav(a.id);
   const onShowcase = () => store.toggleAgentPingsShowcase(a.id);
   const onPoll = () => { void store.pollAgentNow(a.id); useToasts.push('info', `Опрашиваю «${a.name}»…`); };
@@ -43,18 +47,49 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
         <div className="rounded-lg border border-line/60 bg-raised/40 py-2"><div className="font-mono text-[17px] font-bold text-blu">{st.avg != null ? st.avg : '—'}</div><div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">ср. мс</div></div>
       </div>
 
-      {st.total === 0 ? (
+      {allTargets.length === 0 || allResults.length === 0 ? (
         <p className="mt-3 text-[12px] text-dim">Цели не заданы или ещё не опрошены. Добавьте IP/диапазоны в «Агенты → Изменить».</p>
       ) : (
-        <div className="mt-3 max-h-56 space-y-1 overflow-y-auto scroll-thin">
-          {all.map((r) => (
-            <div key={r.ip} className="flex items-center justify-between rounded border border-line/40 bg-raised/30 px-2.5 py-1.5 transition-colors hover:bg-raised/60">
-              <span className="flex items-center gap-2 font-mono text-[11.5px] text-mut">
-                {r.alive ? <Wifi className="h-3.5 w-3.5 text-ok" /> : <WifiOff className="h-3.5 w-3.5 text-crit" />}{r.ip}
-              </span>
-              <span className={cls('font-mono text-[11.5px] font-semibold', r.alive ? 'text-ok' : 'text-crit')}>{r.alive ? `${r.latency ?? 0} мс` : 'нет ответа'}</span>
-            </div>
-          ))}
+        <div className="mt-3 space-y-3">
+          {allTargets.map((target) => {
+            const targetStats = pingStats(target.results);
+            const displayName = target.name || target.target || target.range || 'Без имени';
+            const hasResults = target.results.length > 0;
+            
+            return (
+              <div key={target.target || displayName} className="rounded-lg border border-line/40 bg-raised/30">
+                {/* Заголовок подгруппы */}
+                <div className="flex items-center justify-between border-b border-line/30 bg-raised/50 px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <LayoutGrid className="h-3.5 w-3.5 text-mut" />
+                    <span className="font-mono text-[12px] font-bold text-ink">{displayName}</span>
+                    {target.range && <span className="font-mono text-[10px] text-dim">({target.range})</span>}
+                  </div>
+                  <div className="flex items-center gap-2 font-mono text-[10.5px]">
+                    <span className={cls(targetStats.offline > 0 ? 'text-crit' : 'text-ok')}>
+                      {targetStats.online}/{targetStats.total}
+                    </span>
+                  </div>
+                </div>
+                
+                {/* Список устройств в подгруппе */}
+                {hasResults ? (
+                  <div className="max-h-40 space-y-1 overflow-y-auto scroll-thin p-2">
+                    {target.results.map((r) => (
+                      <div key={r.ip} className="flex items-center justify-between rounded border border-line/40 bg-panel/50 px-2.5 py-1.5 transition-colors hover:bg-raised/60">
+                        <span className="flex items-center gap-2 font-mono text-[11.5px] text-mut">
+                          {r.alive ? <Wifi className="h-3.5 w-3.5 text-ok" /> : <WifiOff className="h-3.5 w-3.5 text-crit" />}{r.ip}
+                        </span>
+                        <span className={cls('font-mono text-[11.5px] font-semibold', r.alive ? 'text-ok' : 'text-crit')}>{r.alive ? `${r.latency ?? 0} мс` : 'нет ответа'}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="p-3 text-[11.5px] text-dim">Нет данных</p>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -76,13 +111,13 @@ export default function AgentPings() {
     const query = typeof q === 'string' ? q.trim().toLowerCase() : '';
     return agents.filter((a) => {
       if (query && !a.name.toLowerCase().includes(query) && !a.ip.includes(query)) return false;
-      if (onlyIssues && pingStats(a.targets).offline === 0) return false;
+      if (onlyIssues && pingStats(a.targets.flatMap(t => t.results)).offline === 0) return false;
       return true;
     });
   }, [agents, q, onlyIssues]);
 
-  const totalDevices = useMemo(() => agents.reduce((acc, a) => acc + pingStats(a.targets).total, 0), [agents]);
-  const totalOnline = useMemo(() => agents.reduce((acc, a) => acc + pingStats(a.targets).online, 0), [agents]);
+  const totalDevices = useMemo(() => agents.reduce((acc, a) => acc + pingStats(a.targets.flatMap(t => t.results)).total, 0), [agents]);
+  const totalOnline = useMemo(() => agents.reduce((acc, a) => acc + pingStats(a.targets.flatMap(t => t.results)).online, 0), [agents]);
 
   return (
     <div className="space-y-4">
