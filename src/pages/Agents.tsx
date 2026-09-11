@@ -220,6 +220,18 @@ function AgentDrawer({ id, onClose, onEdit }: { id: string; onClose: () => void;
               ))}
             </div>
           ) : <p className="text-[12px] text-dim">Нет данных о дисках</p>}
+          {(g?.diskRead != null || g?.diskWrite != null) && (
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="rounded-lg border border-line/60 bg-raised/40 p-2">
+                <div className="text-[9px] font-bold uppercase tracking-wider text-dim">Чтение диска</div>
+                <div className="font-mono text-[14px] font-bold text-blu">{g.diskRead != null ? `${Math.round(g.diskRead)} КБ/с` : '—'}</div>
+              </div>
+              <div className="rounded-lg border border-line/60 bg-raised/40 p-2">
+                <div className="text-[9px] font-bold uppercase tracking-wider text-dim">Запись диска</div>
+                <div className="font-mono text-[14px] font-bold text-purp">{g.diskWrite != null ? `${Math.round(g.diskWrite)} КБ/с` : '—'}</div>
+              </div>
+            </div>
+          )}
         </Panel>
 
         <Panel title="Сеть · адаптеры" icon={<Network className="h-4 w-4" />}>
