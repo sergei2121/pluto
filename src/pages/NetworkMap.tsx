@@ -192,8 +192,8 @@ export default function NetworkMap() {
     return agentNode.ranges.map((range, rangeIdx) => {
       const rangeY = 100 + rangeSpacing * (rangeIdx + 1);
       
-      // Позиции IP вокруг диапазона
-      const ipCount = range.ips.length;
+      // Позиции IP вокруг диапазона (используем total для количества)
+      const ipCount = range.total;
       const ipAngleStep = ipCount > 0 ? (2 * Math.PI) / ipCount : 0;
       
       return {
@@ -201,11 +201,11 @@ export default function NetworkMap() {
         rangeIdx,
         x: rangeColumnX,
         y: rangeY,
-        ips: range.ips.map((ip, ipIdx) => {
+        ips: Array.from({ length: Math.min(ipCount, 8) }).map((_, ipIdx) => {
+          // Показываем только первые 8 IP для визуализации
           const ipAngle = ipAngleStep * ipIdx - Math.PI / 2;
           const ipRadius = 70;
           return {
-            ip,
             ipIdx,
             x: rangeColumnX + ipRadius * Math.cos(ipAngle),
             y: rangeY + ipRadius * Math.sin(ipAngle)
@@ -258,15 +258,19 @@ export default function NetworkMap() {
   const allIpResults = useMemo(() => {
     const results: Array<{ ip: string; alive: boolean; latency: number | null; agentName: string; agentId: string }> = [];
     for (const agent of agentHierarchy) {
-      for (const range of agent.ranges) {
-        for (const ip of range.ips) {
-          results.push({
-            ip: ip.ip,
-            alive: ip.alive,
-            latency: ip.latency,
-            agentName: agent.agent.name,
-            agentId: agent.agent.id
-          });
+      for (const rangeNode of agent.ranges) {
+        // Находим соответствующий target в агенте для получения результатов
+        const target = agent.agent.targets.find(t => t.range === rangeNode.range || t.target === rangeNode.name);
+        if (target && target.results) {
+          for (const ip of target.results) {
+            results.push({
+              ip: ip.ip,
+              alive: ip.alive,
+              latency: ip.latency,
+              agentName: agent.agent.name,
+              agentId: agent.agent.id
+            });
+          }
         }
       }
     }
@@ -614,7 +618,7 @@ export default function NetworkMap() {
                             <ellipse
                               cx={rp.x}
                               cy={rp.y}
-                              rx={Math.min(40, 24 + rp.range.ips.length * 3)}
+                              rx={Math.min(40, 24 + rp.range.total * 3)}
                               ry="24"
                               fill={rp.range.online > 0 ? '#3b82f625' : '#ef444425'}
                               stroke={rp.range.online > 0 ? '#3b82f6' : '#ef4444'}
@@ -628,7 +632,7 @@ export default function NetworkMap() {
                               textAnchor="middle" 
                               className="fill-ink text-[8px] font-semibold"
                             >
-                              {rp.range.ips.length}
+                              {rp.range.total}
                             </text>
                           </g>
                           
