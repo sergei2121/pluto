@@ -177,7 +177,7 @@ function glancesFromApi(data) {
   const fsArr = Array.isArray(data.fs) ? data.fs : [];
   const mainFs = fsArr.find((f) => f.mnt_point === '/' || /^[A-Za-z]:\\?$/.test(f.mnt_point || '')) || fsArr[0] || null;
   
-  // DISK I/O: суммарная скорость чтения/записи по всем дискам (КБ/с)
+  // DISK I/O: суммарная скорость чтения/записи по всем дискам (Rps/Wps - операции в секунду)
   let diskRead = 0;
   let diskWrite = 0;
   if (Array.isArray(data.diskio) && data.diskio.length > 0) {
@@ -209,8 +209,8 @@ function glancesFromApi(data) {
     sensors: sensors.map((s) => ({ label: s.label, value: Math.round(s.value * 10) / 10, unit: s.unit || '', kind: s.type || '' })),
     uptimeSec: data.uptime ? parseUptime(data.uptime) : null,
     mainFsUsed: mainFs && mainFs.percent != null ? Math.round(mainFs.percent * 10) / 10 : null,
-    diskRead: diskRead > 0 ? Math.round((diskRead / 1024) * 10) / 10 : null, // КБ/с
-    diskWrite: diskWrite > 0 ? Math.round((diskWrite / 1024) * 10) / 10 : null, // КБ/с
+    diskRead: diskRead > 0 ? Math.round(diskRead * 10) / 10 : null, // Rps (ops/s)
+    diskWrite: diskWrite > 0 ? Math.round(diskWrite * 10) / 10 : null, // Wps (ops/s)
   };
 }
 

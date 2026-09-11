@@ -224,11 +224,11 @@ function AgentDrawer({ id, onClose, onEdit }: { id: string; onClose: () => void;
             <div className="mt-3 grid grid-cols-2 gap-2">
               <div className="rounded-lg border border-line/60 bg-raised/40 p-2">
                 <div className="text-[9px] font-bold uppercase tracking-wider text-dim">Чтение диска</div>
-                <div className="font-mono text-[14px] font-bold text-blu">{g.diskRead != null ? `${Math.round(g.diskRead)} КБ/с` : '—'}</div>
+                <div className="font-mono text-[14px] font-bold text-blu">{g.diskRead != null ? `${Math.round(g.diskRead)} Rps` : '—'}</div>
               </div>
               <div className="rounded-lg border border-line/60 bg-raised/40 p-2">
                 <div className="text-[9px] font-bold uppercase tracking-wider text-dim">Запись диска</div>
-                <div className="font-mono text-[14px] font-bold text-purp">{g.diskWrite != null ? `${Math.round(g.diskWrite)} КБ/с` : '—'}</div>
+                <div className="font-mono text-[14px] font-bold text-purp">{g.diskWrite != null ? `${Math.round(g.diskWrite)} Wps` : '—'}</div>
               </div>
             </div>
           )}

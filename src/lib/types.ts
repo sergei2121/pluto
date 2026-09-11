@@ -77,8 +77,8 @@ export interface GlancesPoint {
   cput: number | null; // температура CPU, °C
   ssdt: number | null; // температура SSD, °C
   diskUsed: number | null; // заполненность основной ФС, %
-  diskRead: number | null; // скорость чтения диска, КБ/с
-  diskWrite: number | null; // скорость записи диска, КБ/с
+  diskRead: number | null; // скорость чтения диска, Rps (reads per second)
+  diskWrite: number | null; // скорость записи диска, Wps (writes per second)
 }
 
 export interface GlancesDisk { mnt: string; percent: number | null; usedGB: number | null; sizeGB: number | null; }
@@ -108,8 +108,8 @@ export interface GlancesSnapshot {
   sensors: GlancesSensor[]; // все доступные температуры/вентиляторы
   uptimeSec: number | null;
   via: string; // api4 | api3
-  diskRead: number | null; // скорость чтения, КБ/с
-  diskWrite: number | null; // скорость записи, КБ/с
+  diskRead: number | null; // скорость чтения, Rps (reads per second)
+  diskWrite: number | null; // скорость записи, Wps (writes per second)
 }
 
 /** Период для статистики. */
