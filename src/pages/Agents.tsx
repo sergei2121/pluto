@@ -319,22 +319,25 @@ function AgentDrawer({ id, onClose, onEdit }: { id: string; onClose: () => void;
             <p className="text-[12px] text-dim">Цели не заданы. Добавьте IP/диапазоны в «Изменить» и укажите адрес relay.</p>
           ) : (
             <div className="space-y-3">
-              {a.targets.map((t) => (
-                <div key={t.target}>
-                  <div className="mb-1 flex items-center justify-between font-mono text-[11px] text-dim">
-                    <span>{t.target} · {t.results.length} устр.</span>
-                    <TimeAgo ts={t.lastCheck} />
+              {a.targets.map((t) => {
+                const results = Array.isArray(t.results) ? t.results : [];
+                return (
+                  <div key={t.target}>
+                    <div className="mb-1 flex items-center justify-between font-mono text-[11px] text-dim">
+                      <span>{t.target} · {results.length} устр.</span>
+                      <TimeAgo ts={t.lastCheck} />
+                    </div>
+                    <div className="max-h-40 space-y-1 overflow-y-auto scroll-thin">
+                      {results.map((r) => (
+                        <div key={r.ip} className="flex items-center justify-between rounded border border-line/40 bg-raised/30 px-2.5 py-1">
+                          <span className="flex items-center gap-2 font-mono text-[11.5px] text-mut"><StatusDot status={r.alive ? 'up' : 'down'} pulse={false} />{r.ip}</span>
+                          <span className={cls('font-mono text-[11.5px]', r.alive ? 'text-ok' : 'text-crit')}>{r.alive ? `${r.latency ?? 0} мс` : 'нет ответа'}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="max-h-40 space-y-1 overflow-y-auto scroll-thin">
-                    {t.results.map((r) => (
-                      <div key={r.ip} className="flex items-center justify-between rounded border border-line/40 bg-raised/30 px-2.5 py-1">
-                        <span className="flex items-center gap-2 font-mono text-[11.5px] text-mut"><StatusDot status={r.alive ? 'up' : 'down'} pulse={false} />{r.ip}</span>
-                        <span className={cls('font-mono text-[11.5px]', r.alive ? 'text-ok' : 'text-crit')}>{r.alive ? `${r.latency ?? 0} мс` : 'нет ответа'}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </Panel>
