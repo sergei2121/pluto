@@ -1,14 +1,16 @@
-// ─── PLUTO: Карта сети v5.0.0 ────────────────────────────────────────────────
+// ─── PLUTO: Карта сети v5.1.0 ────────────────────────────────────────────────
 // Автоматическая визуализация топологии сети
 // Структура: PLUTO → Агенты → Диапазоны пинга → IP пинга
 // Отдельная карта: Устройства прямого пинга из PLUTO
 // Значок "GL" для агентов с мониторингом Glances
+// Интерактивные подсказки по клику с детальной информацией
+// Цветовая кодировка агентов по тегам
 
 import { useMemo, useState } from 'react';
 import { store, useCurrentUser, usePluto, visibleAgents, visibleDevices } from '../lib/store';
 import { cls, fmtMs, pingStats } from '../lib/util';
 import type { Agent, Device, Tag } from '../lib/types';
-import { Wifi, WifiOff, Globe, ChevronDown, Filter, Activity, Network, Zap, Server, Monitor, Cpu, Radio, Gauge } from 'lucide-react';
+import { Wifi, WifiOff, Globe, ChevronDown, Filter, Activity, Network, Zap, Server, Monitor, Cpu, Radio, Gauge, X, ExternalLink, Clock, TrendingUp } from 'lucide-react';
 
 interface IpNode {
   ip: string;
@@ -36,6 +38,17 @@ interface AgentNode {
 interface DirectDeviceNode {
   device: Device;
   subnet: string;
+}
+
+interface SelectedNode {
+  type: 'agent' | 'ip' | 'direct';
+  agent?: Agent;
+  ip?: string;
+  alive?: boolean;
+  latency?: number | null;
+  device?: Device;
+  x: number;
+  y: number;
 }
 
 function buildAgentHierarchy(agents: Agent[]): AgentNode[] {
@@ -95,6 +108,7 @@ export default function NetworkMap() {
   const [selectedTag, setSelectedTag] = useState<string>('all');
   const [showTagFilter, setShowTagFilter] = useState(false);
   const [activeTab, setActiveTab] = useState<'agents' | 'direct'>('agents');
+  const [selectedNode, setSelectedNode] = useState<SelectedNode | null>(null);
 
   const agents = useMemo(() => {
     if (selectedTag === 'all') return allAgents;
@@ -107,6 +121,13 @@ export default function NetworkMap() {
 
   const getTagObj = (id: string) => tags.find(t => t.id === id);
   const selectedTagObj = selectedTag !== 'all' ? getTagObj(selectedTag) : null;
+
+  // Получаем цвет тега для агента (первый тег или дефолтный)
+  const getAgentColor = (agent: Agent) => {
+    if (agent.tags.length === 0) return '#7c3aed'; // фиолетовый по умолчанию
+    const tag = getTagObj(agent.tags[0]);
+    return tag ? tag.color : '#7c3aed';
+  };
 
   // Размеры холста
   const W = 1600, H = 900;
@@ -408,7 +429,7 @@ export default function NetworkMap() {
                     {a.online && (
                       <circle r="3" fill="#22c55e" opacity="0.6">
                         <animateMotion 
-                          dur="2s" 
+                          dur="6s" 
                           repeatCount="indefinite"
                           path={`M ${cx} ${cy} L ${a.x} ${a.y}`}
                         />
@@ -444,9 +465,13 @@ export default function NetworkMap() {
                   return (
                     <g key={a.agent.id}>
                       {/* Узел агента - шестиугольник */}
-                      <g 
+                      <g
                         className="transition-all duration-300 hover:scale-110 cursor-pointer"
                         filter="url(#nodeShadow)"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedNode({ type: 'agent', agent: a.agent, x: a.x, y: a.y });
+                        }}
                       >
                         <rect
                           x={a.x - 24}
@@ -456,7 +481,7 @@ export default function NetworkMap() {
                           rx="12"
                           ry="12"
                           fill={a.online ? '#22c55e25' : '#ef444425'}
-                          stroke={a.online ? '#22c55e' : '#ef4444'}
+                          stroke={getAgentColor(a.agent)}
                           strokeWidth="2.5"
                         >
                           <title>{`${a.agent.name}\n${a.online ? 'Онлайн' : 'Офлайн'}\nДиапазонов: ${rangeCount}\nIP целей: ${a.totalIps}\nОнлайн: ${a.onlineIps}${a.hasGlances ? '\nGL: активен' : ''}`}</title>
