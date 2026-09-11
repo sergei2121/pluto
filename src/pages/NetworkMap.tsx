@@ -1,28 +1,18 @@
-// ─── PLUTO: Карта сети v5.2.0 ────────────────────────────────────────────────
-// Автоматическая визуализация топологии сети
-// Структура: PLUTO → Агенты → Диапазоны пинга → IP пинга
-// Отдельная карта: Устройства прямого пинга из PLUTO
-// Значок "GL" для агентов с мониторингом Glances
-// Интерактивные подсказки по клику с детальной информацией
-// Цветовая кодировка агентов по тегам
-// Модальные окна с подробной информацией об узлах
+// ─── PLUTO: Карта сети v6.0.0 ────────────────────────────────────────────────
+// Упрощенная схема сети для лучшей читаемости
+// Структура: PLUTO → Агенты → Диапазоны (сводно)
+// Без отображения отдельных IP адресов
+// Акцент на статусах и общей статистике
 
 import { useMemo, useState } from 'react';
 import { store, useCurrentUser, usePluto, visibleAgents, visibleDevices } from '../lib/store';
 import { cls, fmtMs, pingStats } from '../lib/util';
 import type { Agent, Device, Tag } from '../lib/types';
-import { Wifi, WifiOff, Globe, ChevronDown, Filter, Activity, Network, Zap, Server, Monitor, Cpu, Radio, Gauge, X, ExternalLink, Clock, TrendingUp } from 'lucide-react';
-
-interface IpNode {
-  ip: string;
-  alive: boolean;
-  latency: number | null;
-}
+import { Wifi, WifiOff, Globe, ChevronDown, Filter, Activity, Network, Zap, Server, Monitor, X, ExternalLink, Layers } from 'lucide-react';
 
 interface RangeNode {
   name: string;
   range: string;
-  ips: IpNode[];
   online: number;
   total: number;
 }
@@ -42,11 +32,8 @@ interface DirectDeviceNode {
 }
 
 interface SelectedNode {
-  type: 'agent' | 'ip' | 'direct';
+  type: 'agent' | 'direct';
   agent?: Agent;
-  ip?: string;
-  alive?: boolean;
-  latency?: number | null;
   device?: Device;
   x: number;
   y: number;
@@ -56,21 +43,14 @@ function buildAgentHierarchy(agents: Agent[]): AgentNode[] {
   return agents.map((a) => {
     const hasGlances = a.glancesUrl && a.glancesUrl.trim() !== '';
     
-    // Строим иерархию: Агент → Диапазоны → IP
+    // Строим иерархию: Агент → Диапазоны (без детализации IP)
     const ranges: RangeNode[] = a.targets.map((t) => {
       const results = Array.isArray(t.results) ? t.results : [];
-      const ips: IpNode[] = results.map(r => ({
-        ip: r.ip,
-        alive: r.alive,
-        latency: r.latency
-      }));
-      
       const onlineCount = results.filter(r => r.alive).length;
       
       return {
         name: t.name || t.target,
         range: t.range || t.target,
-        ips,
         online: onlineCount,
         total: results.length
       };
