@@ -430,4 +430,9 @@ export function visibleAgents(s: PlutoState, user: User | null): Agent[] {
   return user.menuScope.includes('agents') ? s.agents : [];
 }
 
+/** Агенты с активными ping-целями (для страницы "Пинги агентов"). */
+export function agentsWithPings(s: PlutoState, user: User | null): Agent[] {
+  return visibleAgents(s, user).filter((a) => a.targets && a.targets.length > 0);
+}
+
 export const FAVORITES_LIMIT = 15;
