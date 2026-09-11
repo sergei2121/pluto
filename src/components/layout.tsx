@@ -156,7 +156,6 @@ const TITLES: Record<Route, string> = {
   sla: 'SLA-отчёт · доступность',
   settings: 'Настройки системы',
   deploy: 'Развёртывание и документация',
-  showcase: 'Публичная витрина',
 };
 
 function Clock() {

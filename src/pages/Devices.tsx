@@ -52,7 +52,7 @@ function DeviceModal({ open, initial, onClose }: { open: boolean; initial: Devic
       const lo = Math.min(a, b), hi = Math.max(a, b);
       if (hi - lo > 253) return setErr('Не более 254 адресов в диапазоне');
       for (let i = lo; i <= hi; i++) {
-        await store.addDevice({ name: `${name.trim() || 'PING'} ${base}.${i}`, type: 'ping', address: `${base}.${i}`, interval, tags: selTags, favorite: false, showcase: false, port: null, path: '', method: null, body: null });
+        await store.addDevice({ name: `${name.trim() || 'PING'} ${base}.${i}`, type: 'ping', address: `${base}.${i}`, interval, tags: selTags, favorite: false, port: null, path: '', method: null, body: null });
       }
       useToasts.push('ok', `Добавлено устройств: ${hi - lo + 1}`);
       onClose();
@@ -63,7 +63,7 @@ function DeviceModal({ open, initial, onClose }: { open: boolean; initial: Devic
     if (initial) {
       await store.updateDevice(initial.id, { name: name.trim(), type, address: address.trim(), interval, tags: selTags });
     } else {
-      await store.addDevice({ name: name.trim(), type, address: address.trim(), interval, tags: selTags, favorite: false, showcase: false, port: null, path: '', method: null, body: null });
+      await store.addDevice({ name: name.trim(), type, address: address.trim(), interval, tags: selTags, favorite: false, port: null, path: '', method: null, body: null });
     }
     onClose();
   };
@@ -181,7 +181,6 @@ const DeviceRow = memo(function DeviceRow({ d, isAdmin, onEdit }: { d: Device; i
         <div className="flex items-center justify-end gap-0.5">
           <button onClick={() => void forceCheck(d.id)} title="Проверить сейчас" className="rounded-md p-1.5 text-dim transition-colors hover:bg-raised hover:text-vio"><RefreshCw className={cls('h-3.5 w-3.5', d.checking && 'animate-spin')} /></button>
           <button onClick={() => store.toggleDeviceFav(d.id)} title="В избранное" className={cls('rounded-md p-1.5 transition-all', d.favorite ? 'text-warn' : 'text-dim/40 hover:text-dim')}><Star className={cls('h-3.5 w-3.5', d.favorite && 'fill-warn')} /></button>
-          <button onClick={() => store.toggleDeviceShowcase(d.id)} title="На витрину" className={cls('rounded-md p-1.5 transition-all', d.showcase ? 'text-mint' : 'text-dim/40 hover:text-dim')}><LayoutGrid className="h-3.5 w-3.5" /></button>
           {isAdmin && <button onClick={() => onEdit(d)} title="Изменить" className="rounded-md p-1.5 text-dim transition-colors hover:bg-raised hover:text-ink"><Pencil className="h-3.5 w-3.5" /></button>}
           {isAdmin && <button onClick={() => { if (window.confirm(`Удалить «${d.name}»?`)) void store.removeDevice(d.id); }} title="Удалить" className="rounded-md p-1.5 text-dim transition-colors hover:bg-raised hover:text-crit"><Trash2 className="h-3.5 w-3.5" /></button>}
         </div>

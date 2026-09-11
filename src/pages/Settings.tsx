@@ -149,7 +149,7 @@ function NotifyTab() {
   );
 }
 
-/** Пункты меню, которые можно разрешить наблюдателю (settings/showcase — только admin). */
+/** Пункты меню, которые можно разрешить наблюдателю (settings — только admin). */
 const MENU_GRANTS: { route: Route; label: string }[] = [
   { route: 'dashboard', label: 'Главная' },
   { route: 'devices', label: 'Устройства' },
