@@ -2,7 +2,7 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   LayoutDashboard, Server, Monitor, Crosshair, BarChart3, Waves, LayoutGrid, Settings as SettingsIcon,
-  Radio, LogOut, Search, X, AlertTriangle, Bell, Check, Orbit, Network, FileBarChart, Map,
+  Radio, LogOut, Search, X, AlertTriangle, Bell, Check, Orbit, FileBarChart, Map,
 } from 'lucide-react';
 import { cls, fmtClock, CONSOLE_VERSION } from '../lib/util';
 import { store, useCurrentUser, usePluto, useToastList, useToasts, visibleAgents, visibleDevices } from '../lib/store';
@@ -52,11 +52,6 @@ const NAV: { route: Route; label: string; icon: ReactNode; adminOnly?: boolean }
   { route: 'devices', label: 'Устройства', icon: <Server className="h-[17px] w-[17px]" /> },
   { route: 'agents', label: 'Агенты', icon: <Monitor className="h-[17px] w-[17px]" /> },
   { route: 'agent-pings', label: 'Пинги агентов', icon: <Crosshair className="h-[17px] w-[17px]" /> },
-  { 
-    route: 'topology-map', 
-    label: 'Топология', 
-    icon: <Network className="h-[17px] w-[17px]" />
-  },
   { 
     route: 'network-map', 
     label: 'Карта сети', 
@@ -155,10 +150,7 @@ const TITLES: Record<Route, string> = {
   devices: 'Устройства',
   agents: 'Агенты и локальные сети',
   'agent-pings': 'Пинги агентов · локальные устройства',
-  topology: 'Топология сети',
-  'topology-map': 'Карта сети',
-  'topology-summary': 'Сводка топологии',
-  'network-map': 'Редактор карты сети',
+  'network-map': 'Карта сети',
   'stats-bars': 'Статистика Bars · Glances',
   'stats-ws': 'Статистика WS · Glances',
   sla: 'SLA-отчёт · доступность',
