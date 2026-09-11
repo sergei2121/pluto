@@ -1,10 +1,11 @@
-// ─── PLUTO: Карта сети v5.1.0 ────────────────────────────────────────────────
+// ─── PLUTO: Карта сети v5.2.0 ────────────────────────────────────────────────
 // Автоматическая визуализация топологии сети
 // Структура: PLUTO → Агенты → Диапазоны пинга → IP пинга
 // Отдельная карта: Устройства прямого пинга из PLUTO
 // Значок "GL" для агентов с мониторингом Glances
 // Интерактивные подсказки по клику с детальной информацией
 // Цветовая кодировка агентов по тегам
+// Модальные окна с подробной информацией об узлах
 
 import { useMemo, useState } from 'react';
 import { store, useCurrentUser, usePluto, visibleAgents, visibleDevices } from '../lib/store';
@@ -129,6 +130,49 @@ export default function NetworkMap() {
     return tag ? tag.color : '#7c3aed';
   };
 
+  // Функция для форматирования истории пингов в виде графика/статистики
+  const renderPingHistory = (history: number[], fails: number) => {
+    if (!history || history.length === 0) return <div className="text-dim text-[11px]">Нет данных</div>;
+    
+    const last100 = history.slice(-100);
+    const online = last100.filter(v => v >= 0).length;
+    const offline = last100.filter(v => v < 0).length;
+    const avgLatency = online > 0 
+      ? Math.round(last100.filter(v => v >= 0).reduce((a, b) => a + b, 0) / online) 
+      : null;
+    
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between text-[11px]">
+          <span className="text-dim">Последние 100 проверок:</span>
+          <span className="text-ok">{online} онлайн</span>
+          <span className="text-crit">{offline} офлайн</span>
+        </div>
+        {avgLatency && (
+          <div className="flex items-center gap-1.5 text-[11px] text-mut">
+            <TrendingUp className="h-3 w-3" />
+            <span>Средняя задержка: <strong className="text-ink">{avgLatency} мс</strong></span>
+          </div>
+        )}
+        {/* Визуализация истории в виде мини-графика */}
+        <div className="flex gap-0.5 h-8 items-end mt-2 overflow-hidden">
+          {last100.map((val, idx) => (
+            <div
+              key={idx}
+              className="flex-1 min-w-[2px] rounded-t"
+              style={{
+                height: val >= 0 ? `${Math.min(100, Math.max(10, (val / 200) * 100))}%` : '4px',
+                backgroundColor: val >= 0 ? '#22c55e' : '#ef4444',
+                opacity: 0.6 + (idx / last100.length) * 0.4
+              }}
+              title={val >= 0 ? `${val} мс` : 'Офлайн'}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   // Размеры холста
   const W = 1600, H = 900;
   const cx = W / 2, cy = H / 2 - 50;
@@ -244,7 +288,7 @@ export default function NetworkMap() {
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-vio/15 border border-vio/30">
                 <Network className="h-5 w-5 text-vio" />
               </div>
-              Карта сети v5.0.0
+              Карта сети v5.2.0
             </h2>
             <p className="text-[11.5px] text-dim mt-1.5">
               автоматическая визуализация топологии{selectedTagObj && ` · тег: ${selectedTagObj.label}`}
@@ -589,6 +633,10 @@ export default function NetworkMap() {
                                 <g 
                                   key={`${a.agent.id}-${rangeIdx}-${ip.ip}`}
                                   className="transition-all duration-300 hover:scale-125 cursor-pointer"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedNode({ type: 'ip', ip: ip.ip, alive: ip.alive, latency: ip.latency, x: ipX, y: ipY });
+                                  }}
                                 >
                                   {/* Линия от диапазона к IP */}
                                   <line
@@ -673,6 +721,10 @@ export default function NetworkMap() {
                     key={`direct-${pos.device.id}`}
                     className="transition-all duration-300 hover:scale-125 cursor-pointer"
                     filter="url(#nodeShadow)"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedNode({ type: 'direct', device: pos.device, x: pos.x, y: pos.y });
+                    }}
                   >
                     <circle
                       cx={pos.x}
@@ -739,6 +791,243 @@ export default function NetworkMap() {
             )}
           </svg>
         </div>
+
+        {/* Модальное окно с информацией о выбранном узле */}
+        {selectedNode && (
+          <div 
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+            onClick={() => setSelectedNode(null)}
+          >
+            <div 
+              className="relative max-w-md w-full mx-4 rounded-2xl border border-line bg-panel shadow-2xl overflow-hidden rise"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                left: selectedNode.x > W / 2 ? `calc(50% - ${W - selectedNode.x}px)` : `calc(50% + ${selectedNode.x}px)`,
+                top: selectedNode.y > H / 2 ? `calc(50% - ${H - selectedNode.y}px)` : `calc(50% + ${selectedNode.y}px)`,
+                transform: 'translate(-50%, -50%)'
+              }}
+            >
+              {/* Заголовок модального окна */}
+              <div className="flex items-center justify-between p-4 border-b border-line bg-gradient-to-r from-vio/10 to-transparent">
+                <div className="flex items-center gap-2.5">
+                  {selectedNode.type === 'agent' && (
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ backgroundColor: `${getAgentColor(selectedNode.agent!)}25` }}>
+                      <Server className="h-5 w-5" style={{ color: getAgentColor(selectedNode.agent!) }} />
+                    </div>
+                  )}
+                  {selectedNode.type === 'ip' && (
+                    <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${selectedNode.alive ? 'bg-ok/20' : 'bg-crit/20'}`}>
+                      <Activity className={`h-5 w-5 ${selectedNode.alive ? 'text-ok' : 'text-crit'}`} />
+                    </div>
+                  )}
+                  {selectedNode.type === 'direct' && (
+                    <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${selectedNode.device?.status === 'up' ? 'bg-ok/20' : 'bg-crit/20'}`}>
+                      <Monitor className={`h-5 w-5 ${selectedNode.device?.status === 'up' ? 'text-ok' : 'text-crit'}`} />
+                    </div>
+                  )}
+                  <div>
+                    <h3 className="font-display text-[14px] font-bold text-ink">
+                      {selectedNode.type === 'agent' && selectedNode.agent?.name}
+                      {selectedNode.type === 'ip' && selectedNode.ip}
+                      {selectedNode.type === 'direct' && selectedNode.device?.name}
+                    </h3>
+                    <p className="text-[10.5px] text-dim">
+                      {selectedNode.type === 'agent' && 'Агент мониторинга'}
+                      {selectedNode.type === 'ip' && (selectedNode.alive ? 'Онлайн' : 'Офлайн')}
+                      {selectedNode.type === 'direct' && 'Устройство прямого пинга'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setSelectedNode(null)}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg bg-raised/50 text-dim hover:text-ink hover:bg-raised transition-all"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Содержимое модального окна */}
+              <div className="p-4 space-y-4">
+                {/* Информация об агенте */}
+                {selectedNode.type === 'agent' && selectedNode.agent && (
+                  <>
+                    <div className="rounded-xl border border-line bg-raised/30 p-3.5">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Globe className="h-4 w-4 text-blu" />
+                        <span className="text-[11px] uppercase tracking-[0.1em] text-dim">IP адрес агента</span>
+                      </div>
+                      <div className="text-[15px] font-mono font-semibold text-ink">{selectedNode.agent.address}</div>
+                    </div>
+
+                    {/* Теги агента */}
+                    {selectedNode.agent.tags.length > 0 && (
+                      <div className="rounded-xl border border-line bg-raised/30 p-3.5">
+                        <div className="flex items-center gap-2 mb-2.5">
+                          <Filter className="h-4 w-4 text-vio" />
+                          <span className="text-[11px] uppercase tracking-[0.1em] text-dim">Теги</span>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {selectedNode.agent.tags.map(tagId => {
+                            const tag = getTagObj(tagId);
+                            return tag ? (
+                              <a
+                                key={tag.id}
+                                href={`/?view=devices&tag=${tag.id}`}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all hover:scale-105"
+                                style={{ backgroundColor: `${tag.color}20`, color: tag.color, borderColor: `${tag.color}40`, borderWidth: '1px' }}
+                                onClick={(e) => { e.stopPropagation(); }}
+                              >
+                                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: tag.color }} />
+                                {tag.label}
+                              </a>
+                            ) : null;
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Glances мониторинг */}
+                    {selectedNode.agent.glancesUrl && selectedNode.agent.glancesUrl.trim() !== '' && (
+                      <div className="rounded-xl border border-line bg-gradient-to-br from-vio/10 to-vio/5 p-3.5">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <Gauge className="h-4 w-4 text-vio" />
+                            <span className="text-[11px] uppercase tracking-[0.1em] text-dim">Glances мониторинг</span>
+                          </div>
+                          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-ok/20">
+                            <span className="h-2 w-2 rounded-full bg-ok animate-pulse" />
+                          </span>
+                        </div>
+                        <a
+                          href={selectedNode.agent.glancesUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center justify-between gap-2 rounded-lg bg-panel/50 px-3 py-2.5 text-[12px] text-vio hover:bg-vio/15 transition-all group"
+                        >
+                          <span className="truncate">{selectedNode.agent.glancesUrl}</span>
+                          <ExternalLink className="h-3.5 w-3.5 opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+                        </a>
+                      </div>
+                    )}
+
+                    {/* Статистика агента */}
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="rounded-xl border border-line bg-raised/30 p-3 text-center">
+                        <div className="text-[18px] font-bold text-blu">{selectedNode.agent.targets.reduce((sum, t) => sum + (Array.isArray(t.results) ? t.results.length : 0), 0)}</div>
+                        <div className="text-[9px] uppercase tracking-[0.1em] text-dim mt-0.5">IP целей</div>
+                      </div>
+                      <div className="rounded-xl border border-line bg-raised/30 p-3 text-center">
+                        <div className="text-[18px] font-bold text-ok">
+                          {selectedNode.agent.targets.reduce((sum, t) => sum + (Array.isArray(t.results) ? t.results.filter(r => r.alive).length : 0), 0)}
+                        </div>
+                        <div className="text-[9px] uppercase tracking-[0.1em] text-dim mt-0.5">Онлайн</div>
+                      </div>
+                      <div className="rounded-xl border border-line bg-raised/30 p-3 text-center">
+                        <div className="text-[18px] font-bold text-crit">
+                          {selectedNode.agent.targets.reduce((sum, t) => sum + (Array.isArray(t.results) ? t.results.filter(r => !r.alive).length : 0), 0)}
+                        </div>
+                        <div className="text-[9px] uppercase tracking-[0.1em] text-dim mt-0.5">Офлайн</div>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Информация об IP */}
+                {selectedNode.type === 'ip' && (
+                  <>
+                    <div className="rounded-xl border border-line bg-raised/30 p-3.5">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Activity className={`h-4 w-4 ${selectedNode.alive ? 'text-ok' : 'text-crit'}`} />
+                        <span className="text-[11px] uppercase tracking-[0.1em] text-dim">Статус</span>
+                      </div>
+                      <div className={`text-[16px] font-semibold ${selectedNode.alive ? 'text-ok' : 'text-crit'}`}>
+                        {selectedNode.alive ? '● Онлайн' : '● Офлайн'}
+                      </div>
+                      {selectedNode.latency != null && (
+                        <div className="mt-2 text-[13px] text-mut">
+                          Задержка: <strong className="text-ink">{selectedNode.latency} мс</strong>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* История пингов для IP */}
+                    <div className="rounded-xl border border-line bg-raised/30 p-3.5">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Clock className="h-4 w-4 text-blu" />
+                        <span className="text-[11px] uppercase tracking-[0.1em] text-dim">История пингов</span>
+                      </div>
+                      {renderPingHistory([], 0)}
+                    </div>
+                  </>
+                )}
+
+                {/* Информация об устройстве прямого пинга */}
+                {selectedNode.type === 'direct' && selectedNode.device && (
+                  <>
+                    <div className="rounded-xl border border-line bg-raised/30 p-3.5">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Monitor className={`h-4 w-4 ${selectedNode.device.status === 'up' ? 'text-ok' : 'text-crit'}`} />
+                        <span className="text-[11px] uppercase tracking-[0.1em] text-dim">Статус</span>
+                      </div>
+                      <div className={`text-[16px] font-semibold ${selectedNode.device.status === 'up' ? 'text-ok' : 'text-crit'}`}>
+                        {selectedNode.device.status === 'up' ? '● Онлайн' : '● Офлайн'}
+                      </div>
+                      {selectedNode.device.latency != null && (
+                        <div className="mt-2 text-[13px] text-mut">
+                          Задержка: <strong className="text-ink">{selectedNode.device.latency} мс</strong>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="rounded-xl border border-line bg-raised/30 p-3.5">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Globe className="h-4 w-4 text-blu" />
+                        <span className="text-[11px] uppercase tracking-[0.1em] text-dim">IP адрес</span>
+                      </div>
+                      <div className="text-[15px] font-mono font-semibold text-ink">{selectedNode.device.address}</div>
+                    </div>
+
+                    {/* Теги устройства */}
+                    {selectedNode.device.tags.length > 0 && (
+                      <div className="rounded-xl border border-line bg-raised/30 p-3.5">
+                        <div className="flex items-center gap-2 mb-2.5">
+                          <Filter className="h-4 w-4 text-vio" />
+                          <span className="text-[11px] uppercase tracking-[0.1em] text-dim">Теги</span>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {selectedNode.device.tags.map(tagId => {
+                            const tag = getTagObj(tagId);
+                            return tag ? (
+                              <a
+                                key={tag.id}
+                                href={`/?view=devices&tag=${tag.id}`}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all hover:scale-105"
+                                style={{ backgroundColor: `${tag.color}20`, color: tag.color, borderColor: `${tag.color}40`, borderWidth: '1px' }}
+                                onClick={(e) => { e.stopPropagation(); }}
+                              >
+                                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: tag.color }} />
+                                {tag.label}
+                              </a>
+                            ) : null;
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* История пингов для устройства */}
+                    <div className="rounded-xl border border-line bg-raised/30 p-3.5">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Clock className="h-4 w-4 text-blu" />
+                        <span className="text-[11px] uppercase tracking-[0.1em] text-dim">История пингов</span>
+                      </div>
+                      {renderPingHistory(selectedNode.device.history || [], selectedNode.device.fails || 0)}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Легенда */}
         <div className="mt-6 flex flex-wrap justify-center gap-3 text-[10.5px] text-dim">
