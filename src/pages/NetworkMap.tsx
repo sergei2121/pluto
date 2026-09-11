@@ -258,15 +258,20 @@ export default function NetworkMap() {
   const allIpResults = useMemo(() => {
     const results: Array<{ ip: string; alive: boolean; latency: number | null; agentName: string; agentId: string }> = [];
     for (const agent of agentHierarchy) {
+      if (!agent.agent || !agent.agent.targets) continue;
+      
       for (const rangeNode of agent.ranges) {
         // Находим соответствующий target в агенте для получения результатов
         const target = agent.agent.targets.find(t => t.range === rangeNode.range || t.target === rangeNode.name);
         if (target && target.results) {
           for (const ip of target.results) {
+            // Защита от undefined/null элементов
+            if (!ip || typeof ip.alive === 'undefined') continue;
+            
             results.push({
-              ip: ip.ip,
-              alive: ip.alive,
-              latency: ip.latency,
+              ip: ip.ip || 'unknown',
+              alive: ip.alive === true,
+              latency: ip.latency ?? null,
               agentName: agent.agent.name,
               agentId: agent.agent.id
             });
