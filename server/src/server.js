@@ -177,15 +177,16 @@ function glancesFromApi(data) {
   const fsArr = Array.isArray(data.fs) ? data.fs : [];
   const mainFs = fsArr.find((f) => f.mnt_point === '/' || /^[A-Za-z]:\\?$/.test(f.mnt_point || '')) || fsArr[0] || null;
   
-  // DISK I/O: суммарная скорость чтения/записи по всем дискам (Rps/Wps - операции в секунду)
+  // DISK I/O: суммарная скорость чтения/записи по всем дискам
+  // Поддерживаем разные форматы полей: read_count/write_count, Rps/Wps, R/s/W/s
   let diskRead = 0;
   let diskWrite = 0;
   if (Array.isArray(data.diskio) && data.diskio.length > 0) {
     for (const d of data.diskio) {
-      if (d.read_count != null && d.write_count != null) {
-        diskRead += (d.read_count || 0);
-        diskWrite += (d.write_count || 0);
-      }
+      const r = d.read_count ?? d.Rps ?? d['R/s'] ?? 0;
+      const w = d.write_count ?? d.Wps ?? d['W/s'] ?? 0;
+      diskRead += r;
+      diskWrite += w;
     }
   }
 
