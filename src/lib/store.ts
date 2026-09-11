@@ -314,20 +314,36 @@ export const store = {
   },
 
   // ── теги ──
-  async addTag(label: string, color?: string): Promise<string | null> {
+  async addTag(label: string, color?: string, visible = true): Promise<string | null> {
     const l = (typeof label === 'string' ? label : '').trim();
     if (!l) return 'Укажите название тега';
     if (state.tags.some((t) => t.label.toLowerCase() === l.toLowerCase())) return 'Такой тег уже есть';
     const c = color || TAG_COLORS[state.tags.length % TAG_COLORS.length];
     if (getState().apiMode === 'server') {
       const { api } = await import('./api');
-      await api.addTag(l, c);
+      await api.addTag(l, c, visible);
       await syncAll();
       return null;
     }
-    set({ tags: [...state.tags, { id: uid('tg'), label: l, color: c }] });
+    set({ tags: [...state.tags, { id: uid('tg'), label: l, color: c, visible }] });
     get().pushEvent('info', 'system', `Создан тег «${l}»`);
     return null;
+  },
+
+  async updateTag(id: string, patch: Partial<Tag>): Promise<void> {
+    if (getState().apiMode === 'server') {
+      const { api } = await import('./api');
+      await api.updateTag(id, patch);
+      await syncAll();
+    } else {
+      set({ tags: state.tags.map((t) => (t.id === id ? { ...t, ...patch } : t)) });
+    }
+  },
+
+  async toggleTagVisibility(id: string): Promise<void> {
+    const tag = state.tags.find((t) => t.id === id);
+    if (!tag) return;
+    void store.updateTag(id, { visible: !tag.visible });
   },
 
   async removeTag(id: string): Promise<void> {
@@ -415,6 +431,15 @@ export function visibleDevices(s: PlutoState, user: User | null): Device[] {
   if (!user) return [];
   if (user.role === 'admin') return s.devices;
   return s.devices.filter((d) => user.deviceScope.includes(d.type));
+}
+
+/** Фильтр устройств по видимым тегам (для страницы "Устройства"). */
+export function devicesByVisibleTags(s: PlutoState, devices: Device[]): Device[] {
+  const visibleTagIds = new Set(s.tags.filter((t) => t.visible).map((t) => t.id));
+  // Если нет видимых тегов, показываем все устройства
+  if (visibleTagIds.size === 0) return devices;
+  // Показываем устройства, у которых есть хотя бы один видимый тег, или нет тегов вообще
+  return devices.filter((d) => d.tags.length === 0 || d.tags.some((tagId) => visibleTagIds.has(tagId)));
 }
 
 export function visibleAgents(s: PlutoState, user: User | null): Agent[] {

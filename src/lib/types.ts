@@ -165,6 +165,7 @@ export interface Tag {
   id: string;
   label: string;
   color: string;
+  visible: boolean; // видимость тега на странице "Устройства"
 }
 
 export interface EventItem {

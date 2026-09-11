@@ -83,7 +83,8 @@ export const api = {
     req<{ range: string; retentionDays: number; points: unknown[] }>('GET', `/api/agents/${id}/glances?range=${encodeURIComponent(range)}`),
   testAgentSource: (id: string) => req<SourceTestReport>('GET', `/api/agents/${id}/test-glances`),
 
-  addTag: (label: string, color: string) => req<Tag>('POST', '/api/tags', { label, color }),
+  addTag: (label: string, color: string, visible = true) => req<Tag>('POST', '/api/tags', { label, color, visible }),
+  updateTag: (id: string, patch: Partial<Tag>) => req<Tag>('PATCH', `/api/tags/${id}`, patch),
   deleteTag: (id: string) => req<{ ok: boolean }>('DELETE', `/api/tags/${id}`),
 
   saveSettings: (s: Settings) => req<Settings>('PUT', '/api/settings', s),

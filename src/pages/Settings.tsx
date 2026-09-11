@@ -1,6 +1,6 @@
 // ─── PLUTO: настройки системы ───────────────────────────────────────────────
 import { useEffect, useState } from 'react';
-import { Send, Tag as TagIcon, Bell, Users, Radio, Plus, Trash2, Monitor, Server, Check, Pencil, ShieldCheck, KeyRound, X } from 'lucide-react';
+import { Send, Tag as TagIcon, Bell, Users, Radio, Plus, Trash2, Monitor, Server, Check, Pencil, ShieldCheck, KeyRound, X, Eye, EyeOff } from 'lucide-react';
 import { Panel, Field, Toggle, EmptyState } from '../components/ui';
 import { store, useCurrentUser, usePluto, useToasts } from '../lib/store';
 import { sendTestNotification, requestPushPermission } from '../lib/engine';
@@ -51,11 +51,12 @@ function TagsTab() {
   const tags = usePluto((s) => s.tags);
   const [label, setLabel] = useState('');
   const [color, setColor] = useState(TAG_COLORS[0]);
+  const [visible, setVisible] = useState(true);
 
   const add = async () => {
-    const err = await store.addTag(label, color);
+    const err = await store.addTag(label, color, visible);
     if (err) useToasts.push('warn', err);
-    else setLabel('');
+    else { setLabel(''); setVisible(true); }
   };
 
   return (
@@ -72,6 +73,16 @@ function TagsTab() {
             ))}
           </div>
         </div>
+        <div>
+          <Field label="Видимость на странице «Устройства»">
+            <button onClick={() => setVisible((v) => !v)}
+              className={cls('inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-bold transition-all',
+                visible ? 'border-ok/60 bg-ok/15 text-ok' : 'border-line bg-raised/50 text-dim')}>
+              {visible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+              {visible ? 'Виден' : 'Скрыт'}
+            </button>
+          </Field>
+        </div>
         <button onClick={() => void add()} className="btn-acc"><Plus className="h-4 w-4" />Создать тег</button>
       </div>
 
@@ -82,6 +93,9 @@ function TagsTab() {
           {tags.map((t) => (
             <span key={t.id} className="group inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[12px] font-semibold" style={{ borderColor: t.color, color: t.color }}>
               {t.label}
+              <button onClick={() => void store.toggleTagVisibility(t.id)} className="opacity-50 transition-opacity hover:opacity-100" title={t.visible ? 'Скрыть на странице устройств' : 'Показать на странице устройств'}>
+                {t.visible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+              </button>
               <button onClick={() => void store.removeTag(t.id)} className="opacity-50 transition-opacity hover:opacity-100" title="Удалить тег"><Trash2 className="h-3 w-3" /></button>
             </span>
           ))}
