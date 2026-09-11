@@ -436,8 +436,9 @@ async function pollAgent(agent) {
       const ips = expandTargets(rangeStr);
       const results = await relayPing(agent, ips);
       if (results.length) anyOk = true;
-      const prev = (agent.targets || []).find((t) => t.target === (tgt.target || rangeStr));
-      out.push({ target: targetName || rangeStr, name: targetName, range: rangeStr, lastCheck: now, results: results.length ? results : (prev?.results || []) });
+      // Ищем предыдущие результаты по range или имени цели
+      const prev = (agent.targets || []).find((t) => t.range === rangeStr || t.target === rangeStr || t.name === targetName);
+      out.push({ target: targetName || rangeStr, name: targetName, range: rangeStr, lastCheck: now, results: results.length ? results : (Array.isArray(prev?.results) ? prev.results : []) });
     }
     if (anyOk) agent.targets = out;
   }
