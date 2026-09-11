@@ -77,6 +77,8 @@ export interface GlancesPoint {
   cput: number | null; // температура CPU, °C
   ssdt: number | null; // температура SSD, °C
   diskUsed: number | null; // заполненность основной ФС, %
+  diskRead: number | null; // скорость чтения диска, КБ/с
+  diskWrite: number | null; // скорость записи диска, КБ/с
 }
 
 export interface GlancesDisk { mnt: string; percent: number | null; usedGB: number | null; sizeGB: number | null; }
@@ -106,6 +108,8 @@ export interface GlancesSnapshot {
   sensors: GlancesSensor[]; // все доступные температуры/вентиляторы
   uptimeSec: number | null;
   via: string; // api4 | api3
+  diskRead: number | null; // скорость чтения, КБ/с
+  diskWrite: number | null; // скорость записи, КБ/с
 }
 
 /** Период для статистики. */
@@ -173,7 +177,7 @@ export interface EventItem {
 
 /** Метрика, по которой можно строить порог. */
 export type AlertMetric =
-  | 'cpu' | 'gpu' | 'ram' | 'cput' | 'ssdt' | 'diskUsed' | 'swap' | 'load1' // Glances
+  | 'cpu' | 'gpu' | 'ram' | 'cput' | 'ssdt' | 'diskUsed' | 'diskRead' | 'diskWrite' | 'swap' | 'load1' // Glances
   | 'latency' | 'sslDaysLeft'; // устройства
 
 export type AlertOp = 'gt' | 'lt' | 'gte' | 'lte';
