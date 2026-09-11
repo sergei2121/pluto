@@ -110,11 +110,18 @@ export default function NetworkMap() {
   const [showTagFilter, setShowTagFilter] = useState(false);
   const [activeTab, setActiveTab] = useState<'agents' | 'direct'>('agents');
   const [selectedNode, setSelectedNode] = useState<SelectedNode | null>(null);
+  const [showOfflineOnly, setShowOfflineOnly] = useState(false);
 
   const agents = useMemo(() => {
-    if (selectedTag === 'all') return allAgents;
-    return allAgents.filter(a => a.tags.includes(selectedTag));
-  }, [allAgents, selectedTag]);
+    let result = allAgents;
+    if (selectedTag !== 'all') {
+      result = result.filter(a => a.tags.includes(selectedTag));
+    }
+    if (showOfflineOnly) {
+      result = result.filter(a => !a.online);
+    }
+    return result;
+  }, [allAgents, selectedTag, showOfflineOnly]);
 
   // Строим иерархии для визуализации
   const agentHierarchy = useMemo(() => buildAgentHierarchy(agents), [agents]);
@@ -177,21 +184,56 @@ export default function NetworkMap() {
   const W = 1600, H = 900;
   const cx = W / 2, cy = H / 2 - 50;
   
-  // Радиусы расположения элементов для карты агентов
-  const hubR = 340;  // Радиус расположения агентов от центра
-  const rangeR = 150;  // Радиус расположения диапазонов от агента
-  const ipR = 80;  // Радиус расположения IP от диапазона
+  // Схема: горизонтальная компоновка
+  // PLUTO ядро слева, агенты в центре, диапазоны и IP справа
+  const plutoX = 150;  // Позиция ядра PLUTO
+  const plutoY = H / 2;
+  const agentColumnX = 450;  // Колонка агентов
+  const rangeColumnX = 800;  // Колонка диапазонов
+  const ipColumnX = 1200;    // Колонка IP адресов
+  
+  const agentSpacing = Math.min(100, (H - 200) / Math.max(1, agentHierarchy.length + 1));
 
-  // Позиции агентов по кругу
+  // Позиции агентов по вертикали в колонке
   const agentPositions = agentHierarchy.map((node, i) => {
-    const ang = (i / Math.max(1, agentHierarchy.length)) * Math.PI * 2 - Math.PI / 2;
     return { 
       ...node, 
-      x: cx + Math.cos(ang) * hubR, 
-      y: cy + Math.sin(ang) * hubR, 
-      angle: ang 
+      x: agentColumnX, 
+      y: 100 + agentSpacing * (i + 1),
+      index: i
     };
   });
+  
+  // Позиции диапазонов и IP для каждого агента
+  const getRangePositions = (agentNode: typeof agentPositions[0]) => {
+    const rangeCount = agentNode.ranges.length;
+    const rangeSpacing = Math.min(80, (H - 150) / Math.max(1, rangeCount + 1));
+    
+    return agentNode.ranges.map((range, rangeIdx) => {
+      const rangeY = 100 + rangeSpacing * (rangeIdx + 1);
+      
+      // Позиции IP вокруг диапазона
+      const ipCount = range.ips.length;
+      const ipAngleStep = ipCount > 0 ? (2 * Math.PI) / ipCount : 0;
+      
+      return {
+        range,
+        rangeIdx,
+        x: rangeColumnX,
+        y: rangeY,
+        ips: range.ips.map((ip, ipIdx) => {
+          const ipAngle = ipAngleStep * ipIdx - Math.PI / 2;
+          const ipRadius = 70;
+          return {
+            ip,
+            ipIdx,
+            x: rangeColumnX + ipRadius * Math.cos(ipAngle),
+            y: rangeY + ipRadius * Math.sin(ipAngle)
+          };
+        })
+      };
+    });
+  };
 
   // Группировка устройств прямого пинга по подсетям
   const directSubnets = useMemo(() => {
@@ -295,6 +337,15 @@ export default function NetworkMap() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {/* Кнопка "Только офлайн" */}
+            <button 
+              onClick={() => setShowOfflineOnly(!showOfflineOnly)}
+              className={`flex items-center gap-2 rounded-xl border px-4 py-2 text-[12px] font-semibold transition-all ${showOfflineOnly ? 'bg-crit/20 border-crit/40 text-crit' : 'border-line bg-raised/50 text-dim hover:text-mut'}`}
+            >
+              <WifiOff className="h-4 w-4" />
+              Только офлайн
+            </button>
+
             {/* Переключатель вкладок */}
             <div className="flex overflow-hidden rounded-xl border border-line bg-raised/50">
               <button
@@ -459,56 +510,55 @@ export default function NetworkMap() {
                   <g key={`agent-line-${a.agent.id}`}>
                     {/* Основная линия */}
                     <line
-                      x1={cx}
-                      y1={cy}
-                      x2={a.x}
+                      x1={plutoX + 40}
+                      y1={plutoY}
+                      x2={a.x - 30}
                       y2={a.y}
                       stroke={a.online ? 'url(#agentLineGradient-online)' : 'url(#agentLineGradient-offline)'}
-                      strokeWidth="3"
+                      strokeWidth="2.5"
                       strokeDasharray={a.online ? 'none' : '6,4'}
                       opacity="0.7"
                       className="transition-all duration-500"
                     />
                     {/* Анимированные точки на линии */}
                     {a.online && (
-                      <circle r="3" fill="#22c55e" opacity="0.6">
+                      <circle r="2.5" fill="#22c55e" opacity="0.6">
                         <animateMotion 
-                          dur="6s" 
+                          dur="4s" 
                           repeatCount="indefinite"
-                          path={`M ${cx} ${cy} L ${a.x} ${a.y}`}
+                          path={`M ${plutoX + 40} ${plutoY} L ${a.x - 30} ${a.y}`}
                         />
                       </circle>
                     )}
                   </g>
                 ))}
 
-                {/* Ядро системы в центре - квадрат со скругленными углами */}
+                {/* Ядро системы PLUTO слева - стилизованное под схему */}
                 <g filter="url(#coreGlow)">
                   <rect 
-                    x={cx - 28} 
-                    y={cy - 28} 
-                    width="56" 
-                    height="56" 
-                    rx="14"
-                    ry="14"
+                    x={plutoX - 40} 
+                    y={plutoY - 40} 
+                    width="80" 
+                    height="80" 
+                    rx="16"
+                    ry="16"
                     fill="url(#coreGradient)" 
                     stroke="#7c3aed" 
                     strokeWidth="3"
                     className="transition-all duration-300 hover:scale-105"
                   />
-                  <Zap className="h-7 w-7 text-vio" x={cx - 14} y={cy - 14} style={{ filter: 'drop-shadow(0 0 8px rgba(124, 58, 237, 0.6))' }} />
+                  <Zap className="h-9 w-9 text-vio" x={plutoX - 18} y={plutoY - 18} style={{ filter: 'drop-shadow(0 0 8px rgba(124, 58, 237, 0.6))' }} />
                 </g>
-                <text x={cx} y={cy + 52} textAnchor="middle" className="fill-ink text-[11px] font-bold tracking-[0.15em]">ЯДРО СИСТЕМЫ</text>
+                <text x={plutoX} y={plutoY + 65} textAnchor="middle" className="fill-ink text-[11px] font-bold tracking-[0.15em]">PLUTO</text>
+                <text x={plutoX} y={plutoY + 78} textAnchor="middle" className="fill-dim text-[8px] tracking-[0.1em]">ЯДРО</text>
 
                 {/* Агенты и их диапазоны с IP */}
                 {agentPositions.map((a) => {
-                  // Вычисляем позиции диапазонов вокруг агента
-                  const rangeCount = a.ranges.length;
-                  const rangeAngleStep = rangeCount > 0 ? (2 * Math.PI) / rangeCount : 0;
+                  const rangePositions = getRangePositions(a);
                   
                   return (
                     <g key={a.agent.id}>
-                      {/* Узел агента - шестиугольник */}
+                      {/* Узел агента - прямоугольник со скругленными углами */}
                       <g
                         className="transition-all duration-300 hover:scale-110 cursor-pointer"
                         filter="url(#nodeShadow)"
@@ -518,23 +568,23 @@ export default function NetworkMap() {
                         }}
                       >
                         <rect
-                          x={a.x - 24}
-                          y={a.y - 24}
-                          width="48"
-                          height="48"
-                          rx="12"
-                          ry="12"
+                          x={a.x - 36}
+                          y={a.y - 28}
+                          width="72"
+                          height="56"
+                          rx="14"
+                          ry="14"
                           fill={a.online ? '#22c55e25' : '#ef444425'}
                           stroke={getAgentColor(a.agent)}
                           strokeWidth="2.5"
                         >
-                          <title>{`${a.agent.name}\n${a.online ? 'Онлайн' : 'Офлайн'}\nДиапазонов: ${rangeCount}\nIP целей: ${a.totalIps}\nОнлайн: ${a.onlineIps}${a.hasGlances ? '\nGL: активен' : ''}`}</title>
+                          <title>{`${a.agent.name}\n${a.online ? 'Онлайн' : 'Офлайн'}\nДиапазонов: ${a.ranges.length}\nIP целей: ${a.totalIps}\nОнлайн: ${a.onlineIps}${a.hasGlances ? '\nGL: активен' : ''}`}</title>
                         </rect>
                         
                         {/* Иконка сервера для агента */}
-                        <Server className="h-6 w-6" 
-                          x={a.x - 12} 
-                          y={a.y - 12}
+                        <Server className="h-7 w-7" 
+                          x={a.x - 14} 
+                          y={a.y - 14}
                           style={{ 
                             color: a.online ? '#22c55e' : '#ef4444',
                             filter: 'drop-shadow(0 0 4px currentColor)'
@@ -543,8 +593,8 @@ export default function NetworkMap() {
                         
                         {/* Значок GL если есть Glances мониторинг */}
                         {a.hasGlances && (
-                          <g transform={`translate(${a.x + 10}, ${a.y - 10})`}>
-                            <circle cx="0" cy="0" r="9" fill="#7c3aed" stroke="#fff" strokeWidth="1.5" />
+                          <g transform={`translate(${a.x + 22}, ${a.y - 14})`}>
+                            <circle cx="0" cy="0" r="10" fill="#7c3aed" stroke="#fff" strokeWidth="1.5" />
                             <text x="0" y="4" textAnchor="middle" className="fill-white text-[8px] font-bold">GL</text>
                           </g>
                         )}
@@ -553,120 +603,105 @@ export default function NetworkMap() {
                       {/* Подпись агента */}
                       <text 
                         x={a.x} 
-                        y={a.y + 46} 
+                        y={a.y + 48} 
                         textAnchor="middle" 
                         className="fill-ink text-[10px] font-semibold"
                         style={{ textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}
                       >
-                        {a.agent.name.length > 16 ? a.agent.name.substring(0, 14) + '..' : a.agent.name}
+                        {a.agent.name.length > 14 ? a.agent.name.substring(0, 12) + '..' : a.agent.name}
                       </text>
 
                       {/* Диапазоны и IP внутри них */}
-                      {a.ranges.map((range, rangeIdx) => {
-                        const rangeAngle = rangeAngleStep * rangeIdx - Math.PI / 2;
-                        const rangeX = a.x + Math.cos(rangeAngle) * rangeR;
-                        const rangeY = a.y + Math.sin(rangeAngle) * rangeR;
-                        
-                        // Позиции IP вокруг диапазона
-                        const ipCount = range.ips.length;
-                        const ipAngleStep = ipCount > 0 ? (2 * Math.PI) / ipCount : 0;
-                        
-                        return (
-                          <g key={`${a.agent.id}-range-${rangeIdx}`}>
-                            {/* Линия от агента к диапазону */}
-                            <line
-                              x1={a.x}
-                              y1={a.y}
-                              x2={rangeX}
-                              y2={rangeY}
-                              stroke="#7c3aed"
-                              strokeWidth="1.5"
-                              strokeDasharray="4,3"
-                              opacity="0.4"
-                            />
-                            
-                            {/* Узел диапазона */}
-                            <g
-                              className="transition-all duration-300 hover:scale-110 cursor-pointer"
-                              filter="url(#nodeShadow)"
+                      {rangePositions.map((rp) => (
+                        <g key={`${a.agent.id}-range-${rp.rangeIdx}`}>
+                          {/* Линия от агента к диапазону */}
+                          <line
+                            x1={a.x + 36}
+                            y1={a.y}
+                            x2={rp.x - 30}
+                            y2={rp.y}
+                            stroke="#7c3aed"
+                            strokeWidth="1.5"
+                            strokeDasharray="4,3"
+                            opacity="0.5"
+                          />
+                          
+                          {/* Узел диапазона */}
+                          <g
+                            className="transition-all duration-300 hover:scale-110 cursor-pointer"
+                            filter="url(#nodeShadow)"
+                          >
+                            <ellipse
+                              cx={rp.x}
+                              cy={rp.y}
+                              rx={Math.min(40, 24 + rp.range.ips.length * 3)}
+                              ry="24"
+                              fill={rp.range.online > 0 ? '#3b82f625' : '#ef444425'}
+                              stroke={rp.range.online > 0 ? '#3b82f6' : '#ef4444'}
+                              strokeWidth="2"
                             >
-                              <circle
-                                cx={rangeX}
-                                cy={rangeY}
-                                r={Math.min(28, 18 + range.ips.length * 2)}
-                                fill={range.online > 0 ? '#3b82f625' : '#ef444425'}
-                                stroke={range.online > 0 ? '#3b82f6' : '#ef4444'}
-                                strokeWidth="2"
-                              >
-                                <title>{`${range.name || range.range}\nДиапазон: ${range.range}\nВсего IP: ${range.total}\nОнлайн: ${range.online}`}</title>
-                              </circle>
-                              <text 
-                                x={rangeX} 
-                                y={rangeY + 4} 
-                                textAnchor="middle" 
-                                className="fill-ink text-[8px] font-semibold"
-                              >
-                                {range.ips.length}
-                              </text>
-                            </g>
-                            
-                            {/* Подпись диапазона */}
+                              <title>{`${rp.range.name || rp.range.range}\nДиапазон: ${rp.range.range}\nВсего IP: ${rp.range.total}\nОнлайн: ${rp.range.online}`}</title>
+                            </ellipse>
                             <text 
-                              x={rangeX} 
-                              y={rangeY + 42} 
+                              x={rp.x} 
+                              y={rp.y + 4} 
                               textAnchor="middle" 
-                              className="fill-mut text-[8px]"
-                              style={{ textShadow: '0 1px 3px rgba(0,0,0,0.5)' }}
+                              className="fill-ink text-[8px] font-semibold"
                             >
-                              {(range.name || range.range).length > 14 
-                                ? (range.name || range.range).substring(0, 12) + '..' 
-                                : (range.name || range.range)}
+                              {rp.range.ips.length}
                             </text>
-                            
-                            {/* IP адреса вокруг диапазона */}
-                            {range.ips.map((ip, ipIdx) => {
-                              const ipAngle = ipAngleStep * ipIdx - Math.PI / 2;
-                              const ipX = rangeX + Math.cos(ipAngle) * ipR;
-                              const ipY = rangeY + Math.sin(ipAngle) * ipR;
-                              
-                              return (
-                                <g 
-                                  key={`${a.agent.id}-${rangeIdx}-${ip.ip}`}
-                                  className="transition-all duration-300 hover:scale-125 cursor-pointer"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedNode({ type: 'ip', ip: ip.ip, alive: ip.alive, latency: ip.latency, x: ipX, y: ipY });
-                                  }}
-                                >
-                                  {/* Линия от диапазона к IP */}
-                                  <line
-                                    x1={rangeX}
-                                    y1={rangeY}
-                                    x2={ipX}
-                                    y2={ipY}
-                                    stroke={ip.alive ? '#22c55e' : '#ef4444'}
-                                    strokeWidth="1"
-                                    opacity="0.4"
-                                  />
-                                  
-                                  {/* Узел IP */}
-                                  <circle
-                                    cx={ipX}
-                                    cy={ipY}
-                                    r="6"
-                                    fill={ip.alive ? '#22c55e35' : '#ef444435'}
-                                    stroke={ip.alive ? '#22c55e' : '#ef4444'}
-                                    strokeWidth="2"
-                                    filter="url(#nodeShadow)"
-                                  >
-                                    <title>{`${ip.ip}\n${ip.alive ? 'Онлайн' : 'Офлайн'}${ip.latency != null ? `\n${ip.latency} мс` : ''}\nДиапазон: ${range.name || range.range}`}</title>
-                                  </circle>
-                                </g>
-                              );
-                            })}
                           </g>
-                        );
-                      })}
+                          
+                          {/* Подпись диапазона */}
+                          <text 
+                            x={rp.x} 
+                            y={rp.y + 40} 
+                            textAnchor="middle" 
+                            className="fill-mut text-[8px]"
+                            style={{ textShadow: '0 1px 3px rgba(0,0,0,0.5)' }}
+                          >
+                            {(rp.range.name || rp.range.range).length > 16 
+                              ? (rp.range.name || rp.range.range).substring(0, 14) + '..' 
+                              : (rp.range.name || rp.range.range)}
+                          </text>
+                          
+                          {/* IP адреса вокруг диапазона */}
+                          {rp.ips.map((ipData) => (
+                            <g 
+                              key={`${a.agent.id}-${rp.rangeIdx}-${ipData.ip.ip}`}
+                              className="transition-all duration-300 hover:scale-125 cursor-pointer"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedNode({ type: 'ip', ip: ipData.ip.ip, alive: ipData.ip.alive, latency: ipData.ip.latency, x: ipData.x, y: ipData.y });
+                              }}
+                            >
+                              {/* Линия от диапазона к IP */}
+                              <line
+                                x1={rp.x}
+                                y1={rp.y}
+                                x2={ipData.x}
+                                y2={ipData.y}
+                                stroke={ipData.ip.alive ? '#22c55e' : '#ef4444'}
+                                strokeWidth="1"
+                                opacity="0.4"
+                              />
+                              
+                              {/* Узел IP */}
+                              <circle
+                                cx={ipData.x}
+                                cy={ipData.y}
+                                r="7"
+                                fill={ipData.ip.alive ? '#22c55e35' : '#ef444435'}
+                                stroke={ipData.ip.alive ? '#22c55e' : '#ef4444'}
+                                strokeWidth="2"
+                                filter="url(#nodeShadow)"
+                              >
+                                <title>{`${ipData.ip.ip}\n${ipData.ip.alive ? 'Онлайн' : 'Офлайн'}${ipData.ip.latency != null ? `\n${ipData.ip.latency} мс` : ''}\nДиапазон: ${rp.range.name || rp.range.range}`}</title>
+                              </circle>
+                            </g>
+                          ))}
+                        </g>
+                      ))}
                     </g>
                   );
                 })}
@@ -1051,8 +1086,14 @@ export default function NetworkMap() {
             <div className="h-4 w-4 rounded bg-vio/30 border-2 border-vio flex items-center justify-center">
               <Zap className="h-2.5 w-2.5 text-vio" />
             </div>
-            <span>Ядро системы</span>
+            <span>Ядро PLUTO</span>
           </div>
+          {showOfflineOnly && (
+            <div className="flex items-center gap-2.5 rounded-lg bg-crit/15 px-3.5 py-2 border border-crit/30 shadow-sm">
+              <WifiOff className="h-3.5 w-3.5 text-crit" />
+              <span className="text-crit font-semibold">Режим: только офлайн</span>
+            </div>
+          )}
         </div>
 
         {agentHierarchy.length === 0 && (
@@ -1061,10 +1102,20 @@ export default function NetworkMap() {
               <Network className="h-10 w-10 text-dim opacity-40" />
             </div>
             <p className="text-[13.5px] text-dim">
-              {selectedTag !== 'all' 
-                ? `Агентов с тегом "${selectedTagObj?.label}" не найдено.` 
-                : 'Агентов пока нет — добавьте их на странице «Агенты».'}
+              {showOfflineOnly 
+                ? 'Офлайн агентов не найдено — все агенты работают нормально.' 
+                : selectedTag !== 'all' 
+                  ? `Агентов с тегом "${selectedTagObj?.label}" не найдено.` 
+                  : 'Агентов пока нет — добавьте их на странице «Агенты».'}
             </p>
+            {showOfflineOnly && (
+              <button
+                onClick={() => setShowOfflineOnly(false)}
+                className="mt-4 px-4 py-2 rounded-xl bg-vio/20 text-vio font-semibold text-[12px] hover:bg-vio/30 transition-all"
+              >
+                Показать все агенты
+              </button>
+            )}
           </div>
         )}
       </div>
