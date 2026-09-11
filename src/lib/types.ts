@@ -59,7 +59,9 @@ export interface RelayPingResult {
 
 /** Результат опроса одной цели (IP / диапазон) через relay-агент. */
 export interface RelayTargetResult {
-  target: string;
+  target: string; // отображаемое имя (или диапазон, если имени нет)
+  name?: string; // кастомное имя группы
+  range?: string; // диапазон IP
   lastCheck: number;
   results: RelayPingResult[];
 }
@@ -125,7 +127,7 @@ export interface Agent {
   ip: string; // адрес ПК
   relayUrl: string; // адрес pluto-relay, напр. http://192.168.1.10:8091
   glancesUrl: string; // адрес Glances (glances -w), напр. http://192.168.1.10:61208
-  pingTargets: string[]; // цели, доступные только этому ПК
+  pingTargets: Array<{ name: string; range: string }>; // цели с кастомными именами, доступные только этому ПК
   targets: RelayTargetResult[];
   tags: string[]; // присвоенные теги (редактируются в «Изменить»)
   favorite: boolean; // избранное на главной

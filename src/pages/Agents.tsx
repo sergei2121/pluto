@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { Panel, StatusDot, Modal, Drawer, Field, EmptyState, Ring, Bar, TimeAgo } from '../components/ui';
 import { store, useCurrentUser, usePluto, useToasts, visibleAgents } from '../lib/store';
-import { cls, fmtMs, fmtUp, fmtNet, isIp, isTarget, expandTargets, pingStats } from '../lib/util';
+import { cls, fmtMs, fmtUp, fmtNet, isIp, isTarget, expandTargets, pingStats, uid } from '../lib/util';
 import type { Agent, StatsView } from '../lib/types';
 
 function StatsViewPicker({ value, onChange, compact }: { value: StatsView; onChange: (v: StatsView) => void; compact?: boolean }) {
@@ -30,13 +30,19 @@ function StatsViewPicker({ value, onChange, compact }: { value: StatsView; onCha
   );
 }
 
+interface PingTargetEntry {
+  id: string;
+  name: string;
+  range: string;
+}
+
 function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => void; initial: Agent | null }) {
   const tags = usePluto((s) => s.tags);
   const [name, setName] = useState('');
   const [ip, setIp] = useState('');
   const [relayUrl, setRelayUrl] = useState('');
   const [glancesUrl, setGlancesUrl] = useState('');
-  const [targetsText, setTargetsText] = useState('');
+  const [pingTargets, setPingTargets] = useState<PingTargetEntry[]>([]);
   const [statsView, setStatsView] = useState<StatsView>('');
   const [selTags, setSelTags] = useState<string[]>([]);
   const [err, setErr] = useState('');
@@ -46,19 +52,36 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
     setErr('');
     if (initial) {
       setName(initial.name); setIp(initial.ip); setRelayUrl(initial.relayUrl); setGlancesUrl(initial.glancesUrl || '');
-      setTargetsText(initial.pingTargets.join('\n')); setStatsView(initial.statsView); setSelTags(initial.tags);
+      const targets = Array.isArray(initial.pingTargets) 
+        ? initial.pingTargets.map((t: any, i: number) => ({
+            id: `tgt-${i}-${Date.now()}`,
+            name: typeof t === 'object' ? (t.name || '') : '',
+            range: typeof t === 'object' ? (t.range || String(t)) : String(t),
+          }))
+        : [];
+      setPingTargets(targets.length ? targets : [{ id: uid(), name: '', range: '' }]);
+      setStatsView(initial.statsView); setSelTags(initial.tags);
     } else {
-      setName(''); setIp(''); setRelayUrl(''); setGlancesUrl(''); setTargetsText(''); setStatsView(''); setSelTags([]);
+      setName(''); setIp(''); setRelayUrl(''); setGlancesUrl('');
+      setPingTargets([{ id: uid(), name: '', range: '' }]);
+      setStatsView(''); setSelTags([]);
     }
   }, [open, initial]);
+
+  const addTarget = () => setPingTargets((prev) => [...prev, { id: uid(), name: '', range: '' }]);
+  const removeTarget = (id: string) => setPingTargets((prev) => prev.length > 1 ? prev.filter((t) => t.id !== id) : prev);
+  const updateTarget = (id: string, field: 'name' | 'range', value: string) =>
+    setPingTargets((prev) => prev.map((t) => (t.id === id ? { ...t, [field]: value } : t)));
 
   const save = async () => {
     setErr('');
     if (!name.trim()) return setErr('Укажите имя');
     if (!isIp(ip.trim())) return setErr('IP-адрес ПК в формате 192.168.1.10');
-    const targets = targetsText.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
-    const bad = targets.find((t) => !isTarget(t));
-    if (bad) return setErr(`Некорректная цель: «${bad}». Форматы: 10.0.0.5, 10.0.0.1-20, 10.0.0.0/24`);
+    const targets = pingTargets
+      .filter((t) => t.range.trim())
+      .map((t) => ({ name: t.name.trim(), range: t.range.trim() }));
+    const bad = targets.find((t) => !isTarget(t.range));
+    if (bad) return setErr(`Некорректная цель: «${bad.range}». Форматы: 10.0.0.5, 10.0.0.1-20, 10.0.0.0/24`);
     const body = { name: name.trim(), ip: ip.trim(), relayUrl: relayUrl.trim(), glancesUrl: glancesUrl.trim(), pingTargets: targets, tags: selTags, statsView };
     try {
       if (initial) await store.updateAgent(initial.id, body);
@@ -80,9 +103,40 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
         <Field label="Адрес Glances (телеметрия)" hint="«glances -w», порт по умолчанию 61208. CPU, GPU, RAM, диски, сеть, температуры — в «Статистике» и карточке агента.">
           <input className="inp font-mono" value={glancesUrl} onChange={(e) => setGlancesUrl(e.target.value)} placeholder="http://192.168.1.10:61208" />
         </Field>
-        <Field label="Цели для пинга (по одной в строке)" hint="IP, диапазон 10.0.0.1-20 или подсеть 10.0.0.0/24 — устройства, доступные только этому ПК">
-          <textarea className="inp font-mono" rows={5} value={targetsText} onChange={(e) => setTargetsText(e.target.value)} placeholder={'10.0.0.5\n10.0.0.1-20'} />
-        </Field>
+
+        {/* Динамические поля: цели для пинга с кастомными именами */}
+        <div>
+          <div className="mb-2 flex items-center justify-between">
+            <span className="block text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Цели для пинга</span>
+            <button onClick={addTarget} className="text-[11px] font-semibold text-vio hover:text-vio/80">+ Добавить группу</button>
+          </div>
+          <div className="space-y-2">
+            {pingTargets.map((t, idx) => (
+              <div key={t.id} className="flex items-center gap-2">
+                <input
+                  className="inp flex-1 font-mono text-[11px]"
+                  placeholder="Имя группы (опционально)"
+                  value={t.name}
+                  onChange={(e) => updateTarget(t.id, 'name', e.target.value)}
+                />
+                <input
+                  className="inp flex-[2] font-mono text-[11px]"
+                  placeholder="Диапазон IP (10.0.0.5, 10.0.0.1-20, 10.0.0.0/24)"
+                  value={t.range}
+                  onChange={(e) => updateTarget(t.id, 'range', e.target.value)}
+                />
+                <button
+                  onClick={() => removeTarget(t.id)}
+                  disabled={pingTargets.length === 1}
+                  className="rounded-md p-2 text-dim transition-colors hover:bg-raised hover:text-crit disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+          <p className="mt-1 text-[11px] text-dim">Каждая строка — отдельная группа целей. Имя опционально, диапазон обязателен.</p>
+        </div>
 
         <StatsViewPicker value={statsView} onChange={setStatsView} />
 

@@ -431,11 +431,13 @@ async function pollAgent(agent) {
     const out = [];
     let anyOk = false;
     for (const tgt of agent.pingTargets) {
-      const ips = expandTargets(tgt);
+      const rangeStr = typeof tgt === 'string' ? tgt : (tgt.range || '');
+      const targetName = typeof tgt === 'object' && tgt.name ? tgt.name : '';
+      const ips = expandTargets(rangeStr);
       const results = await relayPing(agent, ips);
       if (results.length) anyOk = true;
-      const prev = (agent.targets || []).find((t) => t.target === tgt);
-      out.push({ target: tgt, lastCheck: now, results: results.length ? results : (prev ? prev.results : []) });
+      const prev = (agent.targets || []).find((t) => t.target === (tgt.target || rangeStr));
+      out.push({ target: targetName || rangeStr, name: targetName, range: rangeStr, lastCheck: now, results: results.length ? results : (prev ? prev.results : []) });
     }
     if (anyOk) agent.targets = out;
   }
@@ -662,7 +664,7 @@ const server = http.createServer(async (req, res) => {
       const a = {
         id: uid(), name: String(b.name || '').trim() || ('ПК ' + ip), ip,
         relayUrl: String(b.relayUrl || '').trim(), glancesUrl: String(b.glancesUrl || '').trim(),
-        pingTargets: Array.isArray(b.pingTargets) ? b.pingTargets.map(String) : [],
+        pingTargets: Array.isArray(b.pingTargets) ? b.pingTargets.map(t => typeof t === 'string' ? { name: '', range: t } : t) : [],
         tags: Array.isArray(b.tags) ? b.tags : [],
         targets: [], favorite: !!b.favorite, pingsFavorite: !!b.pingsFavorite, pingsShowcase: !!b.pingsShowcase,
         statsView: b.statsView === 'bars' || b.statsView === 'ws' ? b.statsView : '',
@@ -683,7 +685,9 @@ const server = http.createServer(async (req, res) => {
         const b = await readBody(req);
         for (const k of ['name', 'ip', 'relayUrl', 'glancesUrl', 'favorite', 'pingsFavorite', 'pingsShowcase']) if (k in b) a[k] = b[k];
         if ('statsView' in b) a.statsView = b.statsView === 'bars' || b.statsView === 'ws' ? b.statsView : '';
-        if (Array.isArray(b.pingTargets)) a.pingTargets = b.pingTargets.map(String);
+        if (Array.isArray(b.pingTargets)) {
+          a.pingTargets = b.pingTargets.map(t => typeof t === 'string' ? { name: '', range: t } : t);
+        }
         if (Array.isArray(b.tags)) a.tags = b.tags.map(String);
         saveDb();
         return json(res, 200, a);
