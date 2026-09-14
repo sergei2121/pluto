@@ -135,6 +135,21 @@ export default function NetworkMap() {
   const agentHierarchy = useMemo(() => buildAgentHierarchy(agents), [agents]);
   const directDevices = useMemo(() => buildDirectPingHierarchy(devices), [devices]);
 
+  // directSubnets вычисляем здесь (перед graphData)
+  const directSubnets = useMemo(() => {
+    const groups: Record<string, DirectDeviceNode[]> = {};
+    directDevices.forEach(d => {
+      if (!groups[d.subnet]) groups[d.subnet] = [];
+      groups[d.subnet].push(d);
+    });
+    return Object.entries(groups).map(([subnet, devs]) => ({
+      subnet,
+      devices: devs,
+      online: devs.filter(d => d.device.status === 'up').length,
+      total: devs.length
+    }));
+  }, [directDevices]);
+
   const getTagObj = (id: string) => tags.find(t => t.id === id);
   const selectedTagObj = selectedTag !== 'all' ? getTagObj(selectedTag) : null;
 
@@ -553,21 +568,6 @@ export default function NetworkMap() {
   const offlineNodes = totalNodes - onlineNodes;
   const totalLinks = graphData.links.length;
   const agentsWithGlances = agentHierarchy.filter(a => a.hasGlances).length;
-  
-  // directSubnets вычисляем здесь
-  const directSubnets = useMemo(() => {
-    const groups: Record<string, DirectDeviceNode[]> = {};
-    directDevices.forEach(d => {
-      if (!groups[d.subnet]) groups[d.subnet] = [];
-      groups[d.subnet].push(d);
-    });
-    return Object.entries(groups).map(([subnet, devs]) => ({
-      subnet,
-      devices: devs,
-      online: devs.filter(d => d.device.status === 'up').length,
-      total: devs.length
-    }));
-  }, [directDevices]);
   
   const directOnline = directSubnets.reduce((sum, g) => sum + g.online, 0);
   const directTotal = directSubnets.reduce((sum, g) => sum + g.total, 0);
