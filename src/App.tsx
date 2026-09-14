@@ -9,7 +9,6 @@ import Devices from './pages/Devices';
 import Agents from './pages/Agents';
 import AgentPings from './pages/AgentPings';
 import Stats from './pages/Stats';
-import NetworkMap from './pages/NetworkMap';
 import Sla from './pages/Sla';
 import SettingsPage from './pages/Settings';
 import Deploy from './pages/Deploy';
@@ -78,7 +77,6 @@ export default function App() {
       {page === 'devices' && <Devices key={`dev-${user.id}`} />}
       {page === 'agents' && <Agents key={`ag-${user.id}`} />}
       {page === 'agent-pings' && <AgentPings key={`ap-${user.id}`} />}
-      {page === 'network-map' && <NetworkMap key={`netmap-${user.id}`} />}
       {page === 'stats-bars' && <Stats key="stats-bars" mode="bars" />}
       {page === 'stats-ws' && <Stats key="stats-ws" mode="ws" />}
       {page === 'sla' && <Sla key={`sla-${user.id}`} />}

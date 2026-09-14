@@ -51,9 +51,10 @@ function TagsTab() {
   const tags = usePluto((s) => s.tags);
   const [label, setLabel] = useState('');
   const [color, setColor] = useState(TAG_COLORS[0]);
+  const [visible, setVisible] = useState(true);
 
   const add = async () => {
-    const err = await store.addTag(label, color, true);
+    const err = await store.addTag(label, color, visible);
     if (err) useToasts.push('warn', err);
     else setLabel('');
   };
@@ -71,6 +72,10 @@ function TagsTab() {
                 style={{ background: c }} title={c} />
             ))}
           </div>
+        </div>
+        <div>
+          <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Видимость</span>
+          <Toggle checked={visible} onChange={setVisible} />
         </div>
         <button onClick={() => void add()} className="btn-acc"><Plus className="h-4 w-4" />Создать тег</button>
       </div>
@@ -158,7 +163,6 @@ const MENU_GRANTS: { route: Route; label: string }[] = [
   { route: 'devices', label: 'Устройства' },
   { route: 'agents', label: 'Агенты' },
   { route: 'agent-pings', label: 'Пинги агентов' },
-  { route: 'network-map', label: 'Карта сети' },
   { route: 'stats-bars', label: 'Статистика Bars' },
   { route: 'stats-ws', label: 'Статистика WS' },
   { route: 'sla', label: 'SLA-отчёт' },
