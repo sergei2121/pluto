@@ -759,6 +759,16 @@ const server = http.createServer(async (req, res) => {
       saveDb();
       return json(res, 200, { ok: true });
     }
+    if (m && method === 'PATCH' && isAdmin) {
+      const tag = db.tags.find((x) => x.id === m[1]);
+      if (!tag) return json(res, 404, { error: 'тег не найден' });
+      const b = await readBody(req);
+      if ('label' in b) tag.label = String(b.label || '').trim();
+      if ('color' in b) tag.color = String(b.color || '#9a8cfa');
+      if ('visible' in b) tag.visible = !!b.visible;
+      saveDb();
+      return json(res, 200, tag);
+    }
 
     // ── настройки ──
     if (p === '/api/settings' && method === 'PUT' && isAdmin) {
