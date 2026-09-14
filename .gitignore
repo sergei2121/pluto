@@ -1,11 +1,35 @@
 ```
-# Dependencies
-node_modules/
-
 # Build artifacts
 dist/
+build/
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.a
+*.out
 
-# Environment
+# Dependencies
+node_modules/
+venv/
+.venv/
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+target/
+.gradle/
+
+# Editor/IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+
+# System files
+.DS_Store
+Thumbs.db
 .env
 .env.local
 *.env.*
@@ -13,24 +37,32 @@ dist/
 # Logs
 *.log
 
-# Editor/IDE
-.vscode/
-.idea/
+# Coverage
+coverage/
+htmlcov/
+.coverage
 
-# OS generated files
-.DS_Store
-Thumbs.db
-
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.so
-
-# Temporary files
-*.tmp
-*.swp
-*~
+# Compressed files
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
 ```
