@@ -2,7 +2,7 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   LayoutDashboard, Server, Monitor, Crosshair, BarChart3, Waves, LayoutGrid, Settings as SettingsIcon,
-  Radio, LogOut, Search, X, AlertTriangle, Bell, Check, Orbit, FileBarChart, Map,
+  Radio, LogOut, Search, X, AlertTriangle, Bell, Check, Orbit, FileBarChart,
 } from 'lucide-react';
 import { cls, fmtClock, CONSOLE_VERSION } from '../lib/util';
 import { store, useCurrentUser, usePluto, useToastList, useToasts, visibleAgents, visibleDevices } from '../lib/store';
@@ -52,11 +52,6 @@ const NAV: { route: Route; label: string; icon: ReactNode; adminOnly?: boolean }
   { route: 'devices', label: 'Устройства', icon: <Server className="h-[17px] w-[17px]" /> },
   { route: 'agents', label: 'Агенты', icon: <Monitor className="h-[17px] w-[17px]" /> },
   { route: 'agent-pings', label: 'Пинги агентов', icon: <Crosshair className="h-[17px] w-[17px]" /> },
-  { 
-    route: 'network-map', 
-    label: 'Карта сети', 
-    icon: <Map className="h-[17px] w-[17px]" />
-  },
   { route: 'stats-bars', label: 'Статистика Bars', icon: <BarChart3 className="h-[17px] w-[17px]" /> },
   { route: 'stats-ws', label: 'Статистика WS', icon: <Waves className="h-[17px] w-[17px]" /> },
   { route: 'sla', label: 'SLA-отчёт', icon: <FileBarChart className="h-[17px] w-[17px]" /> },
@@ -150,7 +145,6 @@ const TITLES: Record<Route, string> = {
   devices: 'Устройства',
   agents: 'Агенты и локальные сети',
   'agent-pings': 'Пинги агентов · локальные устройства',
-  'network-map': 'Карта сети',
   'stats-bars': 'Статистика Bars · Glances',
   'stats-ws': 'Статистика WS · Glances',
   sla: 'SLA-отчёт · доступность',
