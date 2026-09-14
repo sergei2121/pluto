@@ -81,27 +81,46 @@ export interface GlancesPoint {
   diskUsed: number | null; // заполненность основной ФС, %
   diskRead: number | null; // скорость чтения диска, Rps (reads per second)
   diskWrite: number | null; // скорость записи диска, Wps (writes per second)
+  swap: number | null; // Swap, %
+  load1: number | null; // Load avg 1 min
+  load5: number | null; // Load avg 5 min
+  load15: number | null; // Load avg 15 min
+  fanSpeed: number | null; // Скорость вентилятора, RPM
+  battery: number | null; // Заряд батареи, %
+  wifiQuality: number | null; // Качество WiFi, %
 }
 
 export interface GlancesDisk { mnt: string; percent: number | null; usedGB: number | null; sizeGB: number | null; }
-export interface GlancesAdapter { name: string; rx: number | null; tx: number | null; } // КБ/с
+export interface GlancesAdapter { name: string; rx: number | null; tx: number | null; speed?: number | null; isUp?: boolean; } // КБ/с
 export interface GlancesSensor { label: string; value: number; unit: string; kind: string; } // температуры, вент.
+export interface GlancesProcess { pid: number; name: string; cpu: number | null; mem: number | null; status: string; username?: string; }
 
 /** Полный снимок Glances (последний опрос — для карточки агента). */
 export interface GlancesSnapshot {
   t: number;
   cpu: number | null;
   cpuCores: number[]; // загрузка каждого ядра, %
+  cpuUser: number | null; // CPU user, %
+  cpuSystem: number | null; // CPU system, %
+  cpuIowait: number | null; // CPU iowait, %
+  cpuFreq: number | null; // CPU частота, MHz
   gpu: number | null;
   gpuTemp: number | null;
+  gpuMem: number | null; // GPU память, MB
+  gpuMemPercent: number | null; // GPU память, %
   ram: number | null;
   ramUsedGB: number | null;
   ramTotalGB: number | null;
+  ramAvailableGB: number | null;
   swap: number | null;
+  swapUsedGB: number | null;
+  swapTotalGB: number | null;
   load1: number | null;
   load5: number | null;
+  load15: number | null;
   cput: number | null; // Package / CPU
   ssdt: number | null;
+  hddTemp: number | null; // Температура HDD
   disks: GlancesDisk[];
   adapters: GlancesAdapter[]; // все сетевые адаптеры
   mainAdapter: string | null; // выбранный реальный адаптер
@@ -112,6 +131,17 @@ export interface GlancesSnapshot {
   via: string; // api4 | api3
   diskRead: number | null; // скорость чтения, Rps (reads per second)
   diskWrite: number | null; // скорость записи, Wps (writes per second)
+  fanSpeed: number | null; // Скорость вентилятора, RPM
+  battery: number | null; // Заряд батареи, %
+  batteryTimeLeft: number | null; // Время работы от батареи, сек
+  batteryIsCharging: boolean | null;
+  wifiSSID: string | null;
+  wifiQuality: number | null;
+  wifiSignal: number | null;
+  wifiBitrate: number | null;
+  processes: GlancesProcess[]; // топ процессов по CPU
+  containers: Array<{ name: string; status: string; cpu: number | null; mem: number | null }>;
+  cloudProvider: string | null;
 }
 
 /** Период для статистики. */
