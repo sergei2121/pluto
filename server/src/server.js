@@ -163,6 +163,10 @@ function glancesFromApi(data) {
   const gpuList = data.gpu || [];
   const gpu = gpuList.length ? gpuList[0] : null;
   const sensors = (data.sensors || []).filter((s) => s && s.value != null);
+  const battery = data.battery || {};
+  const wifi = data.wifi || {};
+  const containersArr = data.containers || [];
+  const cloud = data.cloud || {};
 
   const toGB = (b) => (b != null ? Math.round((b / 1024 ** 3) * 10) / 10 : null);
 
@@ -174,11 +178,13 @@ function glancesFromApi(data) {
     return s ? Math.round(s.value * 10) / 10 : null;
   };
 
+  const fanSensor = sensors.find((s) => /fan/i.test(s.label || ''));
+  const hddTempSensor = sensors.find((s) => /hdd|disk/i.test(s.label || '') && !/ssd|nvme/i.test(s.label || ''));
+
   const fsArr = Array.isArray(data.fs) ? data.fs : [];
   const mainFs = fsArr.find((f) => f.mnt_point === '/' || /^[A-Za-z]:\\?$/.test(f.mnt_point || '')) || fsArr[0] || null;
-  
+
   // DISK I/O: суммарная скорость чтения/записи по всем дискам
-  // Поддерживаем разные форматы полей: read_count/write_count, Rps/Wps, R/s/W/s
   let diskRead = 0;
   let diskWrite = 0;
   if (Array.isArray(data.diskio) && data.diskio.length > 0) {
@@ -190,28 +196,67 @@ function glancesFromApi(data) {
     }
   }
 
+  // Топ процессов по CPU
+  const procList = (data.processlist || []).slice(0, 10).map((p) => ({
+    pid: p.pid,
+    name: p.name || p.cmdline || 'unknown',
+    cpu: p.cpu_percent != null ? Math.round(p.cpu_percent * 10) / 10 : null,
+    mem: p.memory_percent != null ? Math.round(p.memory_percent * 10) / 10 : null,
+    status: p.status || '?',
+    username: p.username || undefined,
+  }));
+
+  // Контейнеры
+  const contList = (containersArr || []).map((c) => ({
+    name: c.name || 'unknown',
+    status: c.status || 'unknown',
+    cpu: c.cpu_percent != null ? Math.round(c.cpu_percent * 10) / 10 : null,
+    mem: c.memory_usage != null ? Math.round((c.memory_usage / 1024 / 1024) * 10) / 10 : null,
+  }));
+
   return {
     cpu: cpu.total != null ? Math.round(cpu.total * 10) / 10 : null,
     cpuCores: (data.percpu || []).map((c) => Math.round((c.total || 0) * 10) / 10),
+    cpuUser: cpu.user != null ? Math.round(cpu.user * 10) / 10 : null,
+    cpuSystem: cpu.system != null ? Math.round(cpu.system * 10) / 10 : null,
+    cpuIowait: cpu.iowait != null ? Math.round(cpu.iowait * 10) / 10 : null,
+    cpuFreq: cpu.freq_current != null ? Math.round(cpu.freq_current) : null,
     gpu: gpu && gpu.gpu != null ? Math.round(gpu.gpu * 10) / 10 : null,
     gpuTemp: temp(/gpu/i),
+    gpuMem: gpu && gpu.mem != null ? Math.round((gpu.mem / 1024 / 1024) * 10) / 10 : null,
+    gpuMemPercent: gpu && gpu.mem_percent != null ? Math.round(gpu.mem_percent * 10) / 10 : null,
     ram: mem.percent != null ? Math.round(mem.percent * 10) / 10 : null,
-    ramUsedGB: toGB(mem.used), ramTotalGB: toGB(mem.total),
+    ramUsedGB: toGB(mem.used), ramTotalGB: toGB(mem.total), ramAvailableGB: toGB(mem.available),
     swap: data.memswap && data.memswap.percent != null ? Math.round(data.memswap.percent * 10) / 10 : null,
+    swapUsedGB: data.memswap ? toGB(data.memswap.used) : null,
+    swapTotalGB: data.memswap ? toGB(data.memswap.total) : null,
     load1: data.load && data.load.min1 != null ? data.load.min1 : null,
     load5: data.load && data.load.min5 != null ? data.load.min5 : null,
+    load15: data.load && data.load.min15 != null ? data.load.min15 : null,
     cput: temp(/package|cpu/i),
-    ssdt: temp(/ssd|nvme|disk/i),
+    ssdt: temp(/ssd|nvme/i),
+    hddTemp: hddTempSensor ? Math.round(hddTempSensor.value * 10) / 10 : null,
     disks: fsArr.map((f) => ({ mnt: f.mnt_point, percent: f.percent != null ? Math.round(f.percent * 10) / 10 : null, usedGB: toGB(f.used), sizeGB: toGB(f.size) })),
-    adapters: (data.network || []).map((n) => ({ name: n.interface_name || n.key, rx: n.rx != null ? Math.round((n.rx / 1024) * 10) / 10 : null, tx: n.tx != null ? Math.round((n.tx / 1024) * 10) / 10 : null })),
+    adapters: (data.network || []).map((n) => ({ name: n.interface_name || n.key, rx: n.rx != null ? Math.round((n.rx / 1024) * 10) / 10 : null, tx: n.tx != null ? Math.round((n.tx / 1024) * 10) / 10 : null, speed: n.speed != null ? Math.round(n.speed) : null, isUp: n.is_up != null ? !!n.is_up : undefined })),
     mainAdapter: mainAdapterSel ? (mainAdapterSel.interface_name || mainAdapterSel.key) : null,
     rx: mainAdapterSel && mainAdapterSel.rx != null ? Math.round((mainAdapterSel.rx / 1024) * 10) / 10 : null,
     tx: mainAdapterSel && mainAdapterSel.tx != null ? Math.round((mainAdapterSel.tx / 1024) * 10) / 10 : null,
     sensors: sensors.map((s) => ({ label: s.label, value: Math.round(s.value * 10) / 10, unit: s.unit || '', kind: s.type || '' })),
     uptimeSec: data.uptime ? parseUptime(data.uptime) : null,
     mainFsUsed: mainFs && mainFs.percent != null ? Math.round(mainFs.percent * 10) / 10 : null,
-    diskRead: diskRead > 0 ? Math.round(diskRead * 10) / 10 : null, // Rps (ops/s)
-    diskWrite: diskWrite > 0 ? Math.round(diskWrite * 10) / 10 : null, // Wps (ops/s)
+    diskRead: diskRead > 0 ? Math.round(diskRead * 10) / 10 : null,
+    diskWrite: diskWrite > 0 ? Math.round(diskWrite * 10) / 10 : null,
+    fanSpeed: fanSensor ? Math.round(fanSensor.value) : null,
+    battery: battery.percent != null ? Math.round(battery.percent * 10) / 10 : null,
+    batteryTimeLeft: battery.timeleft != null ? Math.round(battery.timeleft * 60) : null,
+    batteryIsCharging: battery.ischarging != null ? !!battery.ischarging : null,
+    wifiSSID: wifi.ssid || null,
+    wifiQuality: wifi.quality != null ? Math.round(wifi.quality * 10) / 10 : null,
+    wifiSignal: wifi.signal != null ? Math.round(wifi.signal) : null,
+    wifiBitrate: wifi.bitrate != null ? Math.round(wifi.bitrate) : null,
+    processes: procList,
+    containers: contList,
+    cloudProvider: cloud.provider || null,
   };
 }
 
@@ -235,7 +280,26 @@ async function collectGlances(url) {
 }
 
 function glancesPoint(g, t) {
-  return { t, cpu: g.cpu, gpu: g.gpu, ram: g.ram, rx: g.rx, tx: g.tx, cput: g.cput, ssdt: g.ssdt, diskUsed: g.mainFsUsed ?? null, diskRead: g.diskRead ?? null, diskWrite: g.diskWrite ?? null };
+  return { 
+    t, 
+    cpu: g.cpu, 
+    gpu: g.gpu, 
+    ram: g.ram, 
+    rx: g.rx, 
+    tx: g.tx, 
+    cput: g.cput, 
+    ssdt: g.ssdt, 
+    diskUsed: g.mainFsUsed ?? null, 
+    diskRead: g.diskRead ?? null, 
+    diskWrite: g.diskWrite ?? null,
+    swap: g.swap ?? null,
+    load1: g.load1 ?? null,
+    load5: g.load5 ?? null,
+    load15: g.load15 ?? null,
+    fanSpeed: g.fanSpeed ?? null,
+    battery: g.battery ?? null,
+    wifiQuality: g.wifiQuality ?? null,
+  };
 }
 
 // ─── Уведомления ────────────────────────────────────────────────────────────
