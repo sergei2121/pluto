@@ -1,14 +1,16 @@
-// ─── PLUTO: Карта сети v6.0.0 ────────────────────────────────────────────────
-// Упрощенная схема сети для лучшей читаемости
-// Структура: PLUTO → Агенты → Диапазоны (сводно)
-// Без отображения отдельных IP адресов
-// Акцент на статусах и общей статистике
+// ─── PLUTO: Карта сети v7.0.0 (NetXMS Style) ─────────────────────────────────
+// Интерактивная карта сети в стиле NetXMS
+// Force-directed граф с возможностью перетаскивания узлов
+// Масштабирование и панорамирование
+// Динамическая топология с отображением связей
+// Группировка по подсетям и агентам
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useRef, useEffect } from 'react';
 import { store, useCurrentUser, usePluto, visibleAgents, visibleDevices } from '../lib/store';
 import { cls, fmtMs, pingStats } from '../lib/util';
 import type { Agent, Device, Tag } from '../lib/types';
-import { Wifi, WifiOff, Globe, ChevronDown, Filter, Activity, Network, Zap, Server, Monitor, X, ExternalLink, Layers, Gauge } from 'lucide-react';
+import { Wifi, WifiOff, Globe, ChevronDown, Filter, Activity, Network, Zap, Server, Monitor, X, ExternalLink, Layers, Gauge, Plus, Minus, Move, Maximize } from 'lucide-react';
+import * as d3 from 'd3';
 
 interface RangeNode {
   name: string;
@@ -91,6 +93,32 @@ export default function NetworkMap() {
   const [activeTab, setActiveTab] = useState<'agents' | 'direct'>('agents');
   const [selectedNode, setSelectedNode] = useState<SelectedNode | null>(null);
   const [showOfflineOnly, setShowOfflineOnly] = useState(false);
+  
+  // D3 refs для force-directed графа
+  const svgRef = useRef<SVGSVGElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [zoomTransform, setZoomTransform] = useState<d3.ZoomTransform | null>(null);
+  const [containerSize, setContainerSize] = useState({ width: 1600, height: 900 });
+
+  // Обновляем размеры контейнера
+  useEffect(() => {
+    if (containerRef.current) {
+      const updateSize = () => {
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (rect) {
+          setContainerSize({ width: rect.width, height: Math.max(600, rect.height - 200) });
+        }
+      };
+      updateSize();
+      window.addEventListener('resize', updateSize);
+      return () => window.removeEventListener('resize', updateSize);
+    }
+  }, []);
+
+  const W = containerSize.width;
+  const H = containerSize.height;
+  const cx = W / 2;
+  const cy = H / 2;
 
   const agents = useMemo(() => {
     let result = allAgents;
@@ -160,72 +188,373 @@ export default function NetworkMap() {
     );
   };
 
-  // Размеры холста
-  const W = 1600, H = 900;
-  const cx = W / 2, cy = H / 2 - 50;
-  
-  // Схема: горизонтальная компоновка
-  // PLUTO ядро слева, агенты в центре, диапазоны и IP справа
-  const plutoX = 150;  // Позиция ядра PLUTO
-  const plutoY = H / 2;
-  const agentColumnX = 450;  // Колонка агентов
-  const rangeColumnX = 800;  // Колонка диапазонов
-  const ipColumnX = 1200;    // Колонка IP адресов
-  
-  const agentSpacing = Math.min(100, (H - 200) / Math.max(1, agentHierarchy.length + 1));
-
-  // Позиции агентов по вертикали в колонке
-  const agentPositions = agentHierarchy.map((node, i) => {
-    return { 
-      ...node, 
-      x: agentColumnX, 
-      y: 100 + agentSpacing * (i + 1),
-      index: i
-    };
-  });
-  
-  // Позиции диапазонов и IP для каждого агента
-  const getRangePositions = (agentNode: typeof agentPositions[0]) => {
-    const rangeCount = agentNode.ranges.length;
-    const rangeSpacing = Math.min(80, (H - 150) / Math.max(1, rangeCount + 1));
+  // Данные для force-directed графа NetXMS style
+  const graphData = useMemo(() => {
+    const nodes: Array<{
+      id: string;
+      type: 'pluto' | 'agent' | 'range' | 'ip' | 'device';
+      name: string;
+      status: 'online' | 'offline' | 'unknown';
+      group?: string;
+      agentId?: string;
+      range?: string;
+      ip?: string;
+      latency?: number | null;
+      total?: number;
+      online?: number;
+      device?: Device;
+      agent?: Agent;
+    }> = [];
     
-    return agentNode.ranges.map((range, rangeIdx) => {
-      const rangeY = 100 + rangeSpacing * (rangeIdx + 1);
-      
-      // Собираем все IP для этого диапазона из allIpResults
-      const rangeIps = allIpResults.filter(r => 
-        r.agentId === agentNode.agent.id && 
-        (r.ip.startsWith(range.range.replace(/\/\d+$/, '').replace(/\.\d+$/, '')) || true) // Упрощённая фильтрация
-      ).slice(0, 8); // Показываем только первые 8
-      
-      const ipCount = rangeIps.length > 0 ? rangeIps.length : Math.min(range.total, 8);
-      const ipAngleStep = ipCount > 0 ? (2 * Math.PI) / ipCount : 0;
-      
-      return {
-        range,
-        rangeIdx,
-        x: rangeColumnX,
-        y: rangeY,
-        ips: Array.from({ length: ipCount }).map((_, ipIdx) => {
-          const ipAngle = ipAngleStep * ipIdx - Math.PI / 2;
-          const ipRadius = 70;
-          const ipData = rangeIps[ipIdx];
-          return {
-            ipIdx,
-            x: rangeColumnX + ipRadius * Math.cos(ipAngle),
-            y: rangeY + ipRadius * Math.sin(ipAngle),
-            ip: ipData ? { 
-              ip: ipData.ip, 
-              alive: ipData.alive, 
-              latency: ipData.latency 
-            } : { ip: 'unknown', alive: false, latency: null }
-          };
-        })
-      };
+    const links: Array<{
+      source: string;
+      target: string;
+      type: 'connection' | 'monitoring';
+      status: 'online' | 'offline';
+    }> = [];
+    
+    // Добавляем ядро PLUTO
+    nodes.push({
+      id: 'pluto-core',
+      type: 'pluto',
+      name: 'PLUTO Core',
+      status: 'online'
     });
+    
+    if (activeTab === 'agents') {
+      // Добавляем агентов и их диапазоны
+      agentHierarchy.forEach((a) => {
+        // Агент
+        nodes.push({
+          id: `agent-${a.agent.id}`,
+          type: 'agent',
+          name: a.agent.name,
+          status: a.online ? 'online' : 'offline',
+          agent: a.agent,
+          group: a.agent.tags[0] || 'default'
+        });
+        
+        // Связь от PLUTO к агенту
+        links.push({
+          source: 'pluto-core',
+          target: `agent-${a.agent.id}`,
+          type: 'connection',
+          status: a.online ? 'online' : 'offline'
+        });
+        
+        // Диапазоны
+        a.ranges.forEach((r, idx) => {
+          const rangeId = `range-${a.agent.id}-${idx}`;
+          nodes.push({
+            id: rangeId,
+            type: 'range',
+            name: r.name || r.range,
+            status: r.online > 0 ? 'online' : 'offline',
+            agentId: a.agent.id,
+            range: r.range,
+            total: r.total,
+            online: r.online
+          });
+          
+          // Связь от агента к диапазону
+          links.push({
+            source: `agent-${a.agent.id}`,
+            target: rangeId,
+            type: 'monitoring',
+            status: r.online > 0 ? 'online' : 'offline'
+          });
+          
+          // IP адреса (ограничиваем количество для производительности)
+          const target = a.agent.targets.find(t => t.range === r.range || t.target === r.name);
+          if (target && Array.isArray(target.results)) {
+            target.results.slice(0, 10).forEach((ipResult, ipIdx) => {
+              if (ipResult && typeof ipResult === 'object' && typeof ipResult.alive === 'boolean') {
+                const ipId = `ip-${a.agent.id}-${idx}-${ipIdx}`;
+                nodes.push({
+                  id: ipId,
+                  type: 'ip',
+                  name: ipResult.ip || 'unknown',
+                  ip: ipResult.ip,
+                  status: ipResult.alive ? 'online' : 'offline',
+                  latency: ipResult.latency,
+                  agentId: a.agent.id,
+                  range: r.range
+                });
+                
+                // Связь от диапазона к IP
+                links.push({
+                  source: rangeId,
+                  target: ipId,
+                  type: 'monitoring',
+                  status: ipResult.alive ? 'online' : 'offline'
+                });
+              }
+            });
+          }
+        });
+      });
+    } else {
+      // Вкладка прямого пинга
+      directSubnets.forEach((group) => {
+        // Группа подсети
+        const groupId = `subnet-${group.subnet.replace(/[./]/g, '-')}`;
+        nodes.push({
+          id: groupId,
+          type: 'range',
+          name: group.subnet,
+          status: group.online > 0 ? 'online' : 'offline',
+          total: group.total,
+          online: group.online
+        });
+        
+        // Связь от PLUTO к группе
+        links.push({
+          source: 'pluto-core',
+          target: groupId,
+          type: 'monitoring',
+          status: group.online > 0 ? 'online' : 'offline'
+        });
+        
+        // Устройства в группе
+        group.devices.forEach((d, idx) => {
+          const deviceId = `device-${d.device.id}`;
+          nodes.push({
+            id: deviceId,
+            type: 'device',
+            name: d.device.name,
+            status: d.device.status as 'online' | 'offline',
+            device: d.device,
+            latency: d.device.latency
+          });
+          
+          // Связь от группы к устройству
+          links.push({
+            source: groupId,
+            target: deviceId,
+            type: 'monitoring',
+            status: d.device.status === 'up' ? 'online' : 'offline'
+          });
+        });
+      });
+    }
+    
+    return { nodes, links };
+  }, [agentHierarchy, directSubnets, activeTab]);
+
+  // Force simulation настройки NetXMS style
+  useEffect(() => {
+    if (!svgRef.current || graphData.nodes.length === 0) return;
+    
+    const svg = d3.select(svgRef.current);
+    const g = svg.select('.graph-content');
+    
+    // Очищаем предыдущее содержимое
+    g.selectAll('*').remove();
+    
+    // Создаем стрелки для связей
+    svg.select('.defs').html(`
+      <marker id="arrow-online" viewBox="0 -5 10 10" refX="28" refY="0" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M0,-5L10,0L0,5" fill="#22c55e" opacity="0.6" />
+      </marker>
+      <marker id="arrow-offline" viewBox="0 -5 10 10" refX="28" refY="0" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M0,-5L10,0L0,5" fill="#ef4444" opacity="0.6" />
+      </marker>
+    `);
+    
+    // Force simulation
+    const simulation = d3.forceSimulation(graphData.nodes)
+      .force('charge', d3.forceManyBody().strength(-300))
+      .force('center', d3.forceCenter(W / 2, H / 2))
+      .force('link', d3.forceLink(graphData.links).id((d: any) => d.id).distance(120))
+      .force('collide', d3.forceCollide().radius(40).iterations(2))
+      .alphaDecay(0.0228);
+    
+    // Рисуем связи
+    const link = g.append('g')
+      .attr('class', 'links')
+      .selectAll('line')
+      .data(graphData.links)
+      .join('line')
+      .attr('stroke', (d: any) => d.status === 'online' ? '#22c55e' : '#ef4444')
+      .attr('stroke-width', 1.5)
+      .attr('stroke-opacity', 0.4)
+      .attr('stroke-dasharray', (d: any) => d.status === 'offline' ? '4,4' : 'none');
+    
+    // Функция для получения цвета узла
+    const getNodeColor = (node: any) => {
+      switch (node.type) {
+        case 'pluto': return '#7c3aed';
+        case 'agent': return node.status === 'online' ? '#22c55e' : '#ef4444';
+        case 'range': return node.status === 'online' ? '#3b82f6' : '#ef4444';
+        case 'ip': return node.status === 'online' ? '#22c55e' : '#ef4444';
+        case 'device': return node.status === 'online' ? '#22c55e' : '#ef4444';
+        default: return '#7c3aed';
+      }
+    };
+    
+    // Функция для получения размера узла
+    const getNodeRadius = (node: any) => {
+      switch (node.type) {
+        case 'pluto': return 35;
+        case 'agent': return 28;
+        case 'range': return Math.min(35, 20 + (node.total || 0) * 2);
+        case 'ip': return 8;
+        case 'device': return 12;
+        default: return 20;
+      }
+    };
+    
+    // Рисуем узлы
+    const node = g.append('g')
+      .attr('class', 'nodes')
+      .selectAll('g')
+      .data(graphData.nodes)
+      .join('g')
+      .attr('class', 'node')
+      .call(d3.drag()
+        .on('start', dragstarted)
+        .on('drag', dragged)
+        .on('end', dragended))
+      .on('click', (event, d: any) => {
+        event.stopPropagation();
+        setSelectedNode({
+          type: d.type === 'agent' ? 'agent' : d.type === 'device' ? 'direct' : 'agent',
+          agent: d.agent,
+          device: d.device,
+          x: d.x,
+          y: d.y
+        });
+      });
+    
+    // Рисуем круги для узлов
+    node.append('circle')
+      .attr('r', getNodeRadius)
+      .attr('fill', (d: any) => `${getNodeColor(d)}25`)
+      .attr('stroke', (d: any) => getNodeColor(d))
+      .attr('stroke-width', 2.5)
+      .attr('filter', 'url(#nodeShadow)')
+      .append('title')
+      .text((d: any) => {
+        let tooltip = `${d.name}\n`;
+        if (d.type === 'range') {
+          tooltip += `Всего: ${d.total}\nОнлайн: ${d.online}`;
+        } else if (d.latency != null) {
+          tooltip += `Задержка: ${d.latency} мс`;
+        }
+        return tooltip;
+      });
+    
+    // Добавляем иконки/текст для узлов
+    node.append('text')
+      .attr('dy', 4)
+      .attr('text-anchor', 'middle')
+      .attr('font-size', '9px')
+      .attr('fill', '#e5e7eb')
+      .attr('font-weight', '600')
+      .text((d: any) => {
+        if (d.type === 'pluto') return 'PLUTO';
+        if (d.type === 'agent') return d.name.length > 10 ? d.name.substring(0, 8) + '..' : d.name;
+        if (d.type === 'range' && d.total) return String(d.total);
+        if (d.type === 'ip') return d.ip?.split('.').pop() || '';
+        return '';
+      });
+    
+    // Подписи под узлами
+    node.append('text')
+      .attr('dy', 50)
+      .attr('text-anchor', 'middle')
+      .attr('font-size', '8px')
+      .attr('fill', '#9ca3af')
+      .text((d: any) => {
+        if (d.type === 'range' && d.name) {
+          return d.name.length > 20 ? d.name.substring(0, 18) + '..' : d.name;
+        }
+        return '';
+      });
+    
+    // Обновление позиций на каждом шаге симуляции
+    simulation.on('tick', () => {
+      link
+        .attr('x1', (d: any) => d.source.x)
+        .attr('y1', (d: any) => d.source.y)
+        .attr('x2', (d: any) => d.target.x)
+        .attr('y2', (d: any) => d.target.y);
+      
+      node.attr('transform', (d: any) => `translate(${d.x},${d.y})`);
+    });
+    
+    // Drag функции
+    function dragstarted(event: any, d: any) {
+      if (!event.active) simulation.alphaTarget(0.3).restart();
+      d.fx = d.x;
+      d.fy = d.y;
+    }
+    
+    function dragged(event: any, d: any) {
+      d.fx = event.x;
+      d.fy = event.y;
+      simulation.alpha(0.3).restart();
+    }
+    
+    function dragended(event: any, d: any) {
+      if (!event.active) simulation.alphaTarget(0);
+      d.fx = null;
+      d.fy = null;
+    }
+    
+    // Zoom behavior
+    const zoom = d3.zoom<SVGSVGElement, unknown>()
+      .scaleExtent([0.2, 4])
+      .on('zoom', (event) => {
+        g.attr('transform', event.transform);
+        setZoomTransform(event.transform);
+      });
+    
+    svg.call(zoom);
+    
+    return () => {
+      simulation.stop();
+    };
+  }, [graphData, W, H]);
+  
+  // Управление зумом
+  const handleZoomIn = () => {
+    if (svgRef.current) {
+      const svg = d3.select(svgRef.current);
+      svg.transition().duration(300).call((selection: any) => {
+        const currentTransform = selection.property('__zoom') || d3.zoomIdentity;
+        const newTransform = currentTransform.scale(1.3);
+        selection.call(d3.zoom().transform, newTransform);
+      });
+    }
+  };
+  
+  const handleZoomOut = () => {
+    if (svgRef.current) {
+      const svg = d3.select(svgRef.current);
+      svg.transition().duration(300).call((selection: any) => {
+        const currentTransform = selection.property('__zoom') || d3.zoomIdentity;
+        const newTransform = currentTransform.scale(0.7);
+        selection.call(d3.zoom().transform, newTransform);
+      });
+    }
+  };
+  
+  const handleResetZoom = () => {
+    if (svgRef.current) {
+      const svg = d3.select(svgRef.current);
+      svg.transition().duration(500).call(d3.zoom().transform, d3.zoomIdentity);
+    }
   };
 
-  // Группировка устройств прямого пинга по подсетям
+  // Статистика для NetXMS style карты
+  const totalNodes = graphData.nodes.length;
+  const onlineNodes = graphData.nodes.filter(n => n.status === 'online').length;
+  const offlineNodes = totalNodes - onlineNodes;
+  const totalLinks = graphData.links.length;
+  const agentsWithGlances = agentHierarchy.filter(a => a.hasGlances).length;
+  
+  // directSubnets вычисляем здесь
   const directSubnets = useMemo(() => {
     const groups: Record<string, DirectDeviceNode[]> = {};
     directDevices.forEach(d => {
@@ -239,65 +568,9 @@ export default function NetworkMap() {
       total: devs.length
     }));
   }, [directDevices]);
-
-  // Позиции устройств прямого пинга
-  const directDevicePositions = directSubnets.flatMap((group, groupIdx) => {
-    const groupAngle = (groupIdx / Math.max(1, directSubnets.length)) * Math.PI * 2 - Math.PI / 2;
-    const groupRadius = 300;
-    const groupCx = cx + Math.cos(groupAngle) * groupRadius;
-    const groupCy = cy + Math.sin(groupAngle) * groupRadius;
-    
-    const deviceCount = group.devices.length;
-    const angleStep = deviceCount > 1 ? (2 * Math.PI) / deviceCount : 0;
-    
-    return group.devices.map((d, i) => {
-      const angle = deviceCount > 1 ? angleStep * i - Math.PI / 2 : 0;
-      const deviceRadius = deviceCount > 1 ? 60 : 0;
-      return {
-        device: d.device,
-        x: groupCx + Math.cos(angle) * deviceRadius,
-        y: groupCy + Math.sin(angle) * deviceRadius,
-        subnet: group.subnet,
-        groupOnline: group.online,
-        groupTotal: group.total
-      };
-    });
-  });
-
-  // Сбор всей статистики по IP через агентов
-  const allIpResults = useMemo(() => {
-    const results: Array<{ ip: string; alive: boolean; latency: number | null; agentName: string; agentId: string }> = [];
-    for (const agent of agentHierarchy) {
-      if (!agent.agent || !Array.isArray(agent.agent.targets)) continue;
-      
-      for (const rangeNode of agent.ranges) {
-        // Находим соответствующий target в агенте для получения результатов
-        const target = agent.agent.targets.find(t => t.range === rangeNode.range || t.target === rangeNode.name);
-        if (target && Array.isArray(target.results)) {
-          for (const ip of target.results) {
-            // Строгая защита: ip должен быть объектом с property alive
-            if (!ip || typeof ip !== 'object' || typeof ip.alive !== 'boolean') continue;
-            
-            results.push({
-              ip: ip.ip || 'unknown',
-              alive: ip.alive === true,
-              latency: typeof ip.latency === 'number' ? ip.latency : null,
-              agentName: agent.agent.name,
-              agentId: agent.agent.id
-            });
-          }
-        }
-      }
-    }
-    return results;
-  }, [agentHierarchy]);
-
-  const totalUniqueIps = new Set(allIpResults.map(r => `${r.agentId}:${r.ip}`)).size;
-  const onlineIps = allIpResults.filter(r => r.alive).length;
-  const offlineIps = totalUniqueIps - onlineIps;
+  
   const directOnline = directSubnets.reduce((sum, g) => sum + g.online, 0);
   const directTotal = directSubnets.reduce((sum, g) => sum + g.total, 0);
-  const agentsWithGlances = agentHierarchy.filter(a => a.hasGlances).length;
 
   return (
     <div className="space-y-4">
@@ -329,10 +602,10 @@ export default function NetworkMap() {
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-vio/15 border border-vio/30">
                 <Network className="h-5 w-5 text-vio" />
               </div>
-              Карта сети v5.2.0
+              Карта сети v7.0.0 (NetXMS)
             </h2>
             <p className="text-[11.5px] text-dim mt-1.5">
-              автоматическая визуализация топологии{selectedTagObj && ` · тег: ${selectedTagObj.label}`}
+              интерактивная force-directed топология{selectedTagObj && ` · тег: ${selectedTagObj.label}`}
             </p>
           </div>
           <div className="flex items-center gap-2">
