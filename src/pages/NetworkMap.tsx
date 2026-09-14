@@ -569,6 +569,11 @@ export default function NetworkMap() {
   const totalLinks = graphData.links.length;
   const agentsWithGlances = agentHierarchy.filter(a => a.hasGlances).length;
   
+  // Статистика IP адресов для вкладки агентов
+  const totalUniqueIps = agentHierarchy.reduce((sum, a) => sum + a.totalIps, 0);
+  const onlineIps = agentHierarchy.reduce((sum, a) => sum + a.onlineIps, 0);
+  const offlineIps = totalUniqueIps - onlineIps;
+  
   const directOnline = directSubnets.reduce((sum, g) => sum + g.online, 0);
   const directTotal = directSubnets.reduce((sum, g) => sum + g.total, 0);
 
