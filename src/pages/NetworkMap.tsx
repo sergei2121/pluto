@@ -9,7 +9,7 @@ import { useMemo, useState, useRef, useEffect } from 'react';
 import { store, useCurrentUser, usePluto, visibleAgents, visibleDevices } from '../lib/store';
 import { cls, fmtMs, pingStats } from '../lib/util';
 import type { Agent, Device, Tag } from '../lib/types';
-import { Wifi, WifiOff, Globe, ChevronDown, Filter, Activity, Network, Zap, Server, Monitor, X, ExternalLink, Layers, Gauge, Plus, Minus, Move, Maximize } from 'lucide-react';
+import { Wifi, WifiOff, Globe, ChevronDown, Filter, Activity, Network, Zap, Server, Monitor, X, ExternalLink, Layers, Gauge, Plus, Minus, Move, Maximize, TrendingUp, Clock } from 'lucide-react';
 import * as d3 from 'd3';
 
 interface RangeNode {
@@ -22,7 +22,7 @@ interface RangeNode {
 interface AgentNode {
   agent: Agent;
   online: boolean;
-  hasGlances: boolean;
+  hasGlances: boolean | '';
   ranges: RangeNode[];
   totalIps: number;
   onlineIps: number;
@@ -219,6 +219,8 @@ export default function NetworkMap() {
       online?: number;
       device?: Device;
       agent?: Agent;
+      x?: number;
+      y?: number;
     }> = [];
     
     const links: Array<{
@@ -576,6 +578,78 @@ export default function NetworkMap() {
   
   const directOnline = directSubnets.reduce((sum, g) => sum + g.online, 0);
   const directTotal = directSubnets.reduce((sum, g) => sum + g.total, 0);
+
+  // Позиции для SVG визуализации (вычисляем из графа D3)
+  const plutoX = W * 0.15;
+  const plutoY = H / 2;
+  
+  // Получаем позиции агентов из графа
+  const agentPositions = useMemo(() => {
+    return agentHierarchy.map((a, idx) => {
+      const node = graphData.nodes.find(n => n.id === `agent-${a.agent.id}`);
+      if (node && node.x != null && node.y != null) {
+        return { ...a, x: node.x, y: node.y };
+      }
+      // Дефолтная позиция если граф еще не рассчитан
+      const angle = (2 * Math.PI * idx) / agentHierarchy.length;
+      const radius = Math.min(W, H) * 0.35;
+      return { 
+        ...a, 
+        x: plutoX + radius * Math.cos(angle), 
+        y: plutoY + radius * Math.sin(angle) 
+      };
+    });
+  }, [agentHierarchy, graphData, W, H, plutoX, plutoY]);
+  
+  // Функция для расчета позиций диапазонов вокруг агента
+  const getRangePositions = (agentNode: typeof agentPositions[0]) => {
+    return agentNode.ranges.map((range, rangeIdx) => {
+      const ipResults = agentNode.agent.targets[rangeIdx]?.results || [];
+      const totalIpsInRange = ipResults.length;
+      
+      // Распределяем диапазоны по кругу вокруг агента
+      const angleStep = (2 * Math.PI) / agentNode.ranges.length;
+      const angle = angleStep * rangeIdx;
+      const distance = 140; // расстояние от агента до диапазона
+      
+      return {
+        rangeIdx,
+        range,
+        ips: ipResults.map((ipResult, ipIdx) => {
+          // IP адреса распределяем вокруг диапазона
+          const ipAngleStep = (2 * Math.PI) / Math.max(1, totalIpsInRange);
+          const ipAngle = ipAngleStep * ipIdx;
+          const ipDistance = 50; // расстояние от диапазона до IP
+          
+          return {
+            ip: ipResult,
+            x: plutoX + distance * Math.cos(angle) + ipDistance * Math.cos(ipAngle),
+            y: plutoY + distance * Math.sin(angle) + ipDistance * Math.sin(ipAngle)
+          };
+        }),
+        x: plutoX + distance * Math.cos(angle),
+        y: plutoY + distance * Math.sin(angle)
+      };
+    });
+  };
+  
+  // Позиции для устройств прямого пинга
+  const directDevicePositions = useMemo(() => {
+    return directDevices.map((d, idx) => {
+      const node = graphData.nodes.find(n => n.device?.id === d.device.id);
+      if (node && node.x != null && node.y != null) {
+        return { ...d, x: node.x, y: node.y };
+      }
+      // Дефолтная позиция
+      const angle = (2 * Math.PI * idx) / directDevices.length;
+      const radius = Math.min(W, H) * 0.35;
+      return { 
+        ...d, 
+        x: plutoX + radius * Math.cos(angle), 
+        y: plutoY + radius * Math.sin(angle) 
+      };
+    });
+  }, [directDevices, graphData, W, H, plutoX, plutoY]);
 
   return (
     <div className="space-y-4">
