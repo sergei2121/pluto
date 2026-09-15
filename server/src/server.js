@@ -237,7 +237,7 @@ function glancesFromApi(data) {
     ssdt: temp(/ssd|nvme/i),
     hddTemp: hddTempSensor ? Math.round(hddTempSensor.value * 10) / 10 : null,
     disks: fsArr.map((f) => ({ mnt: f.mnt_point, percent: f.percent != null ? Math.round(f.percent * 10) / 10 : null, usedGB: toGB(f.used), sizeGB: toGB(f.size) })),
-    adapters: (data.network || []).map((n) => ({ name: n.interface_name || n.key, rx: n.rx != null ? Math.round((n.rx / 1024) * 10) / 10 : null, tx: n.tx != null ? Math.round((n.tx / 1024) * 10) / 10 : null, speed: n.speed != null ? Math.round(n.speed) : null, isUp: n.is_up != null ? !!n.is_up : undefined })),
+    adapters: (data.network || []).map((n) => ({ name: n.interface_name || n.key, rx: n.rx != null ? Math.round((n.rx / 1024) * 10) / 10 : null, tx: n.tx != null ? Math.round((n.tx / 1024) * 10) / 10 : null, speed: n.speed != null ? Math.round((n.speed / 1000000) * 10) / 10 : null, isUp: n.is_up != null ? !!n.is_up : undefined })),
     mainAdapter: mainAdapterSel ? (mainAdapterSel.interface_name || mainAdapterSel.key) : null,
     rx: mainAdapterSel && mainAdapterSel.rx != null ? Math.round((mainAdapterSel.rx / 1024) * 10) / 10 : null,
     tx: mainAdapterSel && mainAdapterSel.tx != null ? Math.round((mainAdapterSel.tx / 1024) * 10) / 10 : null,

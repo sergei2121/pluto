@@ -91,7 +91,7 @@ export interface GlancesPoint {
 }
 
 export interface GlancesDisk { mnt: string; percent: number | null; usedGB: number | null; sizeGB: number | null; }
-export interface GlancesAdapter { name: string; rx: number | null; tx: number | null; speed?: number | null; isUp?: boolean; } // КБ/с
+export interface GlancesAdapter { name: string; rx: number | null; tx: number | null; speed?: number | null; isUp?: boolean; } // rx/tx: КБ/с, speed: Мбит/с
 export interface GlancesSensor { label: string; value: number; unit: string; kind: string; } // температуры, вент.
 export interface GlancesProcess { pid: number; name: string; cpu: number | null; mem: number | null; status: string; username?: string; }
 
