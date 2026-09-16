@@ -96,12 +96,109 @@ async function checkHttp(d, timeoutMs) {
   } catch { return { ok: false, latency: null }; }
 }
 
+async function checkRtsp(d, timeoutMs) {
+  // Проверка RTSP потока через OPTIONS запрос
+  const url = d.address.startsWith('rtsp://') ? d.address : `rtsp://${d.address}${d.port ? ':' + d.port : ''}${d.path || ''}`;
+  const started = Date.now();
+  
+  return new Promise((resolve) => {
+    const parsedUrl = new URL(url.replace('rtsp://', 'http://'));
+    const port = d.port || 554;
+    const net = await import('node:net');
+    
+    const socket = net.createConnection({ host: parsedUrl.hostname, port: parseInt(port), timeout: timeoutMs }, () => {
+      // Отправляем RTSP OPTIONS запрос
+      const cseq = 1;
+      const optionsRequest = `OPTIONS ${url} RTSP/1.0\r\nCSeq: ${cseq}\r\nUser-Agent: Pluto-Monitor\r\n\r\n`;
+      socket.write(optionsRequest);
+    });
+    
+    let response = '';
+    socket.on('data', (data) => {
+      response += data.toString();
+      // Проверяем ответ RTSP
+      if (response.includes('RTSP/1.0 200 OK') || response.includes('RTSP/1.5 200 OK')) {
+        socket.destroy();
+        resolve({ ok: true, latency: Date.now() - started });
+      }
+    });
+    
+    socket.on('timeout', () => {
+      socket.destroy();
+      resolve({ ok: false, latency: null });
+    });
+    
+    socket.on('error', () => {
+      socket.destroy();
+      resolve({ ok: false, latency: null });
+    });
+    
+    // Таймаут на всю операцию
+    setTimeout(() => {
+      socket.destroy();
+      resolve({ ok: false, latency: null });
+    }, timeoutMs);
+  });
+}
+
+async function checkHttpStream(d, timeoutMs) {
+  // Проверка HTTP видеопотока (проверяем наличие контента и заголовки)
+  const base = /^https?:\/\//i.test(d.address) ? d.address : `http://${d.address}${d.port ? ':' + d.port : ''}`;
+  const url = base + (d.path || '');
+  const started = Date.now();
+  
+  return new Promise((resolve) => {
+    const u = new URL(url);
+    const lib = u.protocol === 'https:' ? https : http;
+    
+    const req = lib.get(u, { 
+      timeout: timeoutMs, 
+      headers: { 
+        Connection: 'close',
+        Accept: 'video/*, application/octet-stream'
+      } 
+    }, (res) => {
+      // Успешный ответ для видеопотока: 200 OK
+      // Также допускаем 401 (требуется авторизация) как признак живого сервиса
+      if ([200, 401].includes(res.statusCode)) {
+        const contentType = res.headers['content-type'] || '';
+        // Проверяем, является ли ответ видеопотоком или изображением
+        const isVideo = contentType.includes('video') || 
+                        contentType.includes('image') || 
+                        contentType.includes('octet-stream') ||
+                        contentType.includes('mpegurl');
+        
+        // Считаем успешной проверку если это видео/изображение поток или просто есть ответ
+        resolve({ ok: true, latency: Date.now() - started, isVideo: isVideo });
+        res.resume();
+      } else {
+        res.resume();
+        resolve({ ok: false, latency: null });
+      }
+    });
+    
+    req.on('timeout', () => {
+      req.destroy();
+      resolve({ ok: false, latency: null });
+    });
+    
+    req.on('error', () => {
+      resolve({ ok: false, latency: null });
+    });
+    
+    setTimeout(() => {
+      req.destroy();
+      resolve({ ok: false, latency: null });
+    }, timeoutMs);
+  });
+}
+
 async function runDeviceCheck(d) {
   const timeoutMs = db.settings.timeoutMs || 3000;
   let res;
   if (d.type === 'ping') res = await checkPing(d.address, timeoutMs);
   else if (d.type === 'http' || d.type === 'api') res = await checkHttp(d, timeoutMs);
-  else if (d.type === 'rtsp') res = await checkHttp({ ...d, path: '' }, timeoutMs);
+  else if (d.type === 'rtsp') res = await checkRtsp(d, timeoutMs);
   else if (d.type === 'sip') res = { ok: false, latency: null };
   else res = { ok: false, latency: null };
   applyResult(d, res);
@@ -237,7 +334,7 @@ function glancesFromApi(data) {
     ssdt: temp(/ssd|nvme/i),
     hddTemp: hddTempSensor ? Math.round(hddTempSensor.value * 10) / 10 : null,
     disks: fsArr.map((f) => ({ mnt: f.mnt_point, percent: f.percent != null ? Math.round(f.percent * 10) / 10 : null, usedGB: toGB(f.used), sizeGB: toGB(f.size) })),
-    adapters: (data.network || []).map((n) => ({ name: n.interface_name || n.key, rx: n.rx != null ? Math.round((n.rx / 1024) * 10) / 10 : null, tx: n.tx != null ? Math.round((n.tx / 1024) * 10) / 10 : null, speed: n.speed != null ? Math.round(n.speed) : null, isUp: n.is_up != null ? !!n.is_up : undefined })),
+    adapters: (data.network || []).map((n) => ({ name: n.interface_name || n.key, rx: n.rx != null ? Math.round((n.rx / 1024) * 10) / 10 : null, tx: n.tx != null ? Math.round((n.tx / 1024) * 10) / 10 : null, speed: n.speed != null ? Math.round((n.speed / 1000000) * 10) / 10 : null, isUp: n.is_up != null ? !!n.is_up : undefined })),
     mainAdapter: mainAdapterSel ? (mainAdapterSel.interface_name || mainAdapterSel.key) : null,
     rx: mainAdapterSel && mainAdapterSel.rx != null ? Math.round((mainAdapterSel.rx / 1024) * 10) / 10 : null,
     tx: mainAdapterSel && mainAdapterSel.tx != null ? Math.round((mainAdapterSel.tx / 1024) * 10) / 10 : null,

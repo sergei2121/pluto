@@ -91,7 +91,7 @@ export interface GlancesPoint {
 }
 
 export interface GlancesDisk { mnt: string; percent: number | null; usedGB: number | null; sizeGB: number | null; }
-export interface GlancesAdapter { name: string; rx: number | null; tx: number | null; speed?: number | null; isUp?: boolean; } // КБ/с
+export interface GlancesAdapter { name: string; rx: number | null; tx: number | null; speed?: number | null; isUp?: boolean; } // rx/tx: КБ/с, speed: Мбит/с
 export interface GlancesSensor { label: string; value: number; unit: string; kind: string; } // температуры, вент.
 export interface GlancesProcess { pid: number; name: string; cpu: number | null; mem: number | null; status: string; username?: string; }
 
@@ -317,7 +317,7 @@ export const DEVICE_TYPE_META: Record<DeviceType, { label: string; desc: string 
   ping: { label: 'PING', desc: 'ICMP-эхо, задержка и потеря пакетов' },
   http: { label: 'HTTP', desc: 'HTTP-запрос на хост:порт/путь' },
   api: { label: 'API', desc: 'Кастомная команда GET/POST с телом' },
-  rtsp: { label: 'RTSP', desc: 'Проверка видеопотока (OPTIONS/DESCRIBE)' },
+  rtsp: { label: 'RTSP', desc: 'Проверка RTSP-потока через OPTIONS запрос' },
   sip: { label: 'SIP', desc: 'SIP OPTIONS эндпоинта телефонии' },
   snmp: { label: 'SNMP', desc: 'Сетевое оборудование: аптайм, порты, температура' },
   ssl: { label: 'SSL', desc: 'Срок действия TLS-сертификата, предупреждение заранее' },
