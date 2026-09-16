@@ -150,13 +150,18 @@ export type StatsRange = '5m' | '30m' | '3h' | '24h' | '7d' | '30d';
 /** Куда попадает агент в статистике. */
 export type StatsView2 = '' | 'bars' | 'ws';
 
-/** Агент = ПК: пинг (uptime), телеметрия Glances и relay-пинги локальных устройств. */
+/** Источник телеметрии: Glances или Netdata. */
+export type TelemetrySource = 'glances' | 'netdata' | '';
+
+/** Агент = ПК: пинг (uptime), телеметрия Glances/Netdata и relay-пинги локальных устройств. */
 export interface Agent {
   id: string;
   name: string;
   ip: string; // адрес ПК
   relayUrl: string; // адрес pluto-relay, напр. http://192.168.1.10:8091
   glancesUrl: string; // адрес Glances (glances -w), напр. http://192.168.1.10:61208
+  netdataUrl?: string; // адрес Netdata, напр. http://192.168.1.10:19999
+  telemetrySource?: TelemetrySource; // какой источник использовать
   pingTargets: Array<{ name: string; range: string }>; // цели с кастомными именами, доступные только этому ПК
   targets: RelayTargetResult[];
   tags: string[]; // присвоенные теги (редактируются в «Изменить»)
