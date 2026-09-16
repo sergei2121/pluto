@@ -1,9 +1,6 @@
 ```gitignore
 # Dependencies
 node_modules/
-.julia/
-zig*/
-target/
 
 # Python
 __pycache__/
@@ -11,50 +8,42 @@ __pycache__/
 *.pyo
 *.pyd
 .Python
-env/
 venv/
+env/
+ENV/
 .venv/
-.ENV
-.python-version
-.pytest_cache/
-.mypy_cache/
-.coverage
-coverage/
-htmlcov/
+.env
+.env.local
+.env.*
+.envrc
+
+# Build outputs
+dist/
+build/
+target/
+*.class
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.a
+*.out
 
 # Logs
 *.log
 
-# OS generated files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# IDE
+# Editor/IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 *.tmp
 
-# Environment variables
-.env
-.env.local
-*.env.*
-
-# Build outputs
-dist/
-build/
-*.out
-*.exe
-*.dll
-*.so
-*.a
-*.class
+# Coverage
+coverage/
+htmlcov/
+.coverage
 
 # Compressed files
 *.zip

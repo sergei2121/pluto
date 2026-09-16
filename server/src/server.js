@@ -260,6 +260,160 @@ function glancesFromApi(data) {
   };
 }
 
+// ─── Netdata (телеметрия) ───────────────────────────────────────────────────
+
+/**
+ * Собирает метрики из Netdata API v2.
+ * Netdata предоставляет данные через endpoints:
+ *   /api/v2/data?context=system.cpu&format=json
+ *   /api/v2/data?context=system.ram&format=json
+ *   /api/v2/data?context=system.net&format=json
+ *   /api/v2/data?context=system.ipc&format=json (для semaphores/shared memory)
+ *   /api/v2/data?context=system.processes&format=json
+ *   /api/v2/data?context=system.swap&format=json
+ *   /api/v2/data?context=system.io&format=json
+ *   /api/v2/data?context=system.pressure&format=json (pressure stall info)
+ */
+async function collectNetdata(url) {
+  const base = String(url).replace(/\/+$/, '');
+  
+  // Вспомогательная функция для запроса к Netdata API v2
+  async function fetchContext(context, after = -60) {
+    try {
+      const txt = await fetchText(`${base}/api/v2/data?context=${encodeURIComponent(context)}&format=json&after=${after}&before=0`, 7000);
+      const data = JSON.parse(txt);
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  // Запрашиваем основные контексты параллельно
+  const [cpuData, ramData, netData, swapData, ioData, pressureData, tempsData] = await Promise.all([
+    fetchContext('system.cpu'),
+    fetchContext('system.ram'),
+    fetchContext('system.net'),
+    fetchContext('system.swap'),
+    fetchContext('system.io'),
+    fetchContext('system.pressure'),
+    fetchContext('sensors.temperatures'),
+  ]);
+
+  // Извлекаем значения из ответов Netdata
+  const getValue = (data, dimension) => {
+    if (!data || !data.result || !data.result.data || data.result.data.length === 0) return null;
+    const rows = data.result.data;
+    const dims = data.result.dimensions || {};
+    // Находим индекс нужной размерности
+    let dimIdx = -1;
+    let idx = 0;
+    for (const [key, val] of Object.entries(dims)) {
+      if (key === dimension) { dimIdx = idx; break; }
+      idx++;
+    }
+    if (dimIdx < 0) return null;
+    // Берём последнее значение
+    const lastRow = rows[rows.length - 1];
+    const val = lastRow[dimIdx + 1]; // первый элемент - timestamp
+    return val != null && val !== 'null' ? Number(val) : null;
+  };
+
+  // CPU
+  const cpuUser = getValue(cpuData, 'user');
+  const cpuSystem = getValue(cpuData, 'system');
+  const cpuIowait = getValue(cpuData, 'iowait');
+  const cpuSoftirq = getValue(cpuData, 'softirq');
+  const cpuGuest = getValue(cpuData, 'guest');
+  const cpuTotal = cpuUser != null || cpuSystem != null 
+    ? (cpuUser || 0) + (cpuSystem || 0) + (cpuIowait || 0) + (cpuSoftirq || 0) + (cpuGuest || 0)
+    : null;
+
+  // RAM
+  const ramUsed = getValue(ramData, 'used');
+  const ramCached = getValue(ramData, 'cached');
+  const ramBuffers = getValue(ramData, 'buffers');
+  const ramFree = getValue(ramData, 'free');
+  const ramTotal = ramUsed != null && ramFree != null ? ramUsed + ramFree : null;
+  const ramPercent = ramTotal != null && ramUsed != null ? Math.round((ramUsed / ramTotal) * 1000) / 10 : null;
+
+  // Network
+  const netRx = getValue(netData, 'received');
+  const netTx = getValue(netData, 'sent');
+
+  // Swap
+  const swapUsed = getValue(swapData, 'used');
+  const swapFree = getValue(swapData, 'free');
+  const swapTotal = swapUsed != null && swapFree != null ? swapUsed + swapFree : null;
+  const swapPercent = swapTotal != null && swapUsed != null ? Math.round((swapUsed / swapTotal) * 1000) / 10 : null;
+
+  // Disk I/O
+  const diskRead = getValue(ioData, 'reads');
+  const diskWrite = getValue(ioData, 'writes');
+
+  // Pressure (load average эмулируем через PSI если нет стандартного load)
+  const pressureCpuSome = getValue(pressureData, 'cpu_some');
+  
+  // Температуры
+  const cpuTemp = getValue(tempsData, 'Package id 0') ?? getValue(tempsData, 'Core 0') ?? getValue(tempsData, 'Tdie');
+  const ssdTemp = getValue(tempsData, 'SSD') ?? getValue(tempsData, 'NVMe');
+
+  // Загружаем системную информацию через /api/v2/info
+  let sysInfo = null;
+  try {
+    const infoTxt = await fetchText(`${base}/api/v2/info`, 5000);
+    sysInfo = JSON.parse(infoTxt);
+  } catch { /* не критично */ }
+
+  const uptimeSec = sysInfo?.host?.boot_id ? null : null; // Netdata не отдаёт uptime напрямую
+
+  return {
+    cpu: cpuTotal,
+    cpuCores: [], // Netdata не отдаёт per-core в простом API
+    cpuUser: cpuUser != null ? Math.round(cpuUser * 10) / 10 : null,
+    cpuSystem: cpuSystem != null ? Math.round(cpuSystem * 10) / 10 : null,
+    cpuIowait: cpuIowait != null ? Math.round(cpuIowait * 10) / 10 : null,
+    cpuFreq: null,
+    gpu: null, // Netdata требует отдельный плагин для GPU
+    gpuTemp: null,
+    gpuMem: null,
+    gpuMemPercent: null,
+    ram: ramPercent,
+    ramUsedGB: ramUsed != null ? Math.round((ramUsed / 1024 ** 3) * 10) / 10 : null,
+    ramTotalGB: ramTotal != null ? Math.round((ramTotal / 1024 ** 3) * 10) / 10 : null,
+    ramAvailableGB: ramFree != null ? Math.round((ramFree / 1024 ** 3) * 10) / 10 : null,
+    swap: swapPercent,
+    swapUsedGB: swapUsed != null ? Math.round((swapUsed / 1024 ** 3) * 10) / 10 : null,
+    swapTotalGB: swapTotal != null ? Math.round((swapTotal / 1024 ** 3) * 10) / 10 : null,
+    load1: pressureCpuSome, // эмуляция через PSI
+    load5: null,
+    load15: null,
+    cput: cpuTemp != null ? Math.round(cpuTemp * 10) / 10 : null,
+    ssdt: ssdTemp != null ? Math.round(ssdTemp * 10) / 10 : null,
+    hddTemp: null,
+    disks: [], // Netdata требует отдельный запрос для fs
+    adapters: [],
+    mainAdapter: null,
+    rx: netRx != null ? Math.round((netRx / 1024) * 10) / 10 : null, // КБ/с
+    tx: netTx != null ? Math.round((netTx / 1024) * 10) / 10 : null,
+    sensors: [],
+    uptimeSec: uptimeSec,
+    mainFsUsed: null,
+    diskRead: diskRead != null ? Math.round(diskRead * 10) / 10 : null,
+    diskWrite: diskWrite != null ? Math.round(diskWrite * 10) / 10 : null,
+    fanSpeed: null,
+    battery: null,
+    batteryTimeLeft: null,
+    batteryIsCharging: null,
+    wifiSSID: null,
+    wifiQuality: null,
+    wifiSignal: null,
+    wifiBitrate: null,
+    processes: [],
+    containers: [],
+    cloudProvider: null,
+  };
+}
+
 function parseUptime(s) {
   const m = /(\d+):(\d+):(\d+)/.exec(String(s));
   if (!m) return null;
@@ -277,6 +431,19 @@ async function collectGlances(url) {
     } catch { /* пробуем другую версию API */ }
   }
   throw new Error('Glances недоступен: /api/4/all и /api/3/all не ответили');
+}
+
+/** Собирает телеметрию из указанного источника (Glances или Netdata). */
+async function collectTelemetry(agent) {
+  const source = agent.telemetrySource || 'glances';
+  if (source === 'netdata' && agent.netdataUrl) {
+    const g = await collectNetdata(agent.netdataUrl);
+    return { ...g, via: 'netdata' };
+  } else if (agent.glancesUrl) {
+    const g = await collectGlances(agent.glancesUrl);
+    return { ...g, via: g.via };
+  }
+  throw new Error('Нет доступного источника телеметрии (укажите Glances или Netdata URL)');
 }
 
 function glancesPoint(g, t) {
@@ -507,17 +674,18 @@ async function pollAgent(agent) {
     agent.targets = out;
   }
 
-  // 3) Glances (отдельный интервал, хранение 30 дней)
+  // 3) Телеметрия (Glances или Netdata, отдельный интервал, хранение 30 дней)
   const giv = Math.max(10, db.settings.intervals.glances || 20) * 1000;
-  if (agent.glancesUrl && now - (agent.lastGlances || 0) >= giv) {
+  const hasTelemetry = agent.telemetrySource === 'netdata' ? !!agent.netdataUrl : !!agent.glancesUrl;
+  if (hasTelemetry && now - (agent.lastGlances || 0) >= giv) {
     agent.lastGlances = now;
     try {
-      const g = await collectGlances(agent.glancesUrl);
+      const g = await collectTelemetry(agent);
       agent.glancesLatest = g;
       agent.glancesError = null;
       agent.glances = [...(agent.glances || []), glancesPoint(g, now)].slice(-6000);
     } catch (e) {
-      agent.glancesError = 'Glances: ' + (e.message || 'ошибка');
+      agent.glancesError = 'Телеметрия: ' + (e.message || 'ошибка');
     }
   }
 
@@ -729,6 +897,8 @@ const server = http.createServer(async (req, res) => {
       const a = {
         id: uid(), name: String(b.name || '').trim() || ('ПК ' + ip), ip,
         relayUrl: String(b.relayUrl || '').trim(), glancesUrl: String(b.glancesUrl || '').trim(),
+        netdataUrl: String(b.netdataUrl || '').trim() || undefined,
+        telemetrySource: b.telemetrySource === 'netdata' ? 'netdata' : (b.glancesUrl ? 'glances' : ''),
         pingTargets: Array.isArray(b.pingTargets) ? b.pingTargets.map(t => typeof t === 'string' ? { name: '', range: t } : t) : [],
         tags: Array.isArray(b.tags) ? b.tags : [],
         targets: [], favorite: !!b.favorite, pingsFavorite: !!b.pingsFavorite, pingsShowcase: !!b.pingsShowcase,
@@ -748,7 +918,8 @@ const server = http.createServer(async (req, res) => {
       if (!a) return json(res, 404, { error: 'агент не найден' });
       if (method === 'PUT' || method === 'PATCH') {
         const b = await readBody(req);
-        for (const k of ['name', 'ip', 'relayUrl', 'glancesUrl', 'favorite', 'pingsFavorite', 'pingsShowcase']) if (k in b) a[k] = b[k];
+        for (const k of ['name', 'ip', 'relayUrl', 'glancesUrl', 'netdataUrl', 'favorite', 'pingsFavorite', 'pingsShowcase']) if (k in b) a[k] = b[k];
+        if ('telemetrySource' in b) a.telemetrySource = b.telemetrySource === 'netdata' ? 'netdata' : (b.glancesUrl ? 'glances' : '');
         if ('statsView' in b) a.statsView = b.statsView === 'bars' || b.statsView === 'ws' ? b.statsView : '';
         if (Array.isArray(b.pingTargets)) {
           a.pingTargets = b.pingTargets.map(t => typeof t === 'string' ? { name: '', range: t } : t);
@@ -799,10 +970,11 @@ const server = http.createServer(async (req, res) => {
       const a = db.agents.find((x) => x.id === m[1]);
       if (!a) return json(res, 404, { error: 'агент не найден' });
       try {
-        const g = await collectGlances(a.glancesUrl);
-        return json(res, 200, { ok: true, url: a.glancesUrl, via: g.via, values: glancesPoint(g, Date.now()) });
+        const g = await collectTelemetry(a);
+        const url = a.telemetrySource === 'netdata' ? a.netdataUrl : a.glancesUrl;
+        return json(res, 200, { ok: true, url: url || '', via: g.via, values: glancesPoint(g, Date.now()) });
       } catch (e) {
-        return json(res, 200, { ok: false, url: a.glancesUrl || '', via: null, error: e.message || String(e) });
+        return json(res, 200, { ok: false, url: a.glancesUrl || a.netdataUrl || '', via: null, error: e.message || String(e) });
       }
     }
 
