@@ -478,6 +478,7 @@ function notify(kind, title, body) {
   if (kind === 'recover' && !n.on.recover) return;
   if (kind === 'agentOff' && !n.on.agentOff) return;
   if (kind === 'agentOn' && !n.on.agentOn) return;
+  if (kind === 'threshold' && !n.on.threshold) return;
 
   if (n.telegram.enabled && n.telegram.botToken && n.telegram.chatId) {
     fetch(`https://api.telegram.org/bot${n.telegram.botToken}/sendMessage`, {
@@ -684,6 +685,15 @@ async function pollAgent(agent) {
       agent.glancesLatest = g;
       agent.glancesError = null;
       agent.glances = [...(agent.glances || []), glancesPoint(g, now)].slice(-6000);
+      
+      // Проверка наличия дисков большой емкости (>= 1TB)
+      if (g.disks && Array.isArray(g.disks)) {
+        const largeDisks = g.disks.filter((d) => d.sizeGB != null && d.sizeGB >= 1000);
+        if (largeDisks.length === 0) {
+          pushEvent('crit', 'agent', `Агент «${agent.name}»: Нет диска большой емкости (>= 1TB)`);
+          notify('threshold', 'PLUTO: Нет диска', `Агент «${agent.name}»: не обнаружено дисков емкостью от 1TB`);
+        }
+      }
     } catch (e) {
       agent.glancesError = 'Телеметрия: ' + (e.message || 'ошибка');
     }
