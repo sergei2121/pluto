@@ -9,6 +9,7 @@ import {
   loadDb, saveDb, uid, pushEvent, hashPass, verifyPass, issueSession, authUser, DEFAULT_SETTINGS,
 } from './lib.js';
 import { loginRateLimiter } from './middleware/rateLimiter.js';
+import telemetryCollectors from './telemetry/collectors.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const VERSION = '2.0.0';
