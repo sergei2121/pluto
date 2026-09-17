@@ -422,6 +422,8 @@ function parseUptime(s) {
 
 async function collectGlances(url) {
   const base = String(url).replace(/\/+$/, '');
+  
+  // Пробуем API v4 и v3
   for (const ver of [4, 3]) {
     try {
       const txt = await fetchText(`${base}/api/${ver}/all`, 7000);
@@ -434,7 +436,68 @@ async function collectGlances(url) {
       /* пробуем другую версию API */
     }
   }
-  throw new Error('Glances недоступен: /api/4/all и /api/3/all не ответили');
+  
+  // Запасной вариант: парсим HTML страницу
+  try {
+    console.log(`[Glances] Попытка парсинга HTML от ${url}`);
+    const html = await fetchText(base, 7000);
+    const g = parseGlancesHtml(html);
+    if (g && g.cpu != null) {
+      console.log(`[Glances] Успешный парсинг HTML от ${url}`);
+      return { ...g, via: 'html' };
+    }
+  } catch (e) {
+    console.log(`[Glances] Ошибка парсинга HTML от ${url}: ${e.message}`);
+  }
+  
+  throw new Error('Glances недоступен: API и HTML не ответили');
+}
+
+/** Парсит HTML-страницу Glances и извлекает метрики */
+function parseGlancesHtml(html) {
+  const result = {};
+  
+  // Извлекаем CPU из data-value атрибутов
+  const cpuMatch = html.match(/cpu[^"]*?data-value=["']([^"']+)/i);
+  if (cpuMatch) result.cpu = parseFloat(cpuMatch[1]);
+  
+  // MEM
+  const memMatch = html.match(/mem[^"]*?data-value=["']([^"']+)/i);
+  if (memMatch) result.ram = parseFloat(memMatch[1]);
+  
+  // Load average
+  const load1Match = html.match(/load[^"]*?min1["'][^"]*?data-value=["']([^"']+)/i);
+  const load5Match = html.match(/load[^"]*?min5["'][^"]*?data-value=["']([^"']+)/i);
+  const load15Match = html.match(/load[^"]*?min15["'][^"]*?data-value=["']([^"']+)/i);
+  if (load1Match) result.load1 = parseFloat(load1Match[1]);
+  if (load5Match) result.load5 = parseFloat(load5Match[1]);
+  if (load15Match) result.load15 = parseFloat(load15Match[1]);
+  
+  // Network rx/tx
+  const netRxMatch = html.match(/network[^"]*?rx["'][^"]*?data-value=["']([^"']+)/i);
+  const netTxMatch = html.match(/network[^"]*?tx["'][^"]*?data-value=["']([^"']+)/i);
+  if (netRxMatch) result.rx = parseFloat(netRxMatch[1]);
+  if (netTxMatch) result.tx = parseFloat(netTxMatch[1]);
+  
+  // Disk usage
+  const diskMatch = html.match(/fs[^"]*?percent["'][^"]*?data-value=["']([^"']+)/i);
+  if (diskMatch) result.mainFsUsed = parseFloat(diskMatch[1]);
+  
+  // Uptime
+  const uptimeMatch = html.match(/uptime[^"]*?data-value=["']([^"']+)/i);
+  if (uptimeMatch) result.uptimeSec = parseInt(uptimeMatch[1]);
+  
+  // Temperature sensors
+  const tempMatches = html.matchAll(/sensor[^"]*?type=["']temperature["'][^"]*?data-value=["']([^"']+)/gi);
+  const temps = [];
+  for (const m of tempMatches) temps.push(parseFloat(m[1]));
+  if (temps.length > 0) result.cput = temps[0];
+  
+  // Fan speed
+  const fanMatch = html.match(/sensor[^"]*?type=["']fan["'][^"]*?data-value=["']([^"']+)/i);
+  if (fanMatch) result.fanSpeed = parseFloat(fanMatch[1]);
+  
+  return Object.keys(result).length > 0 ? result : null;
 }
 
 /** Собирает телеметрию из указанного источника (Glances или Netdata). */
