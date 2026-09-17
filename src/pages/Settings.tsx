@@ -389,6 +389,13 @@ function MirrorTab() {
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>('polling');
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    if (typeof document !== 'undefined') {
+      return (document.documentElement.getAttribute('data-theme') as 'dark' | 'light') || 'dark';
+    }
+    return 'dark';
+  });
+  
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: 'polling', label: 'Опросы и пороги', icon: <Send className="h-3.5 w-3.5" /> },
     { id: 'tags', label: 'Теги', icon: <TagIcon className="h-3.5 w-3.5" /> },
@@ -398,16 +405,28 @@ export default function SettingsPage() {
     { id: 'mirror', label: 'Зеркало', icon: <Radio className="h-3.5 w-3.5" /> },
   ];
 
+  const toggleTheme = () => {
+    const newTheme = theme === 'dark' ? 'light' : 'dark';
+    setTheme(newTheme);
+    document.documentElement.setAttribute('data-theme', newTheme);
+    localStorage.setItem('pluto-theme', newTheme);
+  };
+
   return (
     <div className="space-y-4">
-      <div className="rise flex flex-wrap gap-1.5">
-        {tabs.map((t) => (
-          <button key={t.id} onClick={() => setTab(t.id)}
-            className={cls('inline-flex items-center gap-1.5 rounded-lg border px-3.5 py-2 text-[12.5px] font-semibold transition-all',
-              tab === t.id ? 'border-vio/60 bg-vio/20 text-ink' : 'border-line bg-panel/90 text-dim hover:text-mut')}>
-            {t.icon}{t.label}
-          </button>
-        ))}
+      <div className="rise mb-3 flex items-center justify-between">
+        <div className="flex flex-wrap gap-1.5">
+          {tabs.map((t) => (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className={cls('inline-flex items-center gap-1.5 rounded-lg border px-3.5 py-2 text-[12.5px] font-semibold transition-all',
+                tab === t.id ? 'border-vio/60 bg-vio/20 text-ink' : 'border-line bg-panel/90 text-dim hover:text-mut')}>
+              {t.icon}{t.label}
+            </button>
+          ))}
+        </div>
+        <button onClick={toggleTheme} className="btn-ghost text-[12px]" title="Переключить тему">
+          {theme === 'dark' ? '☀️ Светлая' : '🌙 Тёмная'}
+        </button>
       </div>
 
       {tab === 'polling' && <PollingTab />}

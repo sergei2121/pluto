@@ -146,3 +146,52 @@ html, body, #root {
 @media (prefers-reduced-motion: reduce) {
   .stars, .stars-2, .dot-live, .dot-crit, .rise, .pop, .toast-in, .ev-in { animation: none; }
 }
+
+/* ─── Светлая тема ────────────────────────────────────────────────────────── */
+[data-theme="light"] {
+  --color-void: #f5f7fb;
+  --color-deep: #ffffff;
+  --color-panel: #ffffff;
+  --color-raised: #f0f3f8;
+  --color-line: #d9e0ee;
+  --color-ink: #1a1f3a;
+  --color-mut: #4a5278;
+  --color-dim: #6b7298;
+  
+  --color-vio: #6d55d9;
+  --color-blu: #5b8fd9;
+  --color-ok: #3da87f;
+  --color-warn: #c98a3e;
+  --color-crit: #d95a62;
+  --color-mint: #42a8b8;
+}
+
+[data-theme="light"] .nebula {
+  background:
+    radial-gradient(60% 50% at 15% 20%, rgba(109, 85, 217, 0.08), transparent 70%),
+    radial-gradient(50% 45% at 85% 75%, rgba(91, 143, 217, 0.07), transparent 70%),
+    radial-gradient(40% 40% at 60% 10%, rgba(66, 168, 184, 0.04), transparent 70%);
+}
+
+[data-theme="light"] .stars,
+[data-theme="light"] .stars-2 {
+  background-image:
+    radial-gradient(1px 1px at 25px 35px, rgba(26, 31, 58, 0.3), transparent),
+    radial-gradient(1px 1px at 120px 90px, rgba(26, 31, 58, 0.2), transparent),
+    radial-gradient(1.5px 1.5px at 200px 160px, rgba(109, 85, 217, 0.25), transparent),
+    radial-gradient(1px 1px at 300px 60px, rgba(91, 143, 217, 0.2), transparent),
+    radial-gradient(1px 1px at 80px 220px, rgba(26, 31, 58, 0.15), transparent),
+    radial-gradient(1.5px 1.5px at 260px 260px, rgba(26, 31, 58, 0.2), transparent);
+}
+
+[data-theme="light"] .inp {
+  background: var(--color-raised);
+  border-color: var(--color-line);
+  color: var(--color-ink);
+}
+
+[data-theme="light"] .btn-ghost {
+  background: var(--color-raised);
+  border-color: var(--color-line);
+  color: var(--color-mut);
+}
