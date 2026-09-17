@@ -633,8 +633,20 @@ setInterval(() => {
     }
   }
 
+  // Принудительный опрос агентов с тегом "Bars" каждые 20 секунд
+  const barsInterval = 20 * 1000;
+  for (const a of db.agents) {
+    if (a.tags && a.tags.includes('Bars')) {
+      if (now - (a.lastPoll || 0) >= barsInterval) {
+        a.lastPoll = now;
+        queue.push(() => pollAgent(a));
+      }
+    }
+  }
+
   const aiv = Math.max(10, db.settings.intervals.agent || 30) * 1000;
   for (const a of db.agents) {
+    if (a.tags && a.tags.includes('Bars')) continue; // уже добавлен выше
     if (now - (a.lastPoll || 0) >= aiv) {
       a.lastPoll = now;
       queue.push(() => pollAgent(a));
@@ -682,9 +694,19 @@ async function pollAgent(agent) {
     agent.lastGlances = now;
     try {
       const g = await collectTelemetry(agent);
+      const prevDiskCount = agent._lastDiskCount ?? null;
       agent.glancesLatest = g;
       agent.glancesError = null;
       agent.glances = [...(agent.glances || []), glancesPoint(g, now)].slice(-6000);
+      
+      // Статистика количества дисков и алерт при уменьшении
+      const currentDiskCount = (g.disks && Array.isArray(g.disks)) ? g.disks.length : 0;
+      agent._lastDiskCount = currentDiskCount;
+      
+      if (prevDiskCount != null && currentDiskCount > 0 && currentDiskCount < prevDiskCount) {
+        pushEvent('crit', 'agent', `Агент «${agent.name}»: уменьшение количества дисков (${prevDiskCount} → ${currentDiskCount})`);
+        notify('threshold', 'PLUTO: Диски', `Агент «${agent.name}»: уменьшение количества дисков с ${prevDiskCount} до ${currentDiskCount}`);
+      }
       
       // Проверка наличия дисков большой емкости (>= 1TB)
       if (g.disks && Array.isArray(g.disks)) {
