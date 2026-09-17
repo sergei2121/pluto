@@ -216,6 +216,7 @@ export interface EventItem {
 /** Метрика, по которой можно строить порог. */
 export type AlertMetric =
   | 'cpu' | 'gpu' | 'ram' | 'cput' | 'ssdt' | 'diskUsed' | 'diskRead' | 'diskWrite' | 'swap' | 'load1' // Glances
+  | 'hddError' | 'diskCount' // HDD ошибки и количество дисков
   | 'latency' | 'sslDaysLeft'; // устройства
 
 export type AlertOp = 'gt' | 'lt' | 'gte' | 'lte';

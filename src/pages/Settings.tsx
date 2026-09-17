@@ -10,7 +10,7 @@ import {
   type User, type Role, type Route,
 } from '../lib/types';
 
-type Tab = 'polling' | 'tags' | 'notify' | 'users' | 'mirror';
+type Tab = 'polling' | 'tags' | 'notify' | 'alerts' | 'users' | 'mirror';
 
 function NumField({ label, value, onChange, min, suffix, hint }: { label: string; value: number; onChange: (v: number) => void; min: number; suffix?: string; hint?: string }) {
   return (
@@ -393,6 +393,7 @@ export default function SettingsPage() {
     { id: 'polling', label: 'Опросы и пороги', icon: <Send className="h-3.5 w-3.5" /> },
     { id: 'tags', label: 'Теги', icon: <TagIcon className="h-3.5 w-3.5" /> },
     { id: 'notify', label: 'Уведомления', icon: <Bell className="h-3.5 w-3.5" /> },
+    { id: 'alerts', label: 'HDD Error', icon: <Bell className="h-3.5 w-3.5" /> },
     { id: 'users', label: 'Пользователи', icon: <Users className="h-3.5 w-3.5" /> },
     { id: 'mirror', label: 'Зеркало', icon: <Radio className="h-3.5 w-3.5" /> },
   ];
