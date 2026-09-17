@@ -125,9 +125,11 @@ function mockGlancesPoint(t: number, agentId: string): GlancesPoint {
   const cput = Math.round((40 + mulberry32(baseSeed ^ timeBucket ^ 6)() * 35) * 10) / 10;    // 40-75°C
   const ssdt = Math.round((32 + mulberry32(baseSeed ^ timeBucket ^ 7)() * 20) * 10) / 10;    // 32-52°C
   const diskUsed = Math.round((25 + mulberry32(baseSeed ^ timeBucket ^ 8)() * 50) * 10) / 10; // 25-75%
+  const diskRead = Math.round(mulberry32(baseSeed ^ timeBucket ^ 9)() * 500 * 10) / 10;      // 0-500 Rps
+  const diskWrite = Math.round(mulberry32(baseSeed ^ timeBucket ^ 10)() * 300 * 10) / 10;    // 0-300 Wps
   
   return {
-    t, cpu, gpu, ram, rx, tx, cput, ssdt, diskUsed,
+    t, cpu, gpu, ram, rx, tx, cput, ssdt, diskUsed, diskRead, diskWrite,
   };
 }
 
@@ -170,7 +172,7 @@ function stepAgent(id: string, now: number) {
       ramUsedGB: null, ramTotalGB: null, swap: null, load1: null, load5: null,
       cput: pt.cput, ssdt: pt.ssdt, disks, adapters: [], mainAdapter: null,
       rx: pt.rx, tx: pt.tx, sensors: [], uptimeSec: Math.floor((now - a.createdAt) / 1000), via: 'emu',
-      diskRead: null, diskWrite: null, fanSpeed: null, battery: null, batteryTimeLeft: null,
+      diskRead: pt.diskRead, diskWrite: pt.diskWrite, fanSpeed: null, battery: null, batteryTimeLeft: null,
       batteryIsCharging: null, wifiSSID: null, wifiQuality: null, wifiSignal: null, wifiBitrate: null,
       processes: [], containers: [], cloudProvider: null, hddTemp: null, cpuUser: null, cpuSystem: null,
       cpuIowait: null, cpuFreq: null, gpuMem: null, gpuMemPercent: null, ramAvailableGB: null,
