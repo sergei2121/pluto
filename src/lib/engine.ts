@@ -4,9 +4,37 @@ import type { Agent, Device, GlancesPoint } from './types';
 import { clamp, hashStr, mulberry32, rnd } from './util';
 
 let timer: number | null = null;
+let barsPollTimer: number | null = null;
 
-export function startEngine() { if (timer == null) timer = window.setInterval(tick, 1000); }
-export function stopEngine() { if (timer != null) window.clearInterval(timer); timer = null; }
+export function startEngine() { 
+  if (timer == null) timer = window.setInterval(tick, 1000); 
+  if (barsPollTimer == null) barsPollTimer = window.setInterval(pollBarsAgents, 20000);
+}
+export function stopEngine() { 
+  if (timer != null) window.clearInterval(timer); timer = null; 
+  if (barsPollTimer != null) window.clearInterval(barsPollTimer); barsPollTimer = null;
+}
+
+// Принудительный опрос агентов с тегом "Bars" каждые 20 секунд
+async function pollBarsAgents() {
+  const s = getState();
+  const barsAgents = s.agents.filter(a => a.tags.includes('Bars'));
+  for (const a of barsAgents) {
+    const now = Date.now();
+    // Эмуляция опроса онлайн-статуса
+    const rng = mulberry32(hashStr(a.id) ^ Math.floor(now / 1000));
+    const online = rng() > 0.03;
+    const ms = online ? Math.round(rnd(1, 40)) : null;
+    
+    store.updateAgent(a.id, {
+      online,
+      latency: ms,
+      onlineSince: online ? (a.onlineSince || now) : 0,
+      lastSeen: online ? now : a.lastSeen,
+      lastPoll: now,
+    });
+  }
+}
 
 function tick() {
   const s = getState();
@@ -83,6 +111,9 @@ function mockGlancesPoint(t: number): GlancesPoint {
   };
 }
 
+// Хранение предыдущего количества дисков для каждого агента (для детектирования уменьшения)
+const agentPrevDiskCount = new Map<string, number>();
+
 function stepAgent(id: string, now: number) {
   const s = getState();
   const a = s.agents.find((x) => x.id === id);
@@ -98,14 +129,39 @@ function stepAgent(id: string, now: number) {
   let glancesLatest = a.glancesLatest;
   let glances = a.glances;
   if (online && dueGl) {
+    // Генерируем случайные диски для эмуляции (от 1 до 5 дисков, размер от 250 ГБ до 4 ТБ)
+    const diskCount = Math.floor(rnd(1, 6));
+    const disks = Array.from({ length: diskCount }, (_, i) => ({
+      mnt: i === 0 ? '/' : `/mnt/disk${i}`,
+      percent: Math.round(rnd(20, 85) * 10) / 10,
+      usedGB: Math.round(rnd(100, 800)),
+      sizeGB: Math.round(rnd(250, 4000)),
+    }));
+    
     const pt = mockGlancesPoint(now);
     glancesLatest = {
       t: now, cpu: pt.cpu, cpuCores: [], gpu: pt.gpu, gpuTemp: null, ram: pt.ram,
       ramUsedGB: null, ramTotalGB: null, swap: null, load1: null, load5: null,
-      cput: pt.cput, ssdt: pt.ssdt, disks: [], adapters: [], mainAdapter: null,
+      cput: pt.cput, ssdt: pt.ssdt, disks, adapters: [], mainAdapter: null,
       rx: pt.rx, tx: pt.tx, sensors: [], uptimeSec: Math.floor((now - a.createdAt) / 1000), via: 'emu',
+      diskRead: null, diskWrite: null, fanSpeed: null, battery: null, batteryTimeLeft: null,
+      batteryIsCharging: null, wifiSSID: null, wifiQuality: null, wifiSignal: null, wifiBitrate: null,
+      processes: [], containers: [], cloudProvider: null, hddTemp: null, cpuUser: null, cpuSystem: null,
+      cpuIowait: null, cpuFreq: null, gpuMem: null, gpuMemPercent: null, ramAvailableGB: null,
     };
+    
+    // Проверка на уменьшение количества дисков
+    const prevCount = agentPrevDiskCount.get(id);
+    const currCount = disks.length;
+    if (prevCount != null && currCount < prevCount) {
+      store.pushEvent('crit', 'agent', `${a.name}: уменьшение количества дисков (${prevCount} → ${currCount})`);
+    }
+    agentPrevDiskCount.set(id, currCount);
+    
     glances = [...glances, pt].slice(-4000);
+  } else if (!online) {
+    // Если агент офлайн, сбрасываем счетчик
+    agentPrevDiskCount.delete(id);
   }
 
   store.updateAgent(id, {
