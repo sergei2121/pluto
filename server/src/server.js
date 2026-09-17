@@ -427,8 +427,12 @@ async function collectGlances(url) {
       const txt = await fetchText(`${base}/api/${ver}/all`, 7000);
       const data = JSON.parse(txt);
       const g = glancesFromApi(data);
+      console.log(`[Glances] Успешный сбор с API v${ver} от ${url}`);
       return { ...g, via: `api${ver}` };
-    } catch { /* пробуем другую версию API */ }
+    } catch (e) {
+      console.log(`[Glances] Ошибка API v${ver} от ${url}: ${e.message}`);
+      /* пробуем другую версию API */
+    }
   }
   throw new Error('Glances недоступен: /api/4/all и /api/3/all не ответили');
 }
@@ -745,6 +749,7 @@ async function pollAgent(agent) {
       }
     } catch (e) {
       agent.glancesError = 'Телеметрия: ' + (e.message || 'ошибка');
+      console.log(`[Glances] Ошибка сбора телеметрии для агента ${agent.name}: ${e.message}`);
     }
   }
 
