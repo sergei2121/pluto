@@ -699,13 +699,15 @@ async function pollAgent(agent) {
       let currentDiskCount = 0;
       
       if (g.disks && Array.isArray(g.disks)) {
-        // Фильтруем диски: только >= 1TB и не системный
+        // Фильтруем диски: только >= 1TB, не системный и не SSD/NVMe
         const largeDisks = g.disks.filter((d) => {
           // Пропускаем системный диск (монтируется в "/" или корневой раздел Windows)
-          const isSystemDisk = d.mnt === '/' || /^[A-Za-z]:\\\\?$/.test(d.mnt || '');
+          const isSystemDisk = d.mnt === '/' || /^[A-Za-z]:\\?$/.test(d.mnt || '');
           // Проверяем размер >= 1000 GB (1TB)
           const isLargeCapacity = d.sizeGB != null && d.sizeGB >= 1000;
-          return !isSystemDisk && isLargeCapacity;
+          // Проверяем, что это не SSD/NVMe (по названию точки монтирования или устройства)
+          const isSSDorNVMe = /ssd|nvme/i.test(d.mnt || '') || /ssd|nvme/i.test(d.device || '');
+          return !isSystemDisk && isLargeCapacity && !isSSDorNVMe;
         });
         
         currentDiskCount = largeDisks.length;
