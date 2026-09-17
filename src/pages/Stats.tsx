@@ -15,7 +15,7 @@ const RANGES: { v: StatsRange; label: string; ms: number }[] = [
   { v: '30d', label: '30 дн', ms: 30 * 86_400_000 },
 ];
 
-type MetricKey = keyof Pick<GlancesPoint, 'cpu' | 'gpu' | 'ram' | 'rx' | 'tx' | 'cput' | 'ssdt' | 'diskUsed' | 'diskRead' | 'diskWrite'>;
+type MetricKey = keyof Pick<GlancesPoint, 'cpu' | 'gpu' | 'ram' | 'rx' | 'tx' | 'cput' | 'ssdt' | 'diskUsed' | 'diskRead' | 'diskWrite' | 'diskCount'>;
 
 const METRICS: { k: MetricKey; label: string; unit: string; color: string; icon: any; gradient: [string, string] }[] = [
   { k: 'cpu', label: 'CPU', unit: '%', color: '#8f7df0', icon: Cpu, gradient: ['#8f7df0', '#6d5dd1'] },
@@ -28,6 +28,7 @@ const METRICS: { k: MetricKey; label: string; unit: string; color: string; icon:
   { k: 'diskUsed', label: 'Диск C', unit: '%', color: '#7ba4e6', icon: HardDrive, gradient: ['#7ba4e6', '#6790d2'] },
   { k: 'diskRead', label: 'Чтение', unit: 'Rps', color: '#a78bfa', icon: HardDrive, gradient: ['#a78bfa', '#9377e6'] },
   { k: 'diskWrite', label: 'Запись', unit: 'Wps', color: '#f472b6', icon: HardDrive, gradient: ['#f472b6', '#e05ea2'] },
+  { k: 'diskCount', label: 'Диски', unit: 'шт', color: '#8bd8a8', icon: HardDrive, gradient: ['#8bd8a8', '#74c494'] },
 ];
 
 const val = (p: GlancesPoint, k: MetricKey): number | null => p[k] ?? null;
@@ -36,6 +37,7 @@ const val = (p: GlancesPoint, k: MetricKey): number | null => p[k] ?? null;
 function curVal(cur: import('../lib/types').GlancesSnapshot | null | undefined, k: MetricKey): number | null {
   if (!cur) return null;
   if (k === 'diskUsed') return cur.disks?.[0]?.percent ?? null;
+  if (k === 'diskCount') return cur.disks?.length ?? null;
   const v = (cur as unknown as Record<string, number | null>)[k];
   return typeof v === 'number' ? v : null;
 }

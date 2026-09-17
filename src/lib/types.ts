@@ -88,6 +88,7 @@ export interface GlancesPoint {
   fanSpeed: number | null; // Скорость вентилятора, RPM
   battery: number | null; // Заряд батареи, %
   wifiQuality: number | null; // Качество WiFi, %
+  diskCount: number | null; // количество дисков на агенте
 }
 
 export interface GlancesDisk { mnt: string; percent: number | null; usedGB: number | null; sizeGB: number | null; }
