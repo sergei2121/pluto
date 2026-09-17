@@ -874,8 +874,8 @@ async function pollAgent(agent) {
   if (ping.ok) { agent.lastSeen = now; if (!agent.onlineSince) agent.onlineSince = now; }
   else agent.onlineSince = 0;
   agent.latHist = [...(agent.latHist || []), { t: now, ms: ping.ok ? ping.latency : null }].slice(-480);
-  if (ping.ok && !wasOnline) { pushEvent('ok', 'agent', `Агент «${agent.name}» в сети`); notify('agentOn', 'PLUTO: агент в сети', agent.name); }
-  if (!ping.ok && wasOnline) { pushEvent('warn', 'agent', `Агент «${agent.name}» недоступен`); notify('agentOff', 'PLUTO: агент офлайн', agent.name); }
+  if (ping.ok && !wasOnline) { await pushEvent('ok', 'agent', `Агент «${agent.name}» в сети`); notify('agentOn', 'PLUTO: агент в сети', agent.name); }
+  if (!ping.ok && wasOnline) { await pushEvent('warn', 'agent', `Агент «${agent.name}» недоступен`); notify('agentOff', 'PLUTO: агент офлайн', agent.name); }
 
   // 2) relay-пинги локальных устройств. Стабильность: при сбое relay
   //    сохраняем последний успешный результат, чтобы не «мигало».
@@ -944,7 +944,7 @@ async function pollAgent(agent) {
           const prevDiskCount = agent._lastDiskCount ?? null;
           
           if (prevDiskCount != null && currentDiskCount > 0 && currentDiskCount < prevDiskCount) {
-            pushEvent('crit', 'agent', `Агент «${agent.name}»: уменьшение количества дисков большой емкости (${prevDiskCount} → ${currentDiskCount})`);
+            await pushEvent('crit', 'agent', `Агент «${agent.name}»: уменьшение количества дисков большой емкости (${prevDiskCount} → ${currentDiskCount})`);
             notify('threshold', 'PLUTO: Диски', `Агент «${agent.name}»: уменьшение количества дисков >= 1TB с ${prevDiskCount} до ${currentDiskCount}`);
           }
           
@@ -957,7 +957,7 @@ async function pollAgent(agent) {
     }
   }
 
-  saveDb();
+  await saveDb();
 }
 
 function expandTargets(target) {
@@ -1016,11 +1016,12 @@ const server = http.createServer(async (req, res) => {
         const b = await readBody(req);
         const u = db.users.find((x) => x.login.toLowerCase() === String(b.login || '').toLowerCase());
         if (!u || !verifyPass(String(b.pass || ''), u.passHash)) {
-          pushEvent('warn', 'auth', `Неудачная попытка входа: ${b.login || 'unknown'}`);
+          await pushEvent('warn', 'auth', `Неудачная попытка входа: ${b.login || 'unknown'}`);
           return json(res, 401, { error: 'Неверный логин или пароль' });
         }
-        pushEvent('info', 'auth', `Успешный вход пользователя: ${u.login}`);
-        return json(res, 200, { token: issueSession(u.id), user: publicUser(u) });
+        await pushEvent('info', 'auth', `Успешный вход пользователя: ${u.login}`);
+        const token = await issueSession(u.id);
+        return json(res, 200, { token, user: publicUser(u) });
       });
       return;
     }
@@ -1070,7 +1071,7 @@ const server = http.createServer(async (req, res) => {
         existing.twoFA = twoFA;
         if (b.password && String(b.password).length > 0) existing.passHash = hashPass(String(b.password));
         saved = existing;
-        pushEvent('info', 'system', `Пользователь «${name}» обновлён (админ: ${user.login})`);
+        await pushEvent('info', 'system', `Пользователь «${name}» обновлён (админ: ${user.login})`);
       } else {
         if (!b.password || String(b.password).length < 4) return json(res, 400, { error: 'Пароль от 4 символов' });
         saved = {
@@ -1082,9 +1083,9 @@ const server = http.createServer(async (req, res) => {
           createdAt: Date.now(),
         };
         db.users.push(saved);
-        pushEvent('info', 'system', `Создан пользователь «${name}» (${login}, роль: ${saved.role})`);
+        await pushEvent('info', 'system', `Создан пользователь «${name}» (${login}, роль: ${saved.role})`);
       }
-      saveDb();
+      await saveDb();
       return json(res, 200, publicUser(saved));
     }
 
@@ -1096,8 +1097,8 @@ const server = http.createServer(async (req, res) => {
       if (target.id === user.id) return json(res, 400, { error: 'Нельзя удалить самого себя' });
       db.users = db.users.filter((x) => x.id !== um[1]);
       db.sessions = (db.sessions || []).filter((s) => s.userId !== um[1]);
-      pushEvent('warn', 'system', `Пользователь «${target.name}» удалён (админ: ${user.login})`);
-      saveDb();
+      await pushEvent('warn', 'system', `Пользователь «${target.name}» удалён (админ: ${user.login})`);
+      await saveDb();
       return json(res, 200, { ok: true });
     }
 
@@ -1124,8 +1125,8 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/devices' && method === 'DELETE' && isAdmin) {
       const removed = db.devices.length;
       db.devices = [];
-      pushEvent('warn', 'system', `Очищен список устройств: удалено ${removed} шт.`);
-      saveDb();
+      await pushEvent('warn', 'system', `Очищен список устройств: удалено ${removed} шт.`);
+      await saveDb();
       return json(res, 200, { ok: true, removed });
     }
     if (p === '/api/devices' && method === 'POST' && isAdmin) {
@@ -1139,8 +1140,8 @@ const server = http.createServer(async (req, res) => {
         lastCheck: 0, lastChange: Date.now(), checking: false, approx: false, createdAt: Date.now(),
       };
       db.devices.push(d);
-      pushEvent('info', 'device', `Добавлено устройство «${d.name}» (${d.address})`);
-      saveDb();
+      await pushEvent('info', 'device', `Добавлено устройство «${d.name}» (${d.address})`);
+      await saveDb();
       queue.push(() => scheduleDeviceCheck(d)); runNext();
       return json(res, 200, d);
     }
@@ -1151,13 +1152,13 @@ const server = http.createServer(async (req, res) => {
       if (method === 'PUT' || method === 'PATCH') {
         const b = await readBody(req);
         for (const k of ['name', 'type', 'address', 'port', 'path', 'method', 'body', 'interval', 'tags', 'favorite', 'showcase']) if (k in b) d[k] = b[k];
-        saveDb();
+        await saveDb();
         return json(res, 200, d);
       }
       if (method === 'DELETE') {
         db.devices = db.devices.filter((x) => x.id !== d.id);
-        pushEvent('info', 'device', `Устройство «${d.name}» удалено`);
-        saveDb();
+        await pushEvent('info', 'device', `Устройство «${d.name}» удалено`);
+        await saveDb();
         return json(res, 200, { ok: true });
       }
     }
@@ -1186,8 +1187,8 @@ const server = http.createServer(async (req, res) => {
         latHist: [], glances: [], glancesLatest: null, glancesError: null, createdAt: Date.now(),
       };
       db.agents.push(a);
-      pushEvent('info', 'agent', `Добавлен агент «${a.name}» (${a.ip})`);
-      saveDb();
+      await pushEvent('info', 'agent', `Добавлен агент «${a.name}» (${a.ip})`);
+      await saveDb();
       queue.push(() => pollAgent(a)); runNext();
       return json(res, 200, a);
     }
@@ -1204,13 +1205,13 @@ const server = http.createServer(async (req, res) => {
           a.pingTargets = b.pingTargets.map(t => typeof t === 'string' ? { name: '', range: t } : t);
         }
         if (Array.isArray(b.tags)) a.tags = b.tags.map(String);
-        saveDb();
+        await saveDb();
         return json(res, 200, a);
       }
       if (method === 'DELETE') {
         db.agents = db.agents.filter((x) => x.id !== a.id);
-        pushEvent('info', 'agent', `Агент «${a.name}» удалён`);
-        saveDb();
+        await pushEvent('info', 'agent', `Агент «${a.name}» удалён`);
+        await saveDb();
         return json(res, 200, { ok: true });
       }
     }
@@ -1264,14 +1265,14 @@ const server = http.createServer(async (req, res) => {
       if (!t.label) return json(res, 400, { error: 'укажите название' });
       if (db.tags.some((x) => x.label.toLowerCase() === t.label.toLowerCase())) return json(res, 400, { error: 'такой тег уже есть' });
       db.tags.push(t);
-      pushEvent('info', 'system', `Создан тег «${t.label}»`);
-      saveDb();
+      await pushEvent('info', 'system', `Создан тег «${t.label}»`);
+      await saveDb();
       return json(res, 200, t);
     }
     m = p.match(/^\/api\/tags\/([^/]+)$/);
     if (m && method === 'DELETE' && isAdmin) {
       db.tags = db.tags.filter((x) => x.id !== m[1]);
-      saveDb();
+      await saveDb();
       return json(res, 200, { ok: true });
     }
     if (m && method === 'PATCH' && isAdmin) {
@@ -1281,7 +1282,7 @@ const server = http.createServer(async (req, res) => {
       if ('label' in b) tag.label = String(b.label || '').trim();
       if ('color' in b) tag.color = String(b.color || '#9a8cfa');
       if ('visible' in b) tag.visible = !!b.visible;
-      saveDb();
+      await saveDb();
       return json(res, 200, tag);
     }
 
@@ -1295,9 +1296,9 @@ const server = http.createServer(async (req, res) => {
         showcase: { ...db.settings.showcase, ...(b.showcase || {}) },
       };
       const prevPort = db.settings.showcase.port;
-      saveDb();
+      await saveDb();
       if (db.settings.showcase.port !== prevPort) startShowcase();
-      pushEvent('info', 'system', 'Системные настройки сохранены');
+      await pushEvent('info', 'system', 'Системные настройки сохранены');
       return json(res, 200, db.settings);
     }
     if (p === '/api/showcase/restart' && method === 'POST' && isAdmin) {
