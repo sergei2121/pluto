@@ -1,7 +1,7 @@
 // ─── PLUTO: статистика Bars / WS (телеметрия Glances) ───────────────────────
 import { useMemo, useState } from 'react';
-import { BarChart3, Waves, Activity, Download, Cpu, HardDrive, Thermometer, Wifi, Zap } from 'lucide-react';
-import { Panel, EmptyState, TimeAgo } from '../components/ui';
+import { BarChart3, Waves, Activity, Download, Cpu, HardDrive, Thermometer, Wifi, Zap, Server } from 'lucide-react';
+import { Panel, EmptyState, TimeAgo, Sparkbar } from '../components/ui';
 import { store, useCurrentUser, usePluto, visibleAgents } from '../lib/store';
 import { cls, fmtNet, LINE_COLORS } from '../lib/util';
 import type { Agent, GlancesPoint, StatsRange } from '../lib/types';
@@ -173,6 +173,30 @@ export default function Stats({ mode }: { mode: 'bars' | 'ws' }) {
   const cur = agent?.glancesLatest;
   const selectedMetric = METRICS.find((m) => m.k === metric)!;
 
+  // Статистика HDD для агентов в режиме bars (диски >= 1TB)
+  const hddStats = useMemo(() => {
+    if (mode !== 'bars') return null;
+    const stats = agents.map((a) => {
+      const disks = a.glancesLatest?.disks ?? [];
+      const largeDisks = disks.filter((d) => (d.sizeGB ?? 0) >= 1024);
+      return {
+        agentId: a.id,
+        name: a.name,
+        ip: a.ip,
+        online: a.online,
+        totalDisks: disks.length,
+        largeDisksCount: largeDisks.length,
+        largeDisksTotalTB: largeDisks.reduce((sum, d) => sum + (d.sizeGB ?? 0) / 1024, 0),
+      };
+    });
+    const totalCount = stats.reduce((sum, s) => sum + s.largeDisksCount, 0);
+    const totalTB = stats.reduce((sum, s) => sum + s.largeDisksTotalTB, 0);
+    return { agents: stats, totalCount, totalTB };
+  }, [agents, mode]);
+
+  // Режим "все агенты на одной странице" для bars
+  const showAllAgents = mode === 'bars';
+
   return (
     <div className="space-y-5">
       {/* Заголовок страницы */}
@@ -185,15 +209,31 @@ export default function Stats({ mode }: { mode: 'bars' | 'ws' }) {
           <div className="text-[11px] text-dim">Телеметрия Glances · хранение 30 дней · интерактивные графики</div>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2.5">
-          <select className="inp min-w-[180px] font-mono text-[12px]" value={agent?.id ?? ''} onChange={(e) => setAgentId(e.target.value)}>
-            {agents.map((a) => <option key={a.id} value={a.id}>{a.name} · {a.ip}</option>)}
-            {!agents.length && <option value="">нет агентов</option>}
-          </select>
-          {agent && mode === 'bars' && (
-            <div className="flex items-center gap-2 rounded-xl border border-line bg-raised/60 px-3 py-2 text-[11px] font-semibold text-dim shadow-inner">
-              <HardDrive className="h-3.5 w-3.5" />
-              <span>Дисков <span className="font-mono text-ink">{(agent.glancesLatest?.disks ?? []).filter((d) => (d.sizeGB ?? 0) >= 1).length}</span></span>
-            </div>
+          {showAllAgents && hddStats && (
+            <>
+              <div className="flex items-center gap-2 rounded-xl border border-line bg-raised/60 px-3 py-2 text-[11px] font-semibold text-dim shadow-inner">
+                <Server className="h-3.5 w-3.5" />
+                <span>Агентов <span className="font-mono text-ink">{hddStats.agents.length}</span></span>
+              </div>
+              <div className="flex items-center gap-2 rounded-xl border border-ok/50 bg-ok/10 px-3 py-2 text-[11px] font-semibold shadow-inner">
+                <HardDrive className="h-3.5 w-3.5 text-ok" />
+                <span>HDD ≥1TB: <span className="font-mono text-ok">{hddStats.totalCount}</span> шт · <span className="font-mono text-ok">{hddStats.totalTB.toFixed(1)} TB</span></span>
+              </div>
+            </>
+          )}
+          {!showAllAgents && (
+            <>
+              <select className="inp min-w-[180px] font-mono text-[12px]" value={agent?.id ?? ''} onChange={(e) => setAgentId(e.target.value)}>
+                {agents.map((a) => <option key={a.id} value={a.id}>{a.name} · {a.ip}</option>)}
+                {!agents.length && <option value="">нет агентов</option>}
+              </select>
+              {agent && mode === 'bars' && (
+                <div className="flex items-center gap-2 rounded-xl border border-line bg-raised/60 px-3 py-2 text-[11px] font-semibold text-dim shadow-inner">
+                  <HardDrive className="h-3.5 w-3.5" />
+                  <span>Дисков <span className="font-mono text-ink">{(agent.glancesLatest?.disks ?? []).filter((d) => (d.sizeGB ?? 0) >= 1).length}</span></span>
+                </div>
+              )}
+            </>
           )}
           <div className="flex overflow-hidden rounded-xl border border-line bg-raised/60 shadow-inner">
             {RANGES.map((r) => (
@@ -207,13 +247,112 @@ export default function Stats({ mode }: { mode: 'bars' | 'ws' }) {
         </div>
       </div>
 
-      {!agent ? (
+      {!agents.length ? (
         <Panel title="Нет источника данных">
           <EmptyState icon={<Activity className="h-7 w-7" />} title="В этой вкладке пока нет агентов"
             text={`Назначьте агента во вкладку «${mode === 'bars' ? 'Статистика Bars' : 'Статистика WS'}»: «Агенты → Изменить → Показывать в статистике».`}
             action={<button onClick={() => store.nav('agents')} className="rounded-xl border border-vio/50 bg-gradient-to-r from-vio/20 to-vio/10 px-5 py-2.5 text-[13px] font-bold text-ink transition-all hover:from-vio/30 hover:to-vio/20">К агентам</button>} />
         </Panel>
+      ) : showAllAgents ? (
+        /* Режим "все агенты на одной странице" для Bars */
+        <div className="space-y-6">
+          {/* Сетка карточек агентов с графиками */}
+          <div className="grid gap-5 lg:grid-cols-2">
+            {agents.map((a) => {
+              const agentPoints = a.glances.filter((p) => {
+                const r = RANGES.find((r) => r.v === range)!;
+                return p.t >= Date.now() - r.ms;
+              });
+              const agentCur = a.glancesLatest;
+              const hddInfo = hddStats?.agents.find((s) => s.agentId === a.id);
+              
+              return (
+                <div key={a.id} className="rise rounded-2xl border border-line bg-panel/90 p-4 shadow-sm">
+                  {/* Заголовок карточки агента */}
+                  <div className="mb-3 flex items-start justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <div className={cls('h-2.5 w-2.5 rounded-full', a.online ? 'bg-ok' : 'bg-crit')} />
+                        <span className="font-display text-[14px] font-bold text-ink">{a.name}</span>
+                        {a.online && <span className="rounded border border-blu/40 bg-blu/10 px-1 py-px text-[8px] font-bold text-blu">GL</span>}
+                      </div>
+                      <div className="font-mono text-[11px] text-dim">{a.ip}</div>
+                    </div>
+                    <button onClick={() => store.nav('agents', a.ip)} className="rounded-lg border border-line bg-raised/50 px-3 py-1.5 text-[11px] font-semibold text-dim transition-colors hover:border-vio/40 hover:text-vio">
+                      Подробнее
+                    </button>
+                  </div>
+
+                  {/* Статистика HDD для этого агента */}
+                  {hddInfo && (
+                    <div className="mb-3 grid grid-cols-3 gap-2 rounded-xl border border-line bg-raised/40 p-3">
+                      <div className="text-center">
+                        <div className="font-mono text-[16px] font-bold text-ink">{hddInfo.totalDisks}</div>
+                        <div className="text-[9px] font-bold uppercase tracking-wider text-dim">Всего дисков</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="font-mono text-[16px] font-bold text-ok">{hddInfo.largeDisksCount}</div>
+                        <div className="text-[9px] font-bold uppercase tracking-wider text-dim">HDD ≥1TB</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="font-mono text-[16px] font-bold text-blu">{hddInfo.largeDisksTotalTB.toFixed(1)}</div>
+                        <div className="text-[9px] font-bold uppercase tracking-wider text-dim">Объём TB</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Мини-графики по основным метрикам */}
+                  <div className="space-y-3">
+                    {(['cpu', 'ram', 'cput', 'ssdt'] as MetricKey[]).map((mKey) => {
+                      const mDef = METRICS.find((m) => m.k === mKey)!;
+                      const mPoints = agentPoints;
+                      const curValMetric = agentCur ? (agentCur.disks?.[0]?.percent ?? (agentCur as unknown as Record<string, number | null>)[mKey]) : null;
+                      
+                      return (
+                        <div key={mKey}>
+                          <div className="mb-1 flex items-center justify-between">
+                            <div className="flex items-center gap-1.5">
+                              <mDef.icon className="h-3.5 w-3.5" style={{ color: mDef.color }} />
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-dim">{mDef.label}</span>
+                            </div>
+                            <span className="font-mono text-[12px] font-bold" style={{ color: mDef.color }}>
+                              {curValMetric == null ? '—' : mKey === 'rx' || mKey === 'tx' ? fmtNet(curValMetric) : `${Math.round(curValMetric * 10) / 10}${mDef.unit}`}
+                            </span>
+                          </div>
+                          <div className="h-10">
+                            {mPoints.length > 0 ? (
+                              <Sparkbar data={mPoints.map((p) => {
+                                const v = p[mKey];
+                                return v == null ? -1 : v;
+                              })} height={40} color={mDef.color} />
+                            ) : (
+                              <div className="h-full rounded bg-raised/50" />
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Временная шкала для основной метрики */}
+                  <div className="mt-4 pt-3 border-t border-line/40">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-dim">Временная шкала CPU</span>
+                      <TimeAgo ts={agentPoints[agentPoints.length - 1]?.t ?? 0} />
+                    </div>
+                    {agentPoints.length > 0 ? (
+                      <BarsChart points={agentPoints} metric="cpu" color="#8f7df0" gradient={['#8f7df0', '#6d5dd1']} range={range} />
+                    ) : (
+                      <p className="text-[11px] text-dim">Нет данных за выбранный период</p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       ) : (
+        /* Старый режим с выбором одного агента (для WS) */
         <>
           {/* Карточки метрик */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-10">
