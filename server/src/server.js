@@ -694,26 +694,32 @@ async function pollAgent(agent) {
     agent.lastGlances = now;
     try {
       const g = await collectTelemetry(agent);
-      const prevDiskCount = agent._lastDiskCount ?? null;
-      agent.glancesLatest = g;
-      agent.glancesError = null;
-      agent.glances = [...(agent.glances || []), glancesPoint(g, now)].slice(-6000);
+      // Статистика количества дисков большой емкости (>= 1TB) для агентов с тегом "Bars"
+      const isBarsAgent = agent.tags && agent.tags.includes('Bars');
+      let currentDiskCount = 0;
       
-      // Статистика количества дисков и алерт при уменьшении
-      const currentDiskCount = (g.disks && Array.isArray(g.disks)) ? g.disks.length : 0;
-      agent._lastDiskCount = currentDiskCount;
-      
-      if (prevDiskCount != null && currentDiskCount > 0 && currentDiskCount < prevDiskCount) {
-        pushEvent('crit', 'agent', `Агент «${agent.name}»: уменьшение количества дисков (${prevDiskCount} → ${currentDiskCount})`);
-        notify('threshold', 'PLUTO: Диски', `Агент «${agent.name}»: уменьшение количества дисков с ${prevDiskCount} до ${currentDiskCount}`);
-      }
-      
-      // Проверка наличия дисков большой емкости (>= 1TB)
       if (g.disks && Array.isArray(g.disks)) {
-        const largeDisks = g.disks.filter((d) => d.sizeGB != null && d.sizeGB >= 1000);
-        if (largeDisks.length === 0) {
-          pushEvent('crit', 'agent', `Агент «${agent.name}»: Нет диска большой емкости (>= 1TB)`);
-          notify('threshold', 'PLUTO: Нет диска', `Агент «${agent.name}»: не обнаружено дисков емкостью от 1TB`);
+        // Фильтруем диски: только >= 1TB и не системный
+        const largeDisks = g.disks.filter((d) => {
+          // Пропускаем системный диск (монтируется в "/" или корневой раздел Windows)
+          const isSystemDisk = d.mnt === '/' || /^[A-Za-z]:\\\\?$/.test(d.mnt || '');
+          // Проверяем размер >= 1000 GB (1TB)
+          const isLargeCapacity = d.sizeGB != null && d.sizeGB >= 1000;
+          return !isSystemDisk && isLargeCapacity;
+        });
+        
+        currentDiskCount = largeDisks.length;
+        
+        // Для агентов с тегом "Bars" проверяем уменьшение количества дисков
+        if (isBarsAgent) {
+          const prevDiskCount = agent._lastDiskCount ?? null;
+          
+          if (prevDiskCount != null && currentDiskCount > 0 && currentDiskCount < prevDiskCount) {
+            pushEvent('crit', 'agent', `Агент «${agent.name}»: уменьшение количества дисков большой емкости (${prevDiskCount} → ${currentDiskCount})`);
+            notify('threshold', 'PLUTO: Диски', `Агент «${agent.name}»: уменьшение количества дисков >= 1TB с ${prevDiskCount} до ${currentDiskCount}`);
+          }
+          
+          agent._lastDiskCount = currentDiskCount;
         }
       }
     } catch (e) {
