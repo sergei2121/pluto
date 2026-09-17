@@ -189,6 +189,12 @@ export default function Stats({ mode }: { mode: 'bars' | 'ws' }) {
             {agents.map((a) => <option key={a.id} value={a.id}>{a.name} · {a.ip}</option>)}
             {!agents.length && <option value="">нет агентов</option>}
           </select>
+          {agent && mode === 'bars' && (
+            <div className="flex items-center gap-2 rounded-xl border border-line bg-raised/60 px-3 py-2 text-[11px] font-semibold text-dim shadow-inner">
+              <HardDrive className="h-3.5 w-3.5" />
+              <span>дисков: <span className="font-mono text-ink">{agent.glancesLatest?.disks.length ?? 0}</span></span>
+            </div>
+          )}
           <div className="flex overflow-hidden rounded-xl border border-line bg-raised/60 shadow-inner">
             {RANGES.map((r) => (
               <button key={r.v} onClick={() => setRange(r.v)}
