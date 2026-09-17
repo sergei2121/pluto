@@ -145,6 +145,7 @@ const TITLES: Record<Route, string> = {
   devices: 'Устройства',
   agents: 'Агенты и локальные сети',
   'agent-pings': 'Пинги агентов · локальные устройства',
+  'network-map': 'Карта сети',
   'stats-bars': 'Статистика Bars · Glances',
   'stats-ws': 'Статистика WS · Glances',
   sla: 'SLA-отчёт · доступность',
