@@ -100,14 +100,34 @@ export async function forceCheck(id: string): Promise<void> {
 
 // ─── Агенты ──────────────────────────────────────────────────────────────────
 
-function mockGlancesPoint(t: number): GlancesPoint {
+// Генератор псевдо-случайных чисел на основе seed для детерминированной эмуляции
+function seededRandom(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function mockGlancesPoint(t: number, agentId: string): GlancesPoint {
+  // Используем hash от agentId + времени для детерминированной генерации
+  const baseSeed = hashStr(agentId) ^ Math.floor(t / 10000);
+  const rng = seededRandom(baseSeed);
+  
+  // Реалистичные диапазоны для разных метрик
+  const cpu = Math.round((5 + rng() * 45) * 10) / 10;      // 5-50%
+  const gpu = Math.round(rng() * 35 * 10) / 10;            // 0-35%
+  const ram = Math.round((30 + rng() * 40) * 10) / 10;     // 30-70%
+  const rx = Math.round(rng() * 3000 * 10) / 10;           // 0-3000 КБ/с
+  const tx = Math.round(rng() * 1000 * 10) / 10;           // 0-1000 КБ/с
+  const cput = Math.round((40 + rng() * 35) * 10) / 10;    // 40-75°C
+  const ssdt = Math.round((32 + rng() * 20) * 10) / 10;    // 32-52°C
+  const diskUsed = Math.round((25 + rng() * 50) * 10) / 10; // 25-75%
+  
   return {
-    t,
-    cpu: Math.round(rnd(2, 90) * 10) / 10, gpu: Math.round(rnd(0, 70) * 10) / 10,
-    ram: Math.round(rnd(20, 90) * 10) / 10,
-    rx: Math.round(rnd(0, 5000) * 10) / 10, tx: Math.round(rnd(0, 1500) * 10) / 10,
-    cput: Math.round(rnd(35, 78) * 10) / 10, ssdt: Math.round(rnd(30, 58) * 10) / 10,
-    diskUsed: Math.round(rnd(30, 80) * 10) / 10,
+    t, cpu, gpu, ram, rx, tx, cput, ssdt, diskUsed,
   };
 }
 
@@ -138,7 +158,7 @@ function stepAgent(id: string, now: number) {
       sizeGB: Math.round(rnd(250, 4000)),
     }));
     
-    const pt = mockGlancesPoint(now);
+    const pt = mockGlancesPoint(now, a.id);
     glancesLatest = {
       t: now, cpu: pt.cpu, cpuCores: [], gpu: pt.gpu, gpuTemp: null, ram: pt.ram,
       ramUsedGB: null, ramTotalGB: null, swap: null, load1: null, load5: null,
