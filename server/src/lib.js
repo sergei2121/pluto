@@ -14,7 +14,7 @@ export const DEFAULT_SETTINGS = {
     telegram: { enabled: false, botToken: '', chatId: '' },
     email: { enabled: false, smtp: '', from: '', to: '' },
     push: { enabled: false },
-    on: { down: true, degraded: true, recover: true, agentOff: true, agentOn: false },
+    on: { down: true, degraded: true, recover: true, agentOff: true, agentOn: false, threshold: true },
   },
   showcase: { port: 8081 },
 };
