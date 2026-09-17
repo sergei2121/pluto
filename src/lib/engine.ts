@@ -49,7 +49,7 @@ function tick() {
 
   for (const a of s.agents) {
     const aiv = Math.max(10, s.settings.intervals.agent || 30) * 1000;
-    if (now - a.lastPoll >= aiv) stepAgent(a.id, now);
+    if (now - a.lastPoll >= aiv) void stepAgent(a.id, now);
   }
 }
 
@@ -100,43 +100,120 @@ export async function forceCheck(id: string): Promise<void> {
 
 // ─── Агенты ──────────────────────────────────────────────────────────────────
 
-// Генератор псевдо-случайных чисел на основе seed для детерминированной эмуляции
-function seededRandom(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a |= 0; a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+async function fetchGlancesData(agent: Agent): Promise<GlancesPoint | null> {
+  if (!agent.glancesUrl) return null;
+  
+  try {
+    // Базовый URL без trailing slash
+    const baseUrl = agent.glancesUrl.replace(/\/$/, '');
+    
+    // Запрашиваем все необходимые плагины параллельно
+    const [cpuRes, memRes, fsRes, smartRes, diskioRes] = await Promise.all([
+      fetch(`${baseUrl}/api/4/cpu`).then(r => r.ok ? r.json() : null),
+      fetch(`${baseUrl}/api/4/mem`).then(r => r.ok ? r.json() : null),
+      fetch(`${baseUrl}/api/4/fs`).then(r => r.ok ? r.json() : null),
+      fetch(`${baseUrl}/api/4/smart`).then(r => r.ok ? r.json() : null),
+      fetch(`${baseUrl}/api/4/diskio`).then(r => r.ok ? r.json() : null),
+    ]);
+    
+    if (!cpuRes || !memRes) return null;
+    
+    // Парсим CPU
+    const cpu = typeof cpuRes.cpu === 'number' ? cpuRes.cpu : 0;
+    const percpu = cpuRes.percpu || [];
+    const cpuCores = percpu.map((p: any) => ({
+      number: p.cpu_number || 0,
+      total: p.total || 0,
+      user: p.user || 0,
+      system: p.system || 0,
+      idle: p.idle || 0,
+    }));
+    
+    // Парсим RAM
+    const ramTotal = memRes.total || 0;
+    const ramUsed = memRes.used || 0;
+    const ram = ramTotal > 0 ? Math.round((ramUsed / ramTotal) * 1000) / 10 : 0;
+    const ramUsedGB = ramTotal > 0 ? Math.round(ramUsed / 1024 / 1024 / 1024 * 10) / 10 : null;
+    const ramTotalGB = ramTotal > 0 ? Math.round(ramTotal / 1024 / 1024 / 1024 * 10) / 10 : null;
+    
+    // Парсим файловые системы (диски)
+    const disks: Array<{ mnt: string; percent: number; usedGB: number; sizeGB: number }> = [];
+    if (Array.isArray(fsRes)) {
+      for (const fs of fsRes) {
+        const sizeGB = fs.size ? Math.round(fs.size / 1024 / 1024 / 1024 * 10) / 10 : 0;
+        const usedGB = fs.used ? Math.round(fs.used / 1024 / 1024 / 1024 * 10) / 10 : 0;
+        const percent = fs.percent || 0;
+        disks.push({
+          mnt: fs.mnt_point || fs.device_name || '',
+          percent,
+          usedGB,
+          sizeGB,
+        });
+      }
+    }
+    
+    // Парсим SMART (температуры SSD)
+    let ssdt: number | null = null;
+    if (Array.isArray(smartRes) && smartRes.length > 0) {
+      const smartDevice = smartRes[0];
+      // Ищем температуру в атрибутах SMART
+      for (const key of Object.keys(smartDevice)) {
+        const attr = smartDevice[key];
+        if (attr && typeof attr === 'object' && attr.key === '_temperature') {
+          ssdt = attr.value || null;
+          break;
+        }
+      }
+      // Альтернативно: ищем по имени
+      if (ssdt === null) {
+        for (const key of Object.keys(smartDevice)) {
+          const attr = smartDevice[key];
+          if (attr && typeof attr === 'object' && attr.name && attr.name.toLowerCase().includes('temperature')) {
+            ssdt = attr.value || null;
+            break;
+          }
+        }
+      }
+    }
+    
+    // Парсим diskio (чтение/запись)
+    let diskRead = 0;
+    let diskWrite = 0;
+    if (Array.isArray(diskioRes) && diskioRes.length > 0) {
+      // Суммируем по всем дискам
+      for (const disk of diskioRes) {
+        diskRead += disk.read_bytes_rate_per_sec || 0;
+        diskWrite += disk.write_bytes_rate_per_sec || 0;
+      }
+      // Конвертируем в КБ/с
+      diskRead = Math.round(diskRead / 1024 * 10) / 10;
+      diskWrite = Math.round(diskWrite / 1024 * 10) / 10;
+    }
+    
+    // Температура CPU (пытаемся получить из sensors, если доступно)
+    let cput: number | null = null;
+    // Пока оставляем null, так как sensors может быть пустым
+    
+    return {
+      t: Date.now(),
+      cpu,
+      gpu: 0, // GPU пока не запрашиваем
+      ram,
+      rx: 0, // network пока не запрашиваем
+      tx: 0,
+      cput: cput || 0,
+      ssdt: ssdt || 0,
+      diskUsed: disks.length > 0 ? disks[0].percent : 0,
+      diskRead,
+      diskWrite,
+    };
+  } catch (err) {
+    console.error('Error fetching Glances data:', err);
+    return null;
+  }
 }
 
-function mockGlancesPoint(t: number, agentId: string): GlancesPoint {
-  // Используем hash от agentId + времени для детерминированной генерации
-  const baseSeed = hashStr(agentId);
-  const timeBucket = Math.floor(t / 5000); // каждые 5 секунд новое значение
-  
-  // Реалистичные диапазоны для разных метрик с индивидуальными seed
-  const cpu = Math.round((5 + mulberry32(baseSeed ^ timeBucket ^ 1)() * 45) * 10) / 10;      // 5-50%
-  const gpu = Math.round(mulberry32(baseSeed ^ timeBucket ^ 2)() * 35 * 10) / 10;            // 0-35%
-  const ram = Math.round((30 + mulberry32(baseSeed ^ timeBucket ^ 3)() * 40) * 10) / 10;     // 30-70%
-  const rx = Math.round(mulberry32(baseSeed ^ timeBucket ^ 4)() * 3000 * 10) / 10;           // 0-3000 КБ/с
-  const tx = Math.round(mulberry32(baseSeed ^ timeBucket ^ 5)() * 1000 * 10) / 10;           // 0-1000 КБ/с
-  const cput = Math.round((40 + mulberry32(baseSeed ^ timeBucket ^ 6)() * 35) * 10) / 10;    // 40-75°C
-  const ssdt = Math.round((32 + mulberry32(baseSeed ^ timeBucket ^ 7)() * 20) * 10) / 10;    // 32-52°C
-  const diskUsed = Math.round((25 + mulberry32(baseSeed ^ timeBucket ^ 8)() * 50) * 10) / 10; // 25-75%
-  const diskRead = Math.round(mulberry32(baseSeed ^ timeBucket ^ 9)() * 500 * 10) / 10;      // 0-500 Rps
-  const diskWrite = Math.round(mulberry32(baseSeed ^ timeBucket ^ 10)() * 300 * 10) / 10;    // 0-300 Wps
-  
-  return {
-    t, cpu, gpu, ram, rx, tx, cput, ssdt, diskUsed, diskRead, diskWrite,
-  };
-}
-
-// Хранение предыдущего количества дисков для каждого агента (для детектирования уменьшения)
-const agentPrevDiskCount = new Map<string, number>();
-
-function stepAgent(id: string, now: number) {
+async function stepAgent(id: string, now: number) {
   const s = getState();
   const a = s.agents.find((x) => x.id === id);
   if (!a) return;
@@ -150,57 +227,110 @@ function stepAgent(id: string, now: number) {
 
   let glancesLatest = a.glancesLatest;
   let glances = a.glances;
-  if (online && dueGl) {
-    // Генерируем случайные диски для эмуляции (от 1 до 5 дисков, размер от 250 ГБ до 4 ТБ)
-    // Используем детерминированный seed на основе agentId и времени
-    const diskSeed = hashStr(a.id) ^ Math.floor(now / 60000); // меняем раз в минуту
-    const diskRng = mulberry32(diskSeed);
-    const diskCount = Math.floor(1 + diskRng() * 5); // 1-5 дисков
-    const disks = Array.from({ length: diskCount }, (_, i) => {
-      const sizeRng = mulberry32(diskSeed ^ (i + 1));
-      return ({
-        mnt: i === 0 ? '/' : `/mnt/disk${i}`,
-        percent: Math.round((20 + sizeRng() * 65) * 10) / 10, // 20-85%
-        usedGB: Math.round((100 + sizeRng() * 700)), // 100-800 ГБ
-        sizeGB: Math.round((250 + sizeRng() * 3750)), // 250-4000 ГБ
-      });
-    });
+  let glancesError: string | null = null;
+  
+  if (online && dueGl && a.glancesUrl) {
+    // Пытаемся получить реальные данные
+    const point = await fetchGlancesData(a);
     
-    const pt = mockGlancesPoint(now, a.id);
-    glancesLatest = {
-      t: now, cpu: pt.cpu, cpuCores: [], gpu: pt.gpu, gpuTemp: null, ram: pt.ram,
-      ramUsedGB: null, ramTotalGB: null, swap: null, load1: null, load5: null,
-      cput: pt.cput, ssdt: pt.ssdt, disks, adapters: [], mainAdapter: null,
-      rx: pt.rx, tx: pt.tx, sensors: [], uptimeSec: Math.floor((now - a.createdAt) / 1000), via: 'emu',
-      diskRead: pt.diskRead, diskWrite: pt.diskWrite, fanSpeed: null, battery: null, batteryTimeLeft: null,
-      batteryIsCharging: null, wifiSSID: null, wifiQuality: null, wifiSignal: null, wifiBitrate: null,
-      processes: [], containers: [], cloudProvider: null, hddTemp: null, cpuUser: null, cpuSystem: null,
-      cpuIowait: null, cpuFreq: null, gpuMem: null, gpuMemPercent: null, ramAvailableGB: null,
-    };
-    
-    // Проверка на уменьшение количества дисков
-    const prevCount = agentPrevDiskCount.get(id);
-    const currCount = disks.length;
-    if (prevCount != null && currCount < prevCount) {
-      store.pushEvent('crit', 'agent', `${a.name}: уменьшение количества дисков (${prevCount} → ${currCount})`);
+    if (point) {
+      // Получаем диски из реальных данных
+      const disks: Array<{ mnt: string; percent: number; usedGB: number; sizeGB: number }> = [];
+      try {
+        const baseUrl = a.glancesUrl.replace(/\/$/, '');
+        const fsRes = await fetch(`${baseUrl}/api/4/fs`).then(r => r.ok ? r.json() : null);
+        if (Array.isArray(fsRes)) {
+          for (const fs of fsRes) {
+            const sizeGB = fs.size ? Math.round(fs.size / 1024 / 1024 / 1024 * 10) / 10 : 0;
+            const usedGB = fs.used ? Math.round(fs.used / 1024 / 1024 / 1024 * 10) / 10 : 0;
+            const percent = fs.percent || 0;
+            disks.push({
+              mnt: fs.mnt_point || fs.device_name || '',
+              percent,
+              usedGB,
+              sizeGB,
+            });
+          }
+        }
+      } catch (e) {
+        // Игнорируем ошибки при получении дисков
+      }
+      
+      glancesLatest = {
+        t: now,
+        cpu: point.cpu,
+        cpuCores: [],
+        gpu: point.gpu,
+        gpuTemp: null,
+        ram: point.ram,
+        ramUsedGB: null,
+        ramTotalGB: null,
+        swap: null,
+        load1: null,
+        load5: null,
+        cput: point.cput,
+        ssdt: point.ssdt,
+        disks,
+        adapters: [],
+        mainAdapter: null,
+        rx: point.rx,
+        tx: point.tx,
+        sensors: [],
+        uptimeSec: Math.floor((now - a.createdAt) / 1000),
+        via: 'api',
+        diskRead: point.diskRead,
+        diskWrite: point.diskWrite,
+        fanSpeed: null,
+        battery: null,
+        batteryTimeLeft: null,
+        batteryIsCharging: null,
+        wifiSSID: null,
+        wifiQuality: null,
+        wifiSignal: null,
+        wifiBitrate: null,
+        processes: [],
+        containers: [],
+        cloudProvider: null,
+        hddTemp: null,
+        cpuUser: null,
+        cpuSystem: null,
+        cpuIowait: null,
+        cpuFreq: null,
+        gpuMem: null,
+        gpuMemPercent: null,
+        ramAvailableGB: null,
+      };
+      
+      // Проверка на уменьшение количества дисков
+      const prevCount = agentPrevDiskCount.get(id);
+      const currCount = disks.length;
+      if (prevCount != null && currCount < prevCount) {
+        store.pushEvent('crit', 'agent', `${a.name}: уменьшение количества дисков (${prevCount} → ${currCount})`);
+      }
+      agentPrevDiskCount.set(id, currCount);
+      
+      glances = [...glances, point].slice(-4000);
+      glancesError = null;
+    } else {
+      glancesError = 'не удалось получить данные от Glances API';
     }
-    agentPrevDiskCount.set(id, currCount);
-    
-    glances = [...glances, pt].slice(-4000);
   } else if (!online) {
     // Если агент офлайн, сбрасываем счетчик
     agentPrevDiskCount.delete(id);
+    glancesError = 'агент недоступен';
   }
 
   store.updateAgent(id, {
-    online, latency: ms,
+    online,
+    latency: ms,
     onlineSince: online ? (a.onlineSince || now) : 0,
     lastSeen: online ? now : a.lastSeen,
     lastPoll: now,
     lastGlances: dueGl && online ? now : a.lastGlances,
-    glancesLatest, glances,
+    glancesLatest,
+    glances,
     latHist: [...a.latHist, { t: now, ms }].slice(-480),
-    glancesError: online ? null : 'агент недоступен (эмуляция)',
+    glancesError,
   });
 }
 
