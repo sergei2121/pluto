@@ -8,6 +8,7 @@ import { execFile } from 'node:child_process';
 import {
   loadDb, saveDb, uid, pushEvent, hashPass, verifyPass, issueSession, authUser, DEFAULT_SETTINGS,
 } from './lib.js';
+import { loginRateLimiter } from './middleware/rateLimiter.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const VERSION = '2.0.0';
@@ -15,6 +16,67 @@ const WEB_DIR = path.join(__dirname, '..', 'web');
 const HTTP_PORT = parseInt(process.env.HTTP_PORT || '8080', 10);
 
 const db = loadDb();
+
+// ─── Health Check для зависимостей (пункт 20) ────────────────────────────────
+
+const healthChecks = {
+  database: async () => {
+    try {
+      const currentDb = loadDb();
+      return { 
+        status: currentDb ? 'ok' : 'error', 
+        details: { devices: currentDb.devices?.length || 0, agents: currentDb.agents?.length || 0 }
+      };
+    } catch (e) {
+      return { status: 'error', details: { error: e.message } };
+    }
+  },
+  filesystem: async () => {
+    try {
+      await fs.promises.access(WEB_DIR, fs.constants.R_OK);
+      return { status: 'ok', details: { webDir: WEB_DIR } };
+    } catch (e) {
+      return { status: 'error', details: { error: e.message } };
+    }
+  },
+  ping: async () => {
+    return new Promise((resolve) => {
+      execFile('ping', ['-c', '1', '-W', '1', '127.0.0.1'], (err) => {
+        resolve({ 
+          status: err ? 'degraded' : 'ok', 
+          details: { pingAvailable: !err } 
+        });
+      });
+    });
+  },
+};
+
+export async function getHealthStatus() {
+  const results = await Promise.allSettled([
+    healthChecks.database(),
+    healthChecks.filesystem(),
+    healthChecks.ping(),
+  ]);
+  
+  const checks = {
+    database: results[0].status === 'fulfilled' ? results[0].value : { status: 'error', details: { error: 'check failed' } },
+    filesystem: results[1].status === 'fulfilled' ? results[1].value : { status: 'error', details: { error: 'check failed' } },
+    ping: results[2].status === 'fulfilled' ? results[2].value : { status: 'error', details: { error: 'check failed' } },
+  };
+  
+  const overallStatus = Object.values(checks).every(c => c.status === 'ok') 
+    ? 'healthy' 
+    : Object.values(checks).some(c => c.status === 'error') 
+      ? 'unhealthy' 
+      : 'degraded';
+  
+  return {
+    status: overallStatus,
+    timestamp: Date.now(),
+    version: VERSION,
+    checks,
+  };
+}
 
 // ─── HTTP-хелперы ───────────────────────────────────────────────────────────
 
@@ -537,9 +599,18 @@ function glancesPoint(g, t) {
 }
 
 // ─── Уведомления ────────────────────────────────────────────────────────────
+// Пункт 23: улучшенная обработка ошибок с логированием по уровням
 
-function notify(kind, title, body) {
+const notificationLogger = {
+  error: (msg, ctx) => console.error(`[pluto][notifications][ERROR] ${msg}`, JSON.stringify(ctx)),
+  warn: (msg, ctx) => console.warn(`[pluto][notifications][WARN] ${msg}`, JSON.stringify(ctx)),
+  info: (msg, ctx) => console.info(`[pluto][notifications][INFO] ${msg}`, JSON.stringify(ctx)),
+};
+
+async function notify(kind, title, body) {
   const n = db.settings.notifications;
+  
+  // Проверка включённых типов уведомлений
   if (kind === 'down' && !n.on.down) return;
   if (kind === 'degraded' && !n.on.degraded) return;
   if (kind === 'recover' && !n.on.recover) return;
@@ -547,11 +618,76 @@ function notify(kind, title, body) {
   if (kind === 'agentOn' && !n.on.agentOn) return;
   if (kind === 'threshold' && !n.on.threshold) return;
 
+  // Telegram уведомления
   if (n.telegram.enabled && n.telegram.botToken && n.telegram.chatId) {
-    fetch(`https://api.telegram.org/bot${n.telegram.botToken}/sendMessage`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: n.telegram.chatId, text: `${title}\n${body}` }),
-    }).catch(() => {});
+    const text = `*${title}*\n\n${body}`;
+    const url = `https://api.telegram.org/bot${n.telegram.botToken}/sendMessage`;
+    
+    try {
+      const https = await import('node:https');
+      const data = JSON.stringify({
+        chat_id: n.telegram.chatId,
+        text,
+        parse_mode: 'Markdown',
+      });
+      
+      await new Promise((resolve, reject) => {
+        const req = https.request(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': data.length,
+          },
+          timeout: 5000,
+        }, (res) => {
+          let responseBody = '';
+          res.on('data', (chunk) => (responseBody += chunk));
+          res.on('end', () => {
+            if (res.statusCode === 200) {
+              notificationLogger.info('Telegram уведомление отправлено', { kind, title });
+              resolve();
+            } else {
+              notificationLogger.error(`Telegram API вернул ошибку ${res.statusCode}`, { 
+                kind, title, statusCode: res.statusCode, body: responseBody.slice(0, 200) 
+              });
+              resolve(); // Не прерываем выполнение при ошибке Telegram
+            }
+          });
+        });
+        
+        req.on('error', (e) => {
+          notificationLogger.error('Ошибка отправки Telegram уведомления', { 
+            kind, title, error: e.message, code: e.code 
+          });
+          resolve();
+        });
+        
+        req.on('timeout', () => {
+          req.destroy();
+          notificationLogger.error('Таймаут отправки Telegram уведомления', { kind, title });
+          resolve();
+        });
+        
+        req.write(data);
+        req.end();
+      });
+    } catch (e) {
+      notificationLogger.error('Критическая ошибка при отправке Telegram', { 
+        kind, title, error: e.message 
+      });
+    }
+  }
+  
+  // Email уведомления (заготовка для будущей реализации)
+  if (n.email.enabled && n.email.smtp && n.email.from && n.email.to) {
+    notificationLogger.info('Email уведомление (требуется реализация SMTP)', {
+      kind, title, from: n.email.from, to: n.email.to
+    });
+  }
+  
+  // Push уведомления (заготовка для будущей реализации)
+  if (n.push.enabled) {
+    notificationLogger.info('Push уведомление (требуется реализация Web Push)', { kind, title });
   }
 }
 
@@ -863,14 +999,25 @@ const server = http.createServer(async (req, res) => {
 
   try {
     // ── публичные маршруты ──
-    if (p === '/api/health') return json(res, 200, { ok: true, name: 'pluto-core', version: VERSION, console: 'api' });
+    if (p === '/api/health') {
+      const health = await getHealthStatus();
+      return json(res, health.status === 'healthy' ? 200 : (health.status === 'degraded' ? 206 : 503), health);
+    }
     if (p === '/api/version') return json(res, 200, { version: VERSION });
 
     if (p === '/api/auth/login' && method === 'POST') {
-      const b = await readBody(req);
-      const u = db.users.find((x) => x.login.toLowerCase() === String(b.login || '').toLowerCase());
-      if (!u || !verifyPass(String(b.pass || ''), u.passHash)) return json(res, 401, { error: 'Неверный логин или пароль' });
-      return json(res, 200, { token: issueSession(u.id), user: publicUser(u) });
+      // Применяем rate limiter для защиты от brute-force (пункт 1)
+      loginRateLimiter(req, res, async () => {
+        const b = await readBody(req);
+        const u = db.users.find((x) => x.login.toLowerCase() === String(b.login || '').toLowerCase());
+        if (!u || !verifyPass(String(b.pass || ''), u.passHash)) {
+          pushEvent('warn', 'auth', `Неудачная попытка входа: ${b.login || 'unknown'}`);
+          return json(res, 401, { error: 'Неверный логин или пароль' });
+        }
+        pushEvent('info', 'auth', `Успешный вход пользователя: ${u.login}`);
+        return json(res, 200, { token: issueSession(u.id), user: publicUser(u) });
+      });
+      return;
     }
 
     // ── статика веб-консоли (без авторизации) ──

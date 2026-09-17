@@ -26,6 +26,60 @@ const DEFAULT_DB = () => ({
 
 let db = null;
 let saveTimer = null;
+let saveQueue = [];
+let saveInProgress = false;
+
+/**
+ * Улучшенная функция сохранения с очередью операций (пункт 8)
+ * Предотвращает race conditions при множественных одновременных сохранениях
+ */
+export function saveDb() {
+  return new Promise((resolve, reject) => {
+    saveQueue.push({ resolve, reject });
+    _processSaveQueue();
+  });
+}
+
+async function _processSaveQueue() {
+  if (saveInProgress || saveQueue.length === 0) {
+    return;
+  }
+
+  saveInProgress = true;
+  const currentBatch = [...saveQueue];
+  saveQueue = [];
+
+  try {
+    await _doSave();
+    currentBatch.forEach(({ resolve }) => resolve());
+  } catch (e) {
+    console.error('[pluto] ошибка записи БД:', e.message);
+    currentBatch.forEach(({ reject }) => reject(e));
+  }
+
+  saveInProgress = false;
+  
+  // Обработка новых запросов, накопившихся во время сохранения
+  if (saveQueue.length > 0) {
+    setImmediate(() => _processSaveQueue());
+  }
+}
+
+async function _doSave() {
+  return new Promise((resolve, reject) => {
+    try {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+      const tmp = DB_FILE + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(db));
+      fs.renameSync(tmp, DB_FILE);
+      resolve();
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+export function uid() { return crypto.randomBytes(6).toString('hex'); }
 
 export function loadDb() {
   if (db) return db;
@@ -52,7 +106,7 @@ export function loadDb() {
     pushEvent('info', 'system', 'Первый запуск ядра: создан администратор admin');
     saveDb();
   }
-  // нормализация записей (совместимость со старыми базами)
+  // нормализация записей (совместимость со старыми базами) - пункт 19 (миграции схемы)
   db.devices = (db.devices || []).map((d) => ({
     ...d, tags: Array.isArray(d.tags) ? d.tags : [], history: Array.isArray(d.history) ? d.history : [],
     showcase: !!d.showcase, checking: false,
@@ -79,24 +133,6 @@ export function loadDb() {
   db.devices.forEach((d) => (d.checking = false));
   return db;
 }
-
-export function saveDb() {
-  // Дебаунс: при тысячах устройств проверки идут непрерывно.
-  if (saveTimer) return;
-  saveTimer = setTimeout(() => {
-    saveTimer = null;
-    try {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-      const tmp = DB_FILE + '.tmp';
-      fs.writeFileSync(tmp, JSON.stringify(db));
-      fs.renameSync(tmp, DB_FILE);
-    } catch (e) {
-      console.error('[pluto] ошибка записи БД:', e.message);
-    }
-  }, 2000);
-}
-
-export function uid() { return crypto.randomBytes(6).toString('hex'); }
 
 export function pushEvent(sev, source, text) {
   db.events.unshift({ id: uid(), ts: Date.now(), sev, source, text });
