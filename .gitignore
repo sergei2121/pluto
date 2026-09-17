@@ -1,1 +1,1 @@
-Nothing should be ignored based on the provided file changes. The only modified file is a source code file (`server/src/server.js`), which should not be added to .gitignore.
+Nothing needs to be added to .gitignore since the changes only include source/config files (.md, .js) without any build artifacts, dependencies, or temporary files.
