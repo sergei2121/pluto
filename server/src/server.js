@@ -569,11 +569,17 @@ async function collectTelemetry(agent) {
   if (source === 'netdata' && agent.netdataUrl) {
     const g = await collectNetdata(agent.netdataUrl);
     return { ...g, via: 'netdata' };
+  } else if (source === 'telegraf' && agent.telemetryUrl) {
+    const g = await collectTelegraf(agent.telemetryUrl);
+    return { ...g, via: 'telegraf' };
+  } else if (source === 'prometheus' && agent.telemetryUrl) {
+    const g = await collectPrometheus(agent.telemetryUrl);
+    return { ...g, via: 'prometheus' };
   } else if (agent.glancesUrl) {
     const g = await collectGlances(agent.glancesUrl);
     return { ...g, via: g.via };
   }
-  throw new Error('Нет доступного источника телеметрии (укажите Glances или Netdata URL)');
+  throw new Error('Нет доступного источника телеметрии (укажите Glances, Netdata, Telegraf или Prometheus URL)');
 }
 
 function glancesPoint(g, t) {

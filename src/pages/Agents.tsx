@@ -6,7 +6,7 @@ import {
 import { Panel, StatusDot, Modal, Drawer, Field, EmptyState, Ring, Bar, TimeAgo } from '../components/ui';
 import { store, useCurrentUser, usePluto, useToasts, visibleAgents } from '../lib/store';
 import { cls, fmtMs, fmtUp, fmtNet, isIp, isTarget, expandTargets, pingStats, uid } from '../lib/util';
-import type { Agent, StatsView } from '../lib/types';
+import type { Agent, StatsView, TelemetrySource } from '../lib/types';
 
 function StatsViewPicker({ value, onChange, compact }: { value: StatsView; onChange: (v: StatsView) => void; compact?: boolean }) {
   const opts: { v: StatsView; icon: React.ReactNode; label: string; on: string }[] = [
@@ -42,6 +42,9 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
   const [ip, setIp] = useState('');
   const [relayUrl, setRelayUrl] = useState('');
   const [glancesUrl, setGlancesUrl] = useState('');
+  const [netdataUrl, setNetdataUrl] = useState('');
+  const [telemetryUrl, setTelemetryUrl] = useState('');
+  const [telemetrySource, setTelemetrySource] = useState<TelemetrySource>('');
   const [pingTargets, setPingTargets] = useState<PingTargetEntry[]>([]);
   const [statsView, setStatsView] = useState<StatsView>('');
   const [selTags, setSelTags] = useState<string[]>([]);
@@ -52,6 +55,8 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
     setErr('');
     if (initial) {
       setName(initial.name); setIp(initial.ip); setRelayUrl(initial.relayUrl); setGlancesUrl(initial.glancesUrl || '');
+      setNetdataUrl(initial.netdataUrl || ''); setTelemetryUrl(initial.telemetryUrl || '');
+      setTelemetrySource(initial.telemetrySource || '');
       const targets = Array.isArray(initial.pingTargets) 
         ? initial.pingTargets.map((t: any, i: number) => ({
             id: `tgt-${i}-${Date.now()}`,
@@ -63,6 +68,7 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
       setStatsView(initial.statsView); setSelTags(initial.tags);
     } else {
       setName(''); setIp(''); setRelayUrl(''); setGlancesUrl('');
+      setNetdataUrl(''); setTelemetryUrl(''); setTelemetrySource('');
       setPingTargets([{ id: uid(), name: '', range: '' }]);
       setStatsView(''); setSelTags([]);
     }
@@ -82,7 +88,18 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
       .map((t) => ({ name: t.name.trim(), range: t.range.trim() }));
     const bad = targets.find((t) => !isTarget(t.range));
     if (bad) return setErr(`Некорректная цель: «${bad.range}». Форматы: 10.0.0.5, 10.0.0.1-20, 10.0.0.0/24`);
-    const body = { name: name.trim(), ip: ip.trim(), relayUrl: relayUrl.trim(), glancesUrl: glancesUrl.trim(), pingTargets: targets, tags: selTags, statsView };
+    const body = { 
+      name: name.trim(), 
+      ip: ip.trim(), 
+      relayUrl: relayUrl.trim(), 
+      glancesUrl: telemetrySource === 'glances' ? glancesUrl.trim() : '',
+      netdataUrl: telemetrySource === 'netdata' ? netdataUrl.trim() : undefined,
+      telemetryUrl: telemetrySource === 'telegraf' || telemetrySource === 'prometheus' ? telemetryUrl.trim() : undefined,
+      telemetrySource,
+      pingTargets: targets, 
+      tags: selTags, 
+      statsView 
+    };
     try {
       if (initial) await store.updateAgent(initial.id, body);
       else await store.addAgent(body);
@@ -100,9 +117,52 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
         <Field label="Адрес pluto-relay" hint="HTTP-адрес relay на этом ПК, порт по умолчанию 8091. Нужен для пинга устройств внутри VLAN.">
           <input className="inp font-mono" value={relayUrl} onChange={(e) => setRelayUrl(e.target.value)} placeholder="http://192.168.1.10:8091" />
         </Field>
-        <Field label="Адрес Glances (телеметрия)" hint="«glances -w», порт по умолчанию 61208. CPU, GPU, RAM, диски, сеть, температуры — в «Статистике» и карточке агента.">
-          <input className="inp font-mono" value={glancesUrl} onChange={(e) => setGlancesUrl(e.target.value)} placeholder="http://192.168.1.10:61208" />
-        </Field>
+
+        {/* Выбор источника телеметрии */}
+        <div>
+          <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Источник телеметрии</span>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { v: '', label: 'Нет' },
+              { v: 'glances', label: 'Glances' },
+              { v: 'netdata', label: 'Netdata' },
+              { v: 'telegraf', label: 'Telegraf' },
+              { v: 'prometheus', label: 'Prometheus' },
+            ].map((opt) => (
+              <button
+                key={opt.v}
+                onClick={() => setTelemetrySource(opt.v as TelemetrySource)}
+                className={cls(
+                  'rounded-lg border px-3 py-2 text-[12px] font-semibold transition-all',
+                  telemetrySource === opt.v
+                    ? 'border-vio/60 bg-vio/15 text-vio'
+                    : 'border-line bg-raised/50 text-dim hover:text-mut'
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Поля для разных источников телеметрии */}
+        {telemetrySource === 'glances' && (
+          <Field label="Адрес Glances" hint="«glances -w», порт по умолчанию 61208. CPU, GPU, RAM, диски, сеть, температуры — в «Статистике» и карточке агента.">
+            <input className="inp font-mono" value={glancesUrl} onChange={(e) => setGlancesUrl(e.target.value)} placeholder="http://192.168.1.10:61208" />
+          </Field>
+        )}
+
+        {telemetrySource === 'netdata' && (
+          <Field label="Адрес Netdata" hint="Netdata API, порт по умолчанию 19999. Метрики в реальном времени через WebSocket.">
+            <input className="inp font-mono" value={netdataUrl} onChange={(e) => setNetdataUrl(e.target.value)} placeholder="http://192.168.1.10:19999" />
+          </Field>
+        )}
+
+        {(telemetrySource === 'telegraf' || telemetrySource === 'prometheus') && (
+          <Field label={telemetrySource === 'telegraf' ? "Адрес Telegraf HTTP" : "Адрес Prometheus"} hint={telemetrySource === 'telegraf' ? "Telegraf с плагином http_listener_v2, порт по умолчанию 8186. Формат: InfluxDB Line Protocol." : "Prometheus endpoint, порт по умолчанию 9090. Формат: Prometheus text format."}>
+            <input className="inp font-mono" value={telemetryUrl} onChange={(e) => setTelemetryUrl(e.target.value)} placeholder={telemetrySource === 'telegraf' ? "http://192.168.1.10:8186/write" : "http://192.168.1.10:9090/metrics"} />
+          </Field>
+        )}
 
         {/* Динамические поля: цели для пинга с кастомными именами */}
         <div>
