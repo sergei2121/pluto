@@ -1,5 +1,7 @@
 // ─── PLUTO Telemetry: модуль сбора телеметрии из различных источников ────────
 
+import telegrafParser from './telegrafParser.js';
+
 /**
  * Модуль телеметрии (пункт 11 - поддержка других источников телеметрии)
  * Поддерживает Glances, Netdata, Prometheus, Telegraf
@@ -295,31 +297,100 @@ export async function collectPrometheus(baseUrl, fetchTextFn) {
  * Обработка метрик из Telegraf (пункт 11)
  * Telegraf обычно отправляет данные в формате InfluxDB Line Protocol
  */
-export function parseTelegrafLineProtocol(line) {
-  // Формат: measurement,tag_set field_set timestamp
-  // Пример: cpu,cpu=cpu0 usage_idle=98.5 1234567890
+export function parseTelegrafData(body) {
   try {
-    const parts = line.split(' ');
-    if (parts.length < 2) return null;
-
-    const [measurementTags, ...fieldParts] = parts;
-    const [measurement, ...tags] = measurementTags.split(',');
+    const metrics = telegrafParser.parseBulk(body);
     
-    const tagObj = {};
-    tags.forEach((t) => {
-      const [k, v] = t.split('=');
-      tagObj[k] = v;
+    if (!metrics || metrics.length === 0) {
+      return null;
+    }
+
+    // Агрегация метрик по типам
+    const aggregated = {
+      cpu: null,
+      ram: null,
+      disk: null,
+      network: null,
+      temperatures: [],
+      source: 'telegraf',
+    };
+
+    for (const metric of metrics) {
+      const { measurement, fields, tags } = metric;
+
+      // CPU метрики
+      if (measurement === 'cpu' || measurement.startsWith('cpu')) {
+        if (fields.usage_idle != null) {
+          aggregated.cpu = Math.round((100 - fields.usage_idle) * 10) / 10;
+        } else if (fields.usage_user != null) {
+          aggregated.cpu = Math.round((fields.usage_user + (fields.usage_system || 0)) * 10) / 10;
+        }
+      }
+
+      // RAM метрики
+      if (measurement === 'mem' || measurement === 'memory') {
+        if (fields.used_percent != null) {
+          aggregated.ram = Math.round(fields.used_percent * 10) / 10;
+        }
+      }
+
+      // Disk метрики
+      if (measurement === 'disk' || measurement.startsWith('disk')) {
+        if (fields.used_percent != null && (!tags.path || tags.path === '/')) {
+          aggregated.disk = Math.round(fields.used_percent * 10) / 10;
+        }
+      }
+
+      // Network метрики
+      if (measurement === 'net' || measurement === 'network') {
+        if (!aggregated.network) {
+          aggregated.network = { rx: 0, tx: 0 };
+        }
+        if (fields.bytes_recv != null) {
+          aggregated.network.rx = Math.round(fields.bytes_recv / 1024 * 10) / 10;
+        }
+        if (fields.bytes_sent != null) {
+          aggregated.network.tx = Math.round(fields.bytes_sent / 1024 * 10) / 10;
+        }
+      }
+
+      // Temperature метрики
+      if (measurement === 'temp' || measurement === 'temperature' || measurement === 'sensors') {
+        if (fields.value != null || fields.temp != null) {
+          aggregated.temperatures.push({
+            label: tags.sensor || tags.name || 'unknown',
+            value: Math.round((fields.value || fields.temp) * 10) / 10,
+          });
+        }
+      }
+    }
+
+    telemetryLogger.info('Telegraf метрики собраны', { 
+      cpu: aggregated.cpu, 
+      ram: aggregated.ram,
+      disk: aggregated.disk,
+      tempCount: aggregated.temperatures.length 
     });
 
-    const fields = {};
-    fieldParts.forEach((f) => {
-      const [k, v] = f.split('=');
-      fields[k] = parseFloat(v) || v;
-    });
-
-    return { measurement, tags: tagObj, fields, timestamp: parts[parts.length - 1] };
+    return aggregated;
   } catch (e) {
-    telemetryLogger.warn('Ошибка парсинга Telegraf строки', { line: line.slice(0, 100), error: e.message });
+    telemetryLogger.error('Ошибка обработки Telegraf данных', { error: e.message });
+    return null;
+  }
+}
+
+export async function collectTelegraf(baseUrl, fetchTextFn) {
+  const base = String(baseUrl).replace(/\/+$/, '');
+  
+  try {
+    // Telegraf может отдавать данные в формате Prometheus или через HTTP listener
+    // Пробуем получить данные в формате line protocol
+    const url = `${base}/metrics`;
+    const txt = await fetchTextFn(url, 5000);
+    
+    return parseTelegrafData(txt);
+  } catch (e) {
+    telemetryLogger.error('Ошибка сбора Telegraf метрик', { error: e.message });
     return null;
   }
 }
@@ -328,5 +399,6 @@ export default {
   parseGlancesData,
   collectNetdata,
   collectPrometheus,
-  parseTelegrafLineProtocol,
+  collectTelegraf,
+  parseTelegrafData,
 };

@@ -1,5 +1,1 @@
-```
-# Build artifacts
-dist/
-build/
-```
+Nothing needs to be added to .gitignore since the changes only include source code files (.js files) without any build artifacts, dependencies, or temporary files that require ignoring.
