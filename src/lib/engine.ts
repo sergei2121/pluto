@@ -113,18 +113,18 @@ function seededRandom(seed: number): () => number {
 
 function mockGlancesPoint(t: number, agentId: string): GlancesPoint {
   // Используем hash от agentId + времени для детерминированной генерации
-  const baseSeed = hashStr(agentId) ^ Math.floor(t / 10000);
-  const rng = seededRandom(baseSeed);
+  const baseSeed = hashStr(agentId);
+  const timeBucket = Math.floor(t / 5000); // каждые 5 секунд новое значение
   
-  // Реалистичные диапазоны для разных метрик
-  const cpu = Math.round((5 + rng() * 45) * 10) / 10;      // 5-50%
-  const gpu = Math.round(rng() * 35 * 10) / 10;            // 0-35%
-  const ram = Math.round((30 + rng() * 40) * 10) / 10;     // 30-70%
-  const rx = Math.round(rng() * 3000 * 10) / 10;           // 0-3000 КБ/с
-  const tx = Math.round(rng() * 1000 * 10) / 10;           // 0-1000 КБ/с
-  const cput = Math.round((40 + rng() * 35) * 10) / 10;    // 40-75°C
-  const ssdt = Math.round((32 + rng() * 20) * 10) / 10;    // 32-52°C
-  const diskUsed = Math.round((25 + rng() * 50) * 10) / 10; // 25-75%
+  // Реалистичные диапазоны для разных метрик с индивидуальными seed
+  const cpu = Math.round((5 + mulberry32(baseSeed ^ timeBucket ^ 1)() * 45) * 10) / 10;      // 5-50%
+  const gpu = Math.round(mulberry32(baseSeed ^ timeBucket ^ 2)() * 35 * 10) / 10;            // 0-35%
+  const ram = Math.round((30 + mulberry32(baseSeed ^ timeBucket ^ 3)() * 40) * 10) / 10;     // 30-70%
+  const rx = Math.round(mulberry32(baseSeed ^ timeBucket ^ 4)() * 3000 * 10) / 10;           // 0-3000 КБ/с
+  const tx = Math.round(mulberry32(baseSeed ^ timeBucket ^ 5)() * 1000 * 10) / 10;           // 0-1000 КБ/с
+  const cput = Math.round((40 + mulberry32(baseSeed ^ timeBucket ^ 6)() * 35) * 10) / 10;    // 40-75°C
+  const ssdt = Math.round((32 + mulberry32(baseSeed ^ timeBucket ^ 7)() * 20) * 10) / 10;    // 32-52°C
+  const diskUsed = Math.round((25 + mulberry32(baseSeed ^ timeBucket ^ 8)() * 50) * 10) / 10; // 25-75%
   
   return {
     t, cpu, gpu, ram, rx, tx, cput, ssdt, diskUsed,
@@ -150,13 +150,19 @@ function stepAgent(id: string, now: number) {
   let glances = a.glances;
   if (online && dueGl) {
     // Генерируем случайные диски для эмуляции (от 1 до 5 дисков, размер от 250 ГБ до 4 ТБ)
-    const diskCount = Math.floor(rnd(1, 6));
-    const disks = Array.from({ length: diskCount }, (_, i) => ({
-      mnt: i === 0 ? '/' : `/mnt/disk${i}`,
-      percent: Math.round(rnd(20, 85) * 10) / 10,
-      usedGB: Math.round(rnd(100, 800)),
-      sizeGB: Math.round(rnd(250, 4000)),
-    }));
+    // Используем детерминированный seed на основе agentId и времени
+    const diskSeed = hashStr(a.id) ^ Math.floor(now / 60000); // меняем раз в минуту
+    const diskRng = mulberry32(diskSeed);
+    const diskCount = Math.floor(1 + diskRng() * 5); // 1-5 дисков
+    const disks = Array.from({ length: diskCount }, (_, i) => {
+      const sizeRng = mulberry32(diskSeed ^ (i + 1));
+      return ({
+        mnt: i === 0 ? '/' : `/mnt/disk${i}`,
+        percent: Math.round((20 + sizeRng() * 65) * 10) / 10, // 20-85%
+        usedGB: Math.round((100 + sizeRng() * 700)), // 100-800 ГБ
+        sizeGB: Math.round((250 + sizeRng() * 3750)), // 250-4000 ГБ
+      });
+    });
     
     const pt = mockGlancesPoint(now, a.id);
     glancesLatest = {
