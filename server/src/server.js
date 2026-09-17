@@ -694,6 +694,25 @@ async function pollAgent(agent) {
     agent.lastGlances = now;
     try {
       const g = await collectTelemetry(agent);
+      // Сохраняем снимок телеметрии
+      agent.glancesLatest = {
+        t: now, cpu: g.cpu, cpuCores: g.cpuCores || [], gpu: g.gpu, gpuTemp: g.gpuTemp,
+        ram: g.ram, ramUsedGB: g.ramUsedGB, ramTotalGB: g.ramTotalGB, swap: g.swap,
+        load1: g.load1, load5: g.load5, load15: g.load15, cput: g.cput, ssdt: g.ssdt,
+        hddTemp: g.hddTemp, disks: g.disks || [], adapters: g.adapters || [],
+        mainAdapter: g.mainAdapter, rx: g.rx, tx: g.tx, sensors: g.sensors || [],
+        uptimeSec: g.uptimeSec, mainFsUsed: g.mainFsUsed, diskRead: g.diskRead,
+        diskWrite: g.diskWrite, fanSpeed: g.fanSpeed, battery: g.battery,
+        batteryTimeLeft: g.batteryTimeLeft, batteryIsCharging: g.batteryIsCharging,
+        wifiSSID: g.wifiSSID, wifiQuality: g.wifiQuality, wifiSignal: g.wifiSignal,
+        wifiBitrate: g.wifiBitrate, processes: g.processes || [], containers: g.containers || [],
+        cloudProvider: g.cloudProvider, via: g.via,
+      };
+      // Добавляем точку в историю (сокращённая версия)
+      const pt = glancesPoint(g, now);
+      agent.glances = [...(agent.glances || []), pt].slice(-4320); // 30 дней при 20 сек интервале
+      agent.glancesError = null;
+      
       // Статистика количества дисков большой емкости (>= 1TB) для агентов с тегом "Bars"
       const isBarsAgent = agent.tags && agent.tags.includes('Bars');
       let currentDiskCount = 0;
