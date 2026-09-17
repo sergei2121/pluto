@@ -166,10 +166,10 @@ async function runDeviceCheck(d) {
   else if (d.type === 'rtsp') res = await checkHttp({ ...d, path: '' }, timeoutMs);
   else if (d.type === 'sip') res = { ok: false, latency: null };
   else res = { ok: false, latency: null };
-  applyResult(d, res);
+  await applyResult(d, res);
 }
 
-function applyResult(d, res) {
+async function applyResult(d, res) {
   const now = Date.now();
   const cfg = db.settings;
   d.lastCheck = now;
@@ -180,10 +180,10 @@ function applyResult(d, res) {
     d.history = [...(d.history || []), -1].slice(-48);
     if (d.fails >= cfg.failThreshold && d.status !== 'down') {
       d.status = 'down'; d.latency = null; d.lastChange = now;
-      pushEvent('crit', 'device', `${d.name} (${d.address}) — потеря связи`);
+      await pushEvent('crit', 'device', `${d.name} (${d.address}) — потеря связи`);
       notify('down', `PLUTO: авария`, `${d.name} (${d.address}) — потеря связи`);
     }
-    saveDb();
+    await saveDb();
     return;
   }
 
@@ -195,10 +195,10 @@ function applyResult(d, res) {
   d.status = status; d.latency = res.latency; d.fails = 0;
   d.history = [...(d.history || []), res.latency].slice(-48);
 
-  if (prev === 'down') { pushEvent('ok', 'device', `${d.name} — связь восстановлена`); notify('recover', 'PLUTO: восстановление', `${d.name} снова в строю`); }
-  else if (degraded && prev !== 'degraded') { pushEvent('warn', 'device', `${d.name}: деградация ${res.latency} мс`); notify('degraded', 'PLUTO: деградация', `${d.name}: ${res.latency} мс`); }
+  if (prev === 'down') { await pushEvent('ok', 'device', `${d.name} — связь восстановлена`); notify('recover', 'PLUTO: восстановление', `${d.name} снова в строю`); }
+  else if (degraded && prev !== 'degraded') { await pushEvent('warn', 'device', `${d.name}: деградация ${res.latency} мс`); notify('degraded', 'PLUTO: деградация', `${d.name}: ${res.latency} мс`); }
   if (status !== prev) d.lastChange = now;
-  saveDb();
+  await saveDb();
 }
 
 // ─── Relay-пинги (устройства внутри VLAN/NAT) ──────────────────────────────
@@ -825,14 +825,18 @@ function runNext() {
   }
 }
 
+async function scheduleDeviceCheck(d) {
+  d.checking = true;
+  await runDeviceCheck(d);
+}
+
 setInterval(() => {
   const now = Date.now();
   for (const d of db.devices) {
     if (d.checking) continue;
     const iv = Math.max(5, d.interval || 60) * 1000;
     if (now - (d.lastCheck || 0) >= iv) {
-      d.checking = true;
-      queue.push(() => runDeviceCheck(d));
+      queue.push(() => scheduleDeviceCheck(d));
     }
   }
 
@@ -1136,7 +1140,7 @@ const server = http.createServer(async (req, res) => {
       db.devices.push(d);
       pushEvent('info', 'device', `Добавлено устройство «${d.name}» (${d.address})`);
       saveDb();
-      queue.push(() => runDeviceCheck(d)); runNext();
+      queue.push(() => scheduleDeviceCheck(d)); runNext();
       return json(res, 200, d);
     }
     let m = p.match(/^\/api\/devices\/([^/]+)$/);

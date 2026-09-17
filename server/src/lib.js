@@ -134,10 +134,10 @@ export function loadDb() {
   return db;
 }
 
-export function pushEvent(sev, source, text) {
+export async function pushEvent(sev, source, text) {
   db.events.unshift({ id: uid(), ts: Date.now(), sev, source, text });
   if (db.events.length > 300) db.events.length = 300;
-  saveDb();
+  await saveDb();
 }
 
 // ─── Авторизация (scrypt + сессии-токены) ───────────────────────────────────
@@ -158,11 +158,11 @@ export function verifyPass(password, stored) {
   }
 }
 
-export function issueSession(userId) {
+export async function issueSession(userId) {
   const token = crypto.randomBytes(24).toString('hex');
   db.sessions.push({ token, userId, createdAt: Date.now() });
   if (db.sessions.length > 200) db.sessions.splice(0, db.sessions.length - 200);
-  saveDb();
+  await saveDb();
   return token;
 }
 

@@ -139,7 +139,7 @@ export class Database {
     }));
   }
 
-  _createInitialAdmin() {
+  async _createInitialAdmin() {
     const crypto = await import('node:crypto');
     const hashPass = (password) => {
       const salt = crypto.randomBytes(16);
@@ -161,7 +161,7 @@ export class Database {
     });
     
     this.pushEvent('info', 'system', 'Первый запуск ядра: создан администратор admin');
-    this.save();
+    await this.save();
   }
 
   /**
@@ -229,22 +229,22 @@ export class Database {
     return crypto.randomBytes(6).toString('hex');
   }
 
-  pushEvent(sev, source, text) {
+  async pushEvent(sev, source, text) {
     this.db.events.unshift({ id: this._uid(), ts: Date.now(), sev, source, text });
     if (this.db.events.length > this.EVENTS_LIMIT) {
       this.db.events.length = this.EVENTS_LIMIT;
     }
-    this.save();
+    await this.save();
   }
 
-  issueSession(userId) {
+  async issueSession(userId) {
     const crypto = require('node:crypto');
     const token = crypto.randomBytes(24).toString('hex');
     this.db.sessions.push({ token, userId, createdAt: Date.now() });
     if (this.db.sessions.length > this.SESSIONS_LIMIT) {
       this.db.sessions.splice(0, this.db.sessions.length - this.SESSIONS_LIMIT);
     }
-    this.save();
+    await this.save();
     return token;
   }
 
