@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Проверка Glances</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .input-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        input[type="text"]:focus {
+            border-color: #4CAF50;
+            outline: none;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 4px;
+            display: none;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            display: block;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            display: block;
+        }
+        .metrics {
+            margin-top: 30px;
+            display: none;
+        }
+        .metrics.show {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 15px;
+        }
+        .metric-card {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #4CAF50;
+        }
+        .metric-name {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+        }
+        .metric-unit {
+            font-size: 14px;
+            color: #888;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+            display: none;
+        }
+        .loading.show {
+            display: block;
+        }
+        pre {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Проверка подключения к Glances</h1>
+        
+        <div class="input-group">
+            <label for="glancesUrl">Адрес Glances (телеметрия):</label>
+            <input 
+                type="text" 
+                id="glancesUrl" 
+                placeholder="http://x.x.x.x:61208"
+                value="http://localhost:61208"
+            >
+        </div>
+        
+        <button onclick="checkGlances()" id="checkBtn">
+            Проверить подключение
+        </button>
+        
+        <div class="loading" id="loading">
+            ⏳ Подключение и сбор данных...
+        </div>
+        
+        <div class="status" id="status"></div>
+        
+        <div class="metrics" id="metrics"></div>
+        
+        <div style="margin-top: 30px;">
+            <h3>📊 Полные данные:</h3>
+            <pre id="rawData">Нажмите "Проверить подключение" для получения данных</pre>
+        </div>
+    </div>
+
+    <script>
+        async function checkGlances() {
+            const urlInput = document.getElementById('glancesUrl').value.trim();
+            const statusDiv = document.getElementById('status');
+            const metricsDiv = document.getElementById('metrics');
+            const rawDataPre = document.getElementById('rawData');
+            const loadingDiv = document.getElementById('loading');
+            const checkBtn = document.getElementById('checkBtn');
+            
+            // Сброс состояния
+            statusDiv.className = 'status';
+            statusDiv.style.display = 'none';
+            metricsDiv.className = 'metrics';
+            metricsDiv.innerHTML = '';
+            rawDataPre.textContent = 'Загрузка...';
+            
+            if (!urlInput) {
+                showStatus('error', 'Пожалуйста, введите адрес Glances');
+                return;
+            }
+            
+            // Убираем trailing slash
+            const baseUrl = urlInput.replace(/\/$/, '');
+            
+            loadingDiv.classList.add('show');
+            checkBtn.disabled = true;
+            
+            try {
+                // Пробуем разные endpoints
+                let data = null;
+                let apiVersion = null;
+                
+                // Пробуем API v4
+                try {
+                    const response = await fetch(`${baseUrl}/api/4/quicklook`);
+                    if (response.ok) {
+                        data = await response.json();
+                        apiVersion = 'v4';
+                    }
+                } catch (e) {
+                    console.log('API v4 не доступен');
+                }
+                
+                // Если v4 не сработал, пробуем v3
+                if (!data) {
+                    try {
+                        const response = await fetch(`${baseUrl}/api/3/quicklook`);
+                        if (response.ok) {
+                            data = await response.json();
+                            apiVersion = 'v3';
+                        }
+                    } catch (e) {
+                        console.log('API v3 не доступен');
+                    }
+                }
+                
+                // Если API не сработали, пробуем получить все данные
+                if (!data) {
+                    try {
+                        const response = await fetch(`${baseUrl}/api/4/all`);
+                        if (response.ok) {
+                            data = await response.json();
+                            apiVersion = 'v4-all';
+                        }
+                    } catch (e) {
+                        console.log('API all не доступен');
+                    }
+                }
+                
+                // Последняя попытка - v3 all
+                if (!data) {
+                    try {
+                        const response = await fetch(`${baseUrl}/api/3/all`);
+                        if (response.ok) {
+                            data = await response.json();
+                            apiVersion = 'v3-all';
+                        }
+                    } catch (e) {
+                        console.log('API v3 all не доступен');
+                    }
+                }
+                
+                if (!data) {
+                    throw new Error('Не удалось подключиться к Glances API. Проверьте адрес и CORS настройки.');
+                }
+                
+                // Отображаем успех
+                showStatus('success', `✅ Успешное подключение! API версия: ${apiVersion}`);
+                
+                // Отображаем метрики
+                displayMetrics(data, apiVersion);
+                
+                // Отображаем сырые данные
+                rawDataPre.textContent = JSON.stringify(data, null, 2);
+                
+            } catch (error) {
+                showStatus('error', `❌ Ошибка: ${error.message}`);
+                rawDataPre.textContent = `Ошибка подключения:\n${error.message}\n\nВозможные причины:\n1. Неверный адрес Glances\n2. Glances не запущен\n3. Проблемы с CORS (нужно запустить Glances с флагом --cors)\n4. Блокировка браузером смешанного контента (HTTP/HTTPS)`;
+            } finally {
+                loadingDiv.classList.remove('show');
+                checkBtn.disabled = false;
+            }
+        }
+        
+        function showStatus(type, message) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = `status ${type}`;
+            statusDiv.textContent = message;
+        }
+        
+        function displayMetrics(data, apiVersion) {
+            const metricsDiv = document.getElementById('metrics');
+            metricsDiv.classList.add('show');
+            
+            const metrics = [];
+            
+            // Обрабатываем данные в зависимости от формата
+            if (apiVersion.includes('all')) {
+                // Полный ответ API
+                if (data.cpu) {
+                    metrics.push({ name: 'CPU', value: data.cpu.total || data.cpu, unit: '%' });
+                }
+                if (data.mem) {
+                    metrics.push({ name: 'RAM', value: Math.round((data.mem.used / data.mem.total) * 100), unit: '%' });
+                    metrics.push({ name: 'RAM Использовано', value: formatBytes(data.mem.used), unit: '' });
+                    metrics.push({ name: 'RAM Всего', value: formatBytes(data.mem.total), unit: '' });
+                }
+                if (data.disk) {
+                    const disk = Array.isArray(data.disk) ? data.disk[0] : data.disk;
+                    if (disk) {
+                        metrics.push({ name: 'Диск', value: disk.percent || 'N/A', unit: '%' });
+                        metrics.push({ name: 'Диск Свободно', value: formatBytes(disk.free), unit: '' });
+                    }
+                }
+                if (data.network) {
+                    const net = Array.isArray(data.network) ? data.network[0] : data.network;
+                    if (net) {
+                        metrics.push({ name: 'Сеть Rx', value: formatBytes(net.rx), unit: '/s' });
+                        metrics.push({ name: 'Сеть Tx', value: formatBytes(net.tx), unit: '/s' });
+                    }
+                }
+                if (data.load) {
+                    metrics.push({ name: 'Нагрузка', value: data.load.min1 || data.load, unit: '' });
+                }
+                if (data.uptime) {
+                    metrics.push({ name: 'Uptime', value: formatUptime(data.uptime), unit: '' });
+                }
+            } else {
+                // Quicklook ответ
+                if (data.cpu !== undefined) {
+                    metrics.push({ name: 'CPU', value: data.cpu, unit: '%' });
+                }
+                if (data.mem !== undefined) {
+                    metrics.push({ name: 'RAM', value: data.mem, unit: '%' });
+                }
+                if (data.disk !== undefined) {
+                    metrics.push({ name: 'Диск', value: data.disk, unit: '%' });
+                }
+                if (data.load !== undefined) {
+                    metrics.push({ name: 'Нагрузка', value: data.load, unit: '' });
+                }
+            }
+            
+            // Если есть дополнительные плагины в полном ответе
+            if (apiVersion.includes('all') && data.plugins) {
+                if (data.plugins.gpu) {
+                    const gpu = Array.isArray(data.plugins.gpu) ? data.plugins.gpu[0] : data.plugins.gpu;
+                    if (gpu && gpu.proc) {
+                        metrics.push({ name: 'GPU', value: gpu.proc, unit: '%' });
+                    }
+                }
+                if (data.plugins.fs) {
+                    const fs = Array.isArray(data.plugins.fs) ? data.plugins.fs[0] : data.plugins.fs;
+                    if (fs) {
+                        metrics.push({ name: 'ФС Свободно', value: formatBytes(fs.free), unit: '' });
+                    }
+                }
+                if (data.plugins.sensors) {
+                    const sensors = Array.isArray(data.plugins.sensors) ? data.plugins.sensors : [data.plugins.sensors];
+                    sensors.forEach(sensor => {
+                        if (sensor.value !== undefined) {
+                            metrics.push({ 
+                                name: `Датчик ${sensor.label || sensor.type}`, 
+                                value: sensor.value, 
+                                unit: sensor.unit || '' 
+                            });
+                        }
+                    });
+                }
+            }
+            
+            // Рендерим карточки
+            if (metrics.length === 0) {
+                metricsDiv.innerHTML = '<p>Метрики не найдены</p>';
+                return;
+            }
+            
+            metricsDiv.innerHTML = metrics.map(m => `
+                <div class="metric-card">
+                    <div class="metric-name">${m.name}</div>
+                    <div class="metric-value">${m.value} <span class="metric-unit">${m.unit}</span></div>
+                </div>
+            `).join('');
+        }
+        
+        function formatBytes(bytes) {
+            if (!bytes || bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+        
+        function formatUptime(seconds) {
+            if (!seconds) return 'N/A';
+            const days = Math.floor(seconds / 86400);
+            const hours = Math.floor((seconds % 86400) / 3600);
+            const mins = Math.floor((seconds % 3600) / 60);
+            if (days > 0) return `${days}д ${hours}ч`;
+            if (hours > 0) return `${hours}ч ${mins}м`;
+            return `${mins}м`;
+        }
+    </script>
+</body>
+</html>
