@@ -64,17 +64,17 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
             range: typeof t === 'object' ? (t.range || String(t)) : String(t),
           }))
         : [];
-      setPingTargets(targets.length ? targets : [{ id: uid(), name: '', range: '' }]);
+      setPingTargets(targets.length ? targets : [{ id: uid('tgt'), name: '', range: '' }]);
       setStatsView(initial.statsView); setSelTags(initial.tags);
     } else {
       setName(''); setIp(''); setRelayUrl(''); setGlancesUrl('');
       setNetdataUrl(''); setTelemetryUrl(''); setTelemetrySource('');
-      setPingTargets([{ id: uid(), name: '', range: '' }]);
+      setPingTargets([{ id: uid('tgt'), name: '', range: '' }]);
       setStatsView(''); setSelTags([]);
     }
   }, [open, initial]);
 
-  const addTarget = () => setPingTargets((prev) => [...prev, { id: uid(), name: '', range: '' }]);
+  const addTarget = () => setPingTargets((prev) => [...prev, { id: uid('tgt'), name: '', range: '' }]);
   const removeTarget = (id: string) => setPingTargets((prev) => prev.length > 1 ? prev.filter((t) => t.id !== id) : prev);
   const updateTarget = (id: string, field: 'name' | 'range', value: string) =>
     setPingTargets((prev) => prev.map((t) => (t.id === id ? { ...t, [field]: value } : t)));
@@ -425,7 +425,7 @@ export default function Agents() {
   // Упрощённый вид по умолчанию: агент + количество пингуемых IP
   const summary = useMemo(() => {
     const totalPings = agents.reduce((sum, a) => sum + a.pingTargets.reduce((s, t) => {
-      const expanded = expandTargets(t);
+      const expanded = expandTargets(t.range || '');
       return s + (Array.isArray(expanded) ? expanded.length : 1);
     }, 0), 0);
     return { count: agents.length, pings: totalPings };
