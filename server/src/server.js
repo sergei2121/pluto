@@ -212,7 +212,7 @@ async function relayPing(agent, targets) {
     const txt = await fetchText(url, 15000);
     const arr = JSON.parse(txt);
     if (Array.isArray(arr)) {
-      return arr.map((r) => ({ ip: r.ip, alive: !!r.alive, latency: r.latencyMs != null ? r.latencyMs : (r.latency != null ? r.latency : null) }));
+      return arr.map((r) => ({ ip: r.ip, alive: !!r.alive, latency: r.latencyMs != null ? r.latencyMs : (r.latency != null ? r.latency : null), lastSuccess: r.alive ? Date.now() : null }));
     }
   } catch { /* relay недоступен */ }
   return [];
@@ -548,7 +548,17 @@ async function pollAgent(agent) {
       if (results.length) anyOk = true;
       // Ищем предыдущие результаты по range или имени цели
       const prev = (agent.targets || []).find((t) => t.range === rangeStr || t.target === rangeStr || t.name === targetName);
-      out.push({ target: targetName || rangeStr, name: targetName, range: rangeStr, lastCheck: now, results: results.length ? results : (Array.isArray(prev?.results) ? prev.results : []) });
+      // Если нет новых результатов, используем предыдущие (сохраняем lastSuccess)
+      const finalResults = results.length ? results : (Array.isArray(prev?.results) ? prev.results : []);
+      // Для офлайн-устройств сохраняем lastSuccess из предыдущих результатов
+      if (finalResults.length && !results.length && Array.isArray(prev?.results)) {
+        finalResults.forEach((r, idx) => {
+          if (!r.alive && prev.results[idx] && prev.results[idx].lastSuccess) {
+            r.lastSuccess = prev.results[idx].lastSuccess;
+          }
+        });
+      }
+      out.push({ target: targetName || rangeStr, name: targetName, range: rangeStr, lastCheck: now, results: finalResults });
     }
     agent.targets = out;
   }

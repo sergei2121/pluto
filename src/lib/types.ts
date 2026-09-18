@@ -55,6 +55,7 @@ export interface RelayPingResult {
   ip: string;
   alive: boolean;
   latency: number | null; // мс
+  lastSuccess?: number | null; // timestamp последнего успешного пинга
 }
 
 /** Результат опроса одной цели (IP / диапазон) через relay-агент. */
