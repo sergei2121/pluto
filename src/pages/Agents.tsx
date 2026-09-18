@@ -56,7 +56,9 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
     if (initial) {
       setName(initial.name); setIp(initial.ip); setRelayUrl(initial.relayUrl); setGlancesUrl(initial.glancesUrl || '');
       setNetdataUrl(initial.netdataUrl || ''); setTelemetryUrl(initial.telemetryUrl || '');
-      setTelemetrySource(initial.telemetrySource || '');
+      // Автоматически определяем источник телеметрии по наличию URL
+      const source = initial.telemetrySource || (initial.netdataUrl ? 'netdata' : initial.glancesUrl ? 'glances' : '');
+      setTelemetrySource(source as TelemetrySource);
       const targets = Array.isArray(initial.pingTargets) 
         ? initial.pingTargets.map((t: any, i: number) => ({
             id: `tgt-${i}-${Date.now()}`,
