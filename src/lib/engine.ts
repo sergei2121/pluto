@@ -130,6 +130,7 @@ function mockGlancesPoint(t: number, agentId: string): GlancesPoint {
   
   return {
     t, cpu, gpu, ram, rx, tx, cput, ssdt, diskUsed, diskRead, diskWrite,
+    swap: null, load1: null, load5: null, load15: null, fanSpeed: null, battery: null, wifiQuality: null,
   };
 }
 
@@ -169,13 +170,14 @@ function stepAgent(id: string, now: number) {
     const pt = mockGlancesPoint(now, a.id);
     glancesLatest = {
       t: now, cpu: pt.cpu, cpuCores: [], gpu: pt.gpu, gpuTemp: null, ram: pt.ram,
-      ramUsedGB: null, ramTotalGB: null, swap: null, load1: null, load5: null,
+      ramUsedGB: null, ramTotalGB: null, swap: pt.swap, load1: pt.load1, load5: pt.load5, load15: pt.load15,
       cput: pt.cput, ssdt: pt.ssdt, disks, adapters: [], mainAdapter: null,
       rx: pt.rx, tx: pt.tx, sensors: [], uptimeSec: Math.floor((now - a.createdAt) / 1000), via: 'emu',
-      diskRead: pt.diskRead, diskWrite: pt.diskWrite, fanSpeed: null, battery: null, batteryTimeLeft: null,
-      batteryIsCharging: null, wifiSSID: null, wifiQuality: null, wifiSignal: null, wifiBitrate: null,
+      diskRead: pt.diskRead, diskWrite: pt.diskWrite, fanSpeed: pt.fanSpeed, battery: pt.battery, batteryTimeLeft: null,
+      batteryIsCharging: null, wifiSSID: null, wifiQuality: pt.wifiQuality, wifiSignal: null, wifiBitrate: null,
       processes: [], containers: [], cloudProvider: null, hddTemp: null, cpuUser: null, cpuSystem: null,
       cpuIowait: null, cpuFreq: null, gpuMem: null, gpuMemPercent: null, ramAvailableGB: null,
+      swapUsedGB: null, swapTotalGB: null,
     };
     
     // Проверка на уменьшение количества дисков

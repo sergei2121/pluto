@@ -156,7 +156,7 @@ export function Seg<T extends string>({ options, value, onChange }: { options: {
 }
 
 /** Полоски истории проверок: -1 = сбой. */
-export function Sparkbar({ data, height = 26, width = 120 }: { data: number[]; height?: number; width?: number }) {
+export function Sparkbar({ data, height = 26, width = 120, color }: { data: number[]; height?: number; width?: number; color?: string }) {
   const view = data.slice(-30);
   if (view.length === 0) return <div className="flex items-center font-mono text-[10px] text-dim/70" style={{ height }}>нет данных</div>;
   const max = Math.max(...view.filter((v) => v > 0), 1);
