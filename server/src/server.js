@@ -966,7 +966,8 @@ const server = http.createServer(async (req, res) => {
       if (!a) return json(res, 404, { error: 'агент не найден' });
       if (method === 'PUT' || method === 'PATCH') {
         const b = await readBody(req);
-        for (const k of ['name', 'ip', 'relayUrl', 'glancesUrl', 'netdataUrl', 'favorite', 'pingsFavorite', 'pingsShowcase']) if (k in b) a[k] = b[k];
+        for (const k of ['name', 'ip', 'relayUrl', 'glancesUrl', 'favorite', 'pingsFavorite', 'pingsShowcase']) if (k in b) a[k] = b[k];
+        if ('netdataUrl' in b) a.netdataUrl = String(b.netdataUrl || '').trim() || undefined;
         if ('telemetryUrl' in b) a.telemetryUrl = String(b.telemetryUrl || '').trim() || undefined;
         if ('telemetrySource' in b) a.telemetrySource = b.telemetrySource || '';
         if ('statsView' in b) a.statsView = b.statsView === 'bars' || b.statsView === 'ws' ? b.statsView : '';
