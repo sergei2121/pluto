@@ -227,7 +227,7 @@ export default function Stats({ mode }: { mode: 'bars' | 'ws' }) {
                 {agents.map((a) => <option key={a.id} value={a.id}>{a.name} · {a.ip}</option>)}
                 {!agents.length && <option value="">нет агентов</option>}
               </select>
-              {agent && (mode === 'bars' || mode === 'ws') && (
+              {agent && (mode === 'bars' || mode === ('ws' as StatsView)) && (
                 <div className="flex items-center gap-2 rounded-xl border border-line bg-raised/60 px-3 py-2 text-[11px] font-semibold text-dim shadow-inner">
                   <HardDrive className="h-3.5 w-3.5" />
                   <span>Дисков <span className="font-mono text-ink">{(agent.glancesLatest?.disks ?? []).filter((d) => (d.sizeGB ?? 0) >= 1).length}</span></span>
@@ -391,7 +391,7 @@ export default function Stats({ mode }: { mode: 'bars' | 'ws' }) {
               </div>
             }>
             {points.length ? (
-              mode === 'bars' || mode === 'ws'
+              mode === 'bars' || mode === ('ws' as string)
                 ? <BarsChart points={points} metric={metric} color={selectedMetric.color} gradient={selectedMetric.gradient} range={range} />
                 : <WaveChart points={points} metric={metric} color={selectedMetric.color} gradient={selectedMetric.gradient} range={range} />
             ) : (
