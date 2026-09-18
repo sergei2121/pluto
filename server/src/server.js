@@ -1184,7 +1184,8 @@ const server = http.createServer(async (req, res) => {
         id: uid(), name: String(b.name || '').trim() || ('ПК ' + ip), ip,
         relayUrl: String(b.relayUrl || '').trim(), glancesUrl: String(b.glancesUrl || '').trim(),
         netdataUrl: String(b.netdataUrl || '').trim() || undefined,
-        telemetrySource: b.telemetrySource === 'netdata' ? 'netdata' : (b.glancesUrl ? 'glances' : ''),
+        telemetryUrl: String(b.telemetryUrl || '').trim() || undefined,
+        telemetrySource: b.telemetrySource || '',
         pingTargets: Array.isArray(b.pingTargets) ? b.pingTargets.map(t => typeof t === 'string' ? { name: '', range: t } : t) : [],
         tags: Array.isArray(b.tags) ? b.tags : [],
         targets: [], favorite: !!b.favorite, pingsFavorite: !!b.pingsFavorite, pingsShowcase: !!b.pingsShowcase,
@@ -1205,7 +1206,8 @@ const server = http.createServer(async (req, res) => {
       if (method === 'PUT' || method === 'PATCH') {
         const b = await readBody(req);
         for (const k of ['name', 'ip', 'relayUrl', 'glancesUrl', 'netdataUrl', 'favorite', 'pingsFavorite', 'pingsShowcase']) if (k in b) a[k] = b[k];
-        if ('telemetrySource' in b) a.telemetrySource = b.telemetrySource === 'netdata' ? 'netdata' : (b.glancesUrl ? 'glances' : '');
+        if ('telemetryUrl' in b) a.telemetryUrl = String(b.telemetryUrl || '').trim() || undefined;
+        if ('telemetrySource' in b) a.telemetrySource = b.telemetrySource || '';
         if ('statsView' in b) a.statsView = b.statsView === 'bars' || b.statsView === 'ws' ? b.statsView : '';
         if (Array.isArray(b.pingTargets)) {
           a.pingTargets = b.pingTargets.map(t => typeof t === 'string' ? { name: '', range: t } : t);
