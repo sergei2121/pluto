@@ -166,7 +166,6 @@ const DeviceRow = memo(function DeviceRow({ d, isAdmin, onEdit }: { d: Device; i
           <div className="min-w-0">
             <div className="truncate text-[13px] font-semibold text-ink">{d.name}</div>
             <div className="font-mono text-[11px] text-dim">{d.address}</div>
-            {d.lastSuccess != null && <div className="font-mono text-[9px] text-warn">последний успех: <TimeAgo ts={d.lastSuccess} /></div>}
           </div>
         </div>
       </td>
@@ -174,6 +173,13 @@ const DeviceRow = memo(function DeviceRow({ d, isAdmin, onEdit }: { d: Device; i
       <td className="py-2.5 pr-3"><span className={cls('text-[12px] font-semibold', m.text)}>{m.label}</span></td>
       <td className="py-2.5 pr-3 font-mono text-[13px] tabular-nums text-mut">{d.status === 'down' ? '—' : fmtMs(d.latency)}{d.approx && d.status !== 'down' && <span className="ml-0.5 text-[9px] text-dim">≈</span>}</td>
       <td className="hidden py-2.5 pr-3 lg:table-cell"><Sparkbar data={d.history} height={22} width={110} /></td>
+      <td className="hidden py-2.5 pr-3 lg:table-cell">
+        {d.lastSuccess != null ? (
+          <div className="font-mono text-[11px] text-mut">{new Date(d.lastSuccess).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
+        ) : (
+          <span className="text-[11px] text-dim">—</span>
+        )}
+      </td>
       <td className="hidden py-2.5 pr-3 xl:table-cell">
         <div className="flex flex-wrap gap-1">{tagObjs.map((t) => <span key={t.id} className="rounded-full border px-2 py-0.5 text-[10px] font-semibold" style={{ borderColor: t.color, color: t.color }}>{t.label}</span>)}</div>
       </td>
@@ -274,7 +280,7 @@ export default function Devices() {
                 <tr className="border-b border-line/60 text-[10px] font-bold uppercase tracking-[0.12em] text-dim">
                   <th className="py-2 pr-3">Устройство</th><th className="py-2 pr-3">Тип</th><th className="py-2 pr-3">Статус</th>
                   <th className="py-2 pr-3">Задержка</th><th className="hidden py-2 pr-3 lg:table-cell">История</th>
-                  <th className="hidden py-2 pr-3 xl:table-cell">Теги</th><th className="hidden py-2 pr-3 md:table-cell">Опрос</th>
+                  <th className="hidden py-2 pr-3 lg:table-cell">Последний успех</th><th className="hidden py-2 pr-3 xl:table-cell">Теги</th><th className="hidden py-2 pr-3 md:table-cell">Опрос</th>
                   <th className="py-2 text-right">Действия</th>
                 </tr>
               </thead>
