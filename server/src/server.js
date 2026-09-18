@@ -9,7 +9,7 @@ import {
   loadDb, saveDb, uid, pushEvent, hashPass, verifyPass, issueSession, authUser, DEFAULT_SETTINGS,
 } from './lib.js';
 import { loginRateLimiter } from './middleware/rateLimiter.js';
-import telemetryCollectors from './telemetry/collectors.js';
+import telemetryCollectors, { parseGlancesData } from './telemetry/collectors.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const VERSION = '2.0.0';
@@ -220,124 +220,23 @@ async function relayPing(agent, targets) {
 
 // ─── Glances (телеметрия) ───────────────────────────────────────────────────
 
+/**
+ * Преобразует данные Glances API в формат PLUTO
+ * Использует новую функцию parseGlancesData из telemetry/collectors.js
+ */
 function glancesFromApi(data) {
-  const cpu = data.cpu || {};
-  const mem = data.mem || {};
-  const gpuList = data.gpu || [];
-  const gpu = gpuList.length ? gpuList[0] : null;
-  const sensors = (data.sensors || []).filter((s) => s && s.value != null);
-  const battery = data.battery || {};
-  const wifi = data.wifi || {};
-  const containersArr = data.containers || [];
-  const cloud = data.cloud || {};
-
-  const toGB = (b) => (b != null ? Math.round((b / 1024 ** 3) * 10) / 10 : null);
-
-  const mainAdapterSel = (data.network || []).filter((n) => n && !/lo|veth|docker|br-|virbr|vmnet|virtual/i.test(n.interface_name || n.key || ''))
-    .sort((a, b) => ((b.rx || 0) + (b.tx || 0)) - ((a.rx || 0) + (a.tx || 0)))[0] || (data.network || [])[0] || null;
-
-  const temp = (re) => {
-    const s = sensors.find((x) => re.test(x.label || ''));
-    return s ? Math.round(s.value * 10) / 10 : null;
-  };
-
-  const fanSensor = sensors.find((s) => /fan/i.test(s.label || ''));
-  const hddTempSensor = sensors.find((s) => /hdd|disk/i.test(s.label || '') && !/ssd|nvme/i.test(s.label || ''));
-
-  const fsArr = Array.isArray(data.fs) ? data.fs : [];
-  const mainFs = fsArr.find((f) => f.mnt_point === '/' || /^[A-Za-z]:\\?$/.test(f.mnt_point || '')) || fsArr[0] || null;
-
-  // DISK I/O: суммарная скорость чтения/записи по всем дискам
-  let diskRead = 0;
-  let diskWrite = 0;
-  if (Array.isArray(data.diskio) && data.diskio.length > 0) {
-    for (const d of data.diskio) {
-      const r = d.read_count ?? d.Rps ?? d['R/s'] ?? 0;
-      const w = d.write_count ?? d.Wps ?? d['W/s'] ?? 0;
-      diskRead += r;
-      diskWrite += w;
-    }
-  }
-
-  // Топ процессов по CPU
-  const procList = (data.processlist || []).slice(0, 10).map((p) => ({
-    pid: p.pid,
-    name: p.name || p.cmdline || 'unknown',
-    cpu: p.cpu_percent != null ? Math.round(p.cpu_percent * 10) / 10 : null,
-    mem: p.memory_percent != null ? Math.round(p.memory_percent * 10) / 10 : null,
-    status: p.status || '?',
-    username: p.username || undefined,
-  }));
-
-  // Контейнеры
-  const contList = (containersArr || []).map((c) => ({
-    name: c.name || 'unknown',
-    status: c.status || 'unknown',
-    cpu: c.cpu_percent != null ? Math.round(c.cpu_percent * 10) / 10 : null,
-    mem: c.memory_usage != null ? Math.round((c.memory_usage / 1024 / 1024) * 10) / 10 : null,
-  }));
-
-  return {
-    cpu: cpu.total != null ? Math.round(cpu.total * 10) / 10 : null,
-    cpuCores: (data.percpu || []).map((c) => Math.round((c.total || 0) * 10) / 10),
-    cpuUser: cpu.user != null ? Math.round(cpu.user * 10) / 10 : null,
-    cpuSystem: cpu.system != null ? Math.round(cpu.system * 10) / 10 : null,
-    cpuIowait: cpu.iowait != null ? Math.round(cpu.iowait * 10) / 10 : null,
-    cpuFreq: cpu.freq_current != null ? Math.round(cpu.freq_current) : null,
-    gpu: gpu && gpu.gpu != null ? Math.round(gpu.gpu * 10) / 10 : null,
-    gpuTemp: temp(/gpu/i),
-    gpuMem: gpu && gpu.mem != null ? Math.round((gpu.mem / 1024 / 1024) * 10) / 10 : null,
-    gpuMemPercent: gpu && gpu.mem_percent != null ? Math.round(gpu.mem_percent * 10) / 10 : null,
-    ram: mem.percent != null ? Math.round(mem.percent * 10) / 10 : null,
-    ramUsedGB: toGB(mem.used), ramTotalGB: toGB(mem.total), ramAvailableGB: toGB(mem.available),
-    swap: data.memswap && data.memswap.percent != null ? Math.round(data.memswap.percent * 10) / 10 : null,
-    swapUsedGB: data.memswap ? toGB(data.memswap.used) : null,
-    swapTotalGB: data.memswap ? toGB(data.memswap.total) : null,
-    load1: data.load && data.load.min1 != null ? data.load.min1 : null,
-    load5: data.load && data.load.min5 != null ? data.load.min5 : null,
-    load15: data.load && data.load.min15 != null ? data.load.min15 : null,
-    cput: temp(/package|cpu/i),
-    ssdt: temp(/ssd|nvme/i),
-    hddTemp: hddTempSensor ? Math.round(hddTempSensor.value * 10) / 10 : null,
-    disks: fsArr.map((f) => ({ mnt: f.mnt_point, percent: f.percent != null ? Math.round(f.percent * 10) / 10 : null, usedGB: toGB(f.used), sizeGB: toGB(f.size) })),
-    adapters: (data.network || []).map((n) => ({ name: n.interface_name || n.key, rx: n.rx != null ? Math.round((n.rx / 1024) * 10) / 10 : null, tx: n.tx != null ? Math.round((n.tx / 1024) * 10) / 10 : null, speed: n.speed != null ? Math.round((n.speed / 1000000) * 10) / 10 : null, isUp: n.is_up != null ? !!n.is_up : undefined })),
-    mainAdapter: mainAdapterSel ? (mainAdapterSel.interface_name || mainAdapterSel.key) : null,
-    rx: mainAdapterSel && mainAdapterSel.rx != null ? Math.round((mainAdapterSel.rx / 1024) * 10) / 10 : null,
-    tx: mainAdapterSel && mainAdapterSel.tx != null ? Math.round((mainAdapterSel.tx / 1024) * 10) / 10 : null,
-    sensors: sensors.map((s) => ({ label: s.label, value: Math.round(s.value * 10) / 10, unit: s.unit || '', kind: s.type || '' })),
-    uptimeSec: data.uptime ? parseUptime(data.uptime) : null,
-    mainFsUsed: mainFs && mainFs.percent != null ? Math.round(mainFs.percent * 10) / 10 : null,
-    diskRead: diskRead > 0 ? Math.round(diskRead * 10) / 10 : null,
-    diskWrite: diskWrite > 0 ? Math.round(diskWrite * 10) / 10 : null,
-    fanSpeed: fanSensor ? Math.round(fanSensor.value) : null,
-    battery: battery.percent != null ? Math.round(battery.percent * 10) / 10 : null,
-    batteryTimeLeft: battery.timeleft != null ? Math.round(battery.timeleft * 60) : null,
-    batteryIsCharging: battery.ischarging != null ? !!battery.ischarging : null,
-    wifiSSID: wifi.ssid || null,
-    wifiQuality: wifi.quality != null ? Math.round(wifi.quality * 10) / 10 : null,
-    wifiSignal: wifi.signal != null ? Math.round(wifi.signal) : null,
-    wifiBitrate: wifi.bitrate != null ? Math.round(wifi.bitrate) : null,
-    processes: procList,
-    containers: contList,
-    cloudProvider: cloud.provider || null,
-  };
+  return parseGlancesData(data);
 }
 
 // ─── Netdata (телеметрия) ───────────────────────────────────────────────────
 
 /**
  * Собирает метрики из Netdata API v2.
- * Netdata предоставляет данные через endpoints:
- *   /api/v2/data?context=system.cpu&format=json
- *   /api/v2/data?context=system.ram&format=json
- *   /api/v2/data?context=system.net&format=json
- *   /api/v2/data?context=system.ipc&format=json (для semaphores/shared memory)
- *   /api/v2/data?context=system.processes&format=json
- *   /api/v2/data?context=system.swap&format=json
- *   /api/v2/data?context=system.io&format=json
- *   /api/v2/data?context=system.pressure&format=json (pressure stall info)
+ * Использует функцию collectNetdata из telemetry/collectors.js
  */
 async function collectNetdata(url) {
+  return await telemetryCollectors.collectNetdata(url, fetchText);
+}
   const base = String(url).replace(/\/+$/, '');
   
   // Вспомогательная функция для запроса к Netdata API v2
@@ -563,17 +462,17 @@ function parseGlancesHtml(html) {
   return Object.keys(result).length > 0 ? result : null;
 }
 
-/** Собирает телеметрию из указанного источника (Glances или Netdata). */
+/** Собирает телеметрию из указанного источника (Glances, Netdata, Telegraf или Prometheus). */
 async function collectTelemetry(agent) {
   const source = agent.telemetrySource || 'glances';
   if (source === 'netdata' && agent.netdataUrl) {
-    const g = await collectNetdata(agent.netdataUrl);
+    const g = await telemetryCollectors.collectNetdata(agent.netdataUrl, fetchText);
     return { ...g, via: 'netdata' };
   } else if (source === 'telegraf' && agent.telemetryUrl) {
-    const g = await collectTelegraf(agent.telemetryUrl);
+    const g = await telemetryCollectors.collectTelegraf(agent.telemetryUrl, fetchText);
     return { ...g, via: 'telegraf' };
   } else if (source === 'prometheus' && agent.telemetryUrl) {
-    const g = await collectPrometheus(agent.telemetryUrl);
+    const g = await telemetryCollectors.collectPrometheus(agent.telemetryUrl, fetchText);
     return { ...g, via: 'prometheus' };
   } else if (agent.glancesUrl) {
     const g = await collectGlances(agent.glancesUrl);
