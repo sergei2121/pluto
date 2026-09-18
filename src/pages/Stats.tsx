@@ -4,7 +4,7 @@ import { BarChart3, Waves, Activity, Download, Cpu, HardDrive, Thermometer, Wifi
 import { Panel, EmptyState, TimeAgo, Sparkbar } from '../components/ui';
 import { store, useCurrentUser, usePluto, visibleAgents } from '../lib/store';
 import { cls, fmtNet, LINE_COLORS } from '../lib/util';
-import type { Agent, GlancesPoint, StatsRange } from '../lib/types';
+import type { Agent, GlancesPoint, StatsRange, StatsView } from '../lib/types';
 
 const RANGES: { v: StatsRange; label: string; ms: number }[] = [
   { v: '5m', label: '5 мин', ms: 5 * 60_000 },
@@ -227,7 +227,7 @@ export default function Stats({ mode }: { mode: 'bars' | 'ws' }) {
                 {agents.map((a) => <option key={a.id} value={a.id}>{a.name} · {a.ip}</option>)}
                 {!agents.length && <option value="">нет агентов</option>}
               </select>
-              {agent && (mode === 'bars' || mode === ('ws' as StatsView)) && (
+              {agent && (mode === 'bars' || mode === 'ws') && (
                 <div className="flex items-center gap-2 rounded-xl border border-line bg-raised/60 px-3 py-2 text-[11px] font-semibold text-dim shadow-inner">
                   <HardDrive className="h-3.5 w-3.5" />
                   <span>Дисков <span className="font-mono text-ink">{(agent.glancesLatest?.disks ?? []).filter((d) => (d.sizeGB ?? 0) >= 1).length}</span></span>
@@ -391,7 +391,7 @@ export default function Stats({ mode }: { mode: 'bars' | 'ws' }) {
               </div>
             }>
             {points.length ? (
-              mode === 'bars' || mode === ('ws' as string)
+              mode === 'bars' || mode === ('ws' as StatsView)
                 ? <BarsChart points={points} metric={metric} color={selectedMetric.color} gradient={selectedMetric.gradient} range={range} />
                 : <WaveChart points={points} metric={metric} color={selectedMetric.color} gradient={selectedMetric.gradient} range={range} />
             ) : (
