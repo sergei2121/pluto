@@ -5,7 +5,7 @@ import { cls, timeAgo } from '../lib/util';
 import type { DeviceStatus } from '../lib/types';
 
 export function Panel({ title, icon, right, children, className, bodyClass, delay = 0 }: {
-  title?: string; icon?: ReactNode; right?: ReactNode; children: ReactNode;
+  title?: string | ReactNode; icon?: ReactNode; right?: ReactNode; children: ReactNode;
   className?: string; bodyClass?: string; delay?: number;
 }) {
   return (
