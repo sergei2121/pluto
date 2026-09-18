@@ -2,17 +2,18 @@
 # Build artifacts
 dist/
 build/
-*.css
-*.js
-*.html
+*.pyc
+__pycache__/
 
 # Dependencies
 node_modules/
+venv/
+.venv/
 
 # Environment
 .env
 .env.local
-.env.*
+*.env.*
 
 # Editors
 .vscode/
@@ -21,4 +22,9 @@ node_modules/
 # Logs and temp files
 *.log
 *.tmp
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
 ```
