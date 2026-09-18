@@ -7,7 +7,7 @@ export const DATA_DIR = process.env.DATA_DIR || './data';
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
 export const DEFAULT_SETTINGS = {
-  intervals: { ping: 60, http: 60, api: 180, rtsp: 120, sip: 120, agent: 30, glances: 20 },
+  intervals: { ping: 60, http: 60, api: 180, rtsp: 120, sip: 120, agent: 30, netdata: 20 },
   timeoutMs: 3000, failThreshold: 3, degradeFactor: 10, degradeMinMs: 250,
   mirror: { enabled: false, url: '', secret: '', interval: 60 },
   notifications: {
@@ -114,9 +114,9 @@ export function loadDb() {
   db.agents = (db.agents || []).map((a) => ({
     ...a, pingTargets: Array.isArray(a.pingTargets) ? a.pingTargets : [],
     targets: Array.isArray(a.targets) ? a.targets : [], tags: Array.isArray(a.tags) ? a.tags : [],
-    latHist: Array.isArray(a.latHist) ? a.latHist : [], glances: Array.isArray(a.glances) ? a.glances : [],
-    glancesLatest: a.glancesLatest || null, glancesError: a.glancesError || null,
-    relayUrl: a.relayUrl || '', glancesUrl: a.glancesUrl || '', lastGlances: a.lastGlances || 0,
+    latHist: Array.isArray(a.latHist) ? a.latHist : [], netdata: Array.isArray(a.netdata) ? a.netdata : [],
+    netdataLatest: a.netdataLatest || null, netdataError: a.netdataError || null,
+    relayUrl: a.relayUrl || '', netdataUrl: a.netdataUrl || '', lastNetdata: a.lastNetdata || 0,
     favorite: !!a.favorite, pingsFavorite: !!a.pingsFavorite, pingsShowcase: !!a.pingsShowcase,
     statsView: a.statsView === 'bars' || a.statsView === 'ws' ? a.statsView : (a.stats ? 'ws' : ''),
   }));
@@ -124,7 +124,7 @@ export function loadDb() {
   db.users = (db.users || []).map((u) => ({
     ...u,
     menuScope: Array.isArray(u.menuScope) ? u.menuScope
-      : (u.role === 'admin' ? [] : Array.isArray(u.scope) ? u.scope.filter((s) => s !== 'agent' && s !== 'glances') : []),
+      : (u.role === 'admin' ? [] : Array.isArray(u.scope) ? u.scope.filter((s) => s !== 'agent' && s !== 'netdata') : []),
     deviceScope: Array.isArray(u.deviceScope) ? u.deviceScope
       : (Array.isArray(u.scope) ? u.scope.filter((s) => ['ping', 'http', 'api', 'rtsp', 'sip', 'snmp', 'ssl'].includes(s)) : []),
     twoFA: u.twoFA && typeof u.twoFA === 'object' ? { enabled: !!u.twoFA.enabled, secret: u.twoFA.secret || null } : { enabled: false, secret: null },

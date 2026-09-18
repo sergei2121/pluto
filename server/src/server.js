@@ -9,7 +9,7 @@ import {
   loadDb, saveDb, uid, pushEvent, hashPass, verifyPass, issueSession, authUser, DEFAULT_SETTINGS,
 } from './lib.js';
 import { loginRateLimiter } from './middleware/rateLimiter.js';
-import telemetryCollectors, { parseGlancesData } from './telemetry/collectors.js';
+import telemetryCollectors from './telemetry/collectors.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const VERSION = '2.0.0';
@@ -218,16 +218,6 @@ async function relayPing(agent, targets) {
   return [];
 }
 
-// ─── Glances (телеметрия) ───────────────────────────────────────────────────
-
-/**
- * Преобразует данные Glances API в формат PLUTO
- * Использует новую функцию parseGlancesData из telemetry/collectors.js
- */
-function glancesFromApi(data) {
-  return parseGlancesData(data);
-}
-
 // ─── Netdata (телеметрия) ───────────────────────────────────────────────────
 
 /**
@@ -239,130 +229,31 @@ async function collectNetdata(url) {
 }
 
 function parseUptime(s) {
-  const m = /(\d+):(\d+):(\d+)/.exec(String(s));
+  const m = /(\\d+):(\\d+):(\\d+)/.exec(String(s));
   if (!m) return null;
   return parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseInt(m[3]);
 }
 
-async function collectGlances(url) {
-  const base = String(url).replace(/\/+$/, '');
-  
-  // Пробуем API v4 и v3
-  for (const ver of [4, 3]) {
-    try {
-      const txt = await fetchText(`${base}/api/${ver}/all`, 7000);
-      const data = JSON.parse(txt);
-      const g = glancesFromApi(data);
-      console.log(`[Glances] Успешный сбор с API v${ver} от ${url}`);
-      return { ...g, via: `api${ver}` };
-    } catch (e) {
-      console.log(`[Glances] Ошибка API v${ver} от ${url}: ${e.message}`);
-      /* пробуем другую версию API */
-    }
-  }
-  
-  // Запасной вариант: парсим HTML страницу
-  try {
-    console.log(`[Glances] Попытка парсинга HTML от ${url}`);
-    const html = await fetchText(base, 7000);
-    const g = parseGlancesHtml(html);
-    if (g && g.cpu != null) {
-      console.log(`[Glances] Успешный парсинг HTML от ${url}`);
-      return { ...g, via: 'html' };
-    }
-  } catch (e) {
-    console.log(`[Glances] Ошибка парсинга HTML от ${url}: ${e.message}`);
-  }
-  
-  throw new Error('Glances недоступен: API и HTML не ответили');
-}
-
-/** Парсит HTML-страницу Glances и извлекает метрики */
-function parseGlancesHtml(html) {
-  const result = {};
-  
-  // Извлекаем CPU из data-value атрибутов
-  const cpuMatch = html.match(/cpu[^"]*?data-value=["']([^"']+)/i);
-  if (cpuMatch) result.cpu = parseFloat(cpuMatch[1]);
-  
-  // MEM
-  const memMatch = html.match(/mem[^"]*?data-value=["']([^"']+)/i);
-  if (memMatch) result.ram = parseFloat(memMatch[1]);
-  
-  // Load average
-  const load1Match = html.match(/load[^"]*?min1["'][^"]*?data-value=["']([^"']+)/i);
-  const load5Match = html.match(/load[^"]*?min5["'][^"]*?data-value=["']([^"']+)/i);
-  const load15Match = html.match(/load[^"]*?min15["'][^"]*?data-value=["']([^"']+)/i);
-  if (load1Match) result.load1 = parseFloat(load1Match[1]);
-  if (load5Match) result.load5 = parseFloat(load5Match[1]);
-  if (load15Match) result.load15 = parseFloat(load15Match[1]);
-  
-  // Network rx/tx
-  const netRxMatch = html.match(/network[^"]*?rx["'][^"]*?data-value=["']([^"']+)/i);
-  const netTxMatch = html.match(/network[^"]*?tx["'][^"]*?data-value=["']([^"']+)/i);
-  if (netRxMatch) result.rx = parseFloat(netRxMatch[1]);
-  if (netTxMatch) result.tx = parseFloat(netTxMatch[1]);
-  
-  // Disk usage
-  const diskMatch = html.match(/fs[^"]*?percent["'][^"]*?data-value=["']([^"']+)/i);
-  if (diskMatch) result.mainFsUsed = parseFloat(diskMatch[1]);
-  
-  // Uptime
-  const uptimeMatch = html.match(/uptime[^"]*?data-value=["']([^"']+)/i);
-  if (uptimeMatch) result.uptimeSec = parseInt(uptimeMatch[1]);
-  
-  // Temperature sensors
-  const tempMatches = html.matchAll(/sensor[^"]*?type=["']temperature["'][^"]*?data-value=["']([^"']+)/gi);
-  const temps = [];
-  for (const m of tempMatches) temps.push(parseFloat(m[1]));
-  if (temps.length > 0) result.cput = temps[0];
-  
-  // Fan speed
-  const fanMatch = html.match(/sensor[^"]*?type=["']fan["'][^"]*?data-value=["']([^"']+)/i);
-  if (fanMatch) result.fanSpeed = parseFloat(fanMatch[1]);
-  
-  return Object.keys(result).length > 0 ? result : null;
-}
-
-/** Собирает телеметрию из указанного источника (Glances, Netdata, Telegraf или Prometheus). */
+/** Собирает телеметрию из Netdata API. */
 async function collectTelemetry(agent) {
-  const source = agent.telemetrySource || 'glances';
-  if (source === 'netdata' && agent.netdataUrl) {
+  if (agent.netdataUrl) {
     const g = await telemetryCollectors.collectNetdata(agent.netdataUrl, fetchText);
     return { ...g, via: 'netdata' };
-  } else if (source === 'telegraf' && agent.telemetryUrl) {
-    const g = await telemetryCollectors.collectTelegraf(agent.telemetryUrl, fetchText);
-    return { ...g, via: 'telegraf' };
-  } else if (source === 'prometheus' && agent.telemetryUrl) {
-    const g = await telemetryCollectors.collectPrometheus(agent.telemetryUrl, fetchText);
-    return { ...g, via: 'prometheus' };
-  } else if (agent.glancesUrl) {
-    const g = await collectGlances(agent.glancesUrl);
-    return { ...g, via: g.via };
   }
-  throw new Error('Нет доступного источника телеметрии (укажите Glances, Netdata, Telegraf или Prometheus URL)');
+  throw new Error('Нет доступного источника телеметрии (укажите Netdata URL)');
 }
 
-function glancesPoint(g, t) {
+function netdataPoint(g, t) {
   return { 
     t, 
     cpu: g.cpu, 
-    gpu: g.gpu, 
     ram: g.ram, 
-    rx: g.rx, 
-    tx: g.tx, 
-    cput: g.cput, 
-    ssdt: g.ssdt, 
-    diskUsed: g.mainFsUsed ?? null, 
-    diskRead: g.diskRead ?? null, 
-    diskWrite: g.diskWrite ?? null,
+    rx: g.netRx, 
+    tx: g.netTx, 
+    cput: g.cpuTemp, 
     swap: g.swap ?? null,
-    load1: g.load1 ?? null,
-    load5: g.load5 ?? null,
-    load15: g.load15 ?? null,
-    fanSpeed: g.fanSpeed ?? null,
-    battery: g.battery ?? null,
-    wifiQuality: g.wifiQuality ?? null,
+    diskRead: g.diskRead ?? null,
+    diskWrite: g.diskWrite ?? null,
   };
 }
 
@@ -662,15 +553,15 @@ async function pollAgent(agent) {
     agent.targets = out;
   }
 
-  // 3) Телеметрия (Glances или Netdata, отдельный интервал, хранение 30 дней)
-  const giv = Math.max(10, db.settings.intervals.glances || 20) * 1000;
-  const hasTelemetry = agent.telemetrySource === 'netdata' ? !!agent.netdataUrl : !!agent.glancesUrl;
-  if (hasTelemetry && now - (agent.lastGlances || 0) >= giv) {
-    agent.lastGlances = now;
+  // 3) Телеметрия (Netdata, отдельный интервал, хранение 30 дней)
+  const giv = Math.max(10, db.settings.intervals.netdata || 20) * 1000;
+  const hasTelemetry = !!agent.netdataUrl;
+  if (hasTelemetry && now - (agent.lastNetdata || 0) >= giv) {
+    agent.lastNetdata = now;
     try {
       const g = await collectTelemetry(agent);
       // Сохраняем снимок телеметрии
-      agent.glancesLatest = {
+      agent.netdataLatest = {
         t: now, cpu: g.cpu, cpuCores: g.cpuCores || [], gpu: g.gpu, gpuTemp: g.gpuTemp,
         ram: g.ram, ramUsedGB: g.ramUsedGB, ramTotalGB: g.ramTotalGB, swap: g.swap,
         load1: g.load1, load5: g.load5, load15: g.load15, cput: g.cput, ssdt: g.ssdt,
@@ -684,9 +575,9 @@ async function pollAgent(agent) {
         cloudProvider: g.cloudProvider, via: g.via,
       };
       // Добавляем точку в историю (сокращённая версия)
-      const pt = glancesPoint(g, now);
-      agent.glances = [...(agent.glances || []), pt].slice(-4320); // 30 дней при 20 сек интервале
-      agent.glancesError = null;
+      const pt = netdataPoint(g, now);
+      agent.netdata = [...(agent.netdata || []), pt].slice(-4320); // 30 дней при 20 сек интервале
+      agent.netdataError = null;
       
       // Статистика количества дисков большой емкости (>= 1TB) для агентов с тегом "Bars"
       const isBarsAgent = agent.tags && agent.tags.includes('Bars');
@@ -719,8 +610,8 @@ async function pollAgent(agent) {
         }
       }
     } catch (e) {
-      agent.glancesError = 'Телеметрия: ' + (e.message || 'ошибка');
-      console.log(`[Glances] Ошибка сбора телеметрии для агента ${agent.name}: ${e.message}`);
+      agent.netdataError = 'Телеметрия: ' + (e.message || 'ошибка');
+      console.log(`[Netdata] Ошибка сбора телеметрии для агента ${agent.name}: ${e.message}`);
     }
   }
 
@@ -875,14 +766,14 @@ const server = http.createServer(async (req, res) => {
       const devices = isAdmin ? db.devices : db.devices.filter((d) => deviceScope.includes(d.type));
       const agentsRaw = isAdmin || menuScope.includes('agents') ? db.agents : [];
       const agents = agentsRaw.map((a) => ({
-        id: a.id, name: a.name, ip: a.ip, relayUrl: a.relayUrl || '', glancesUrl: a.glancesUrl || '',
+        id: a.id, name: a.name, ip: a.ip, relayUrl: a.relayUrl || '', netdataUrl: a.netdataUrl || '',
         pingTargets: a.pingTargets || [], targets: a.targets || [], tags: a.tags || [],
         favorite: !!a.favorite, pingsFavorite: !!a.pingsFavorite, pingsShowcase: !!a.pingsShowcase,
         statsView: a.statsView === 'bars' || a.statsView === 'ws' ? a.statsView : '',
         online: !!a.online, latency: a.latency ?? null,
         onlineSince: a.onlineSince || 0, lastSeen: a.lastSeen || 0, lastPoll: a.lastPoll || 0,
-        lastGlances: a.lastGlances || 0, glancesError: a.glancesError || null,
-        glancesLatest: a.glancesLatest || null, glances: (a.glances || []).slice(-120),
+        lastNetdata: a.lastNetdata || 0, netdataError: a.netdataError || null,
+        netdataLatest: a.netdataLatest || null, netdata: (a.netdata || []).slice(-120),
         latHist: (a.latHist || []).slice(-120), createdAt: a.createdAt,
       }));
       return json(res, 200, { devices, agents, tags: db.tags, events: (db.events || []).slice(0, 100), settings: db.settings, users: isAdmin ? db.users.map(publicUser) : undefined });
@@ -944,16 +835,13 @@ const server = http.createServer(async (req, res) => {
       const a = {
         id: uid(), name: String(b.name || '').trim() || ('ПК ' + ip), ip,
         relayUrl: String(b.relayUrl || '').trim(),
-        glancesUrl: String(b.glancesUrl || '').trim() || '',
         netdataUrl: String(b.netdataUrl || '').trim() || undefined,
-        telemetryUrl: String(b.telemetryUrl || '').trim() || undefined,
-        telemetrySource: b.telemetrySource || '',
         pingTargets: Array.isArray(b.pingTargets) ? b.pingTargets.map(t => typeof t === 'string' ? { name: '', range: t } : t) : [],
         tags: Array.isArray(b.tags) ? b.tags : [],
         targets: [], favorite: !!b.favorite, pingsFavorite: !!b.pingsFavorite, pingsShowcase: !!b.pingsShowcase,
         statsView: b.statsView === 'bars' || b.statsView === 'ws' ? b.statsView : '',
-        online: false, latency: null, onlineSince: 0, lastSeen: 0, lastPoll: 0, lastGlances: 0,
-        latHist: [], glances: [], glancesLatest: null, glancesError: null, createdAt: Date.now(),
+        online: false, latency: null, onlineSince: 0, lastSeen: 0, lastPoll: 0, lastNetdata: 0,
+        latHist: [], netdata: [], netdataLatest: null, netdataError: null, createdAt: Date.now(),
       };
       db.agents.push(a);
       await pushEvent('info', 'agent', `Добавлен агент «${a.name}» (${a.ip})`);
@@ -968,10 +856,7 @@ const server = http.createServer(async (req, res) => {
       if (method === 'PUT' || method === 'PATCH') {
         const b = await readBody(req);
         for (const k of ['name', 'ip', 'relayUrl', 'favorite', 'pingsFavorite', 'pingsShowcase']) if (k in b) a[k] = b[k];
-        if ('glancesUrl' in b) a.glancesUrl = String(b.glancesUrl || '').trim() || '';
         if ('netdataUrl' in b) a.netdataUrl = String(b.netdataUrl || '').trim() || undefined;
-        if ('telemetryUrl' in b) a.telemetryUrl = String(b.telemetryUrl || '').trim() || undefined;
-        if ('telemetrySource' in b) a.telemetrySource = b.telemetrySource || '';
         if ('statsView' in b) a.statsView = b.statsView === 'bars' || b.statsView === 'ws' ? b.statsView : '';
         if (Array.isArray(b.pingTargets)) {
           a.pingTargets = b.pingTargets.map(t => typeof t === 'string' ? { name: '', range: t } : t);
@@ -994,7 +879,7 @@ const server = http.createServer(async (req, res) => {
       await pollAgent(a);
       return json(res, 200, a);
     }
-    m = p.match(/^\/api\/agents\/([^/]+)\/glances$/);
+    m = p.match(/^\/api\/agents\/([^/]+)\/netdata$/);
     if (m && method === 'GET') {
       const a = db.agents.find((x) => x.id === m[1]);
       if (!a) return json(res, 404, { error: 'агент не найден' });
@@ -1003,7 +888,7 @@ const server = http.createServer(async (req, res) => {
       const rq = url.searchParams.get('range');
       const range = ranges[rq] ? rq : '3h';
       const cutoff = Date.now() - ranges[range];
-      let pts = (a.glances || []).filter((x) => x.t >= cutoff);
+      let pts = (a.netdata || []).filter((x) => x.t >= cutoff);
       if (pts.length > 1200) {
         const bw = ranges[range] / 1200;
         const out = []; let cur = null, bi = -1;
@@ -1017,16 +902,15 @@ const server = http.createServer(async (req, res) => {
       }
       return json(res, 200, { range, retentionDays: 30, points: pts });
     }
-    m = p.match(/^\/api\/agents\/([^/]+)\/test-glances$/);
+    m = p.match(/^\/api\/agents\/([^/]+)\/test-netdata$/);
     if (m && method === 'GET') {
       const a = db.agents.find((x) => x.id === m[1]);
       if (!a) return json(res, 404, { error: 'агент не найден' });
       try {
         const g = await collectTelemetry(a);
-        const url = a.telemetrySource === 'netdata' ? a.netdataUrl : a.glancesUrl;
-        return json(res, 200, { ok: true, url: url || '', via: g.via, values: glancesPoint(g, Date.now()) });
+        return json(res, 200, { ok: true, url: a.netdataUrl || '', via: g.via, values: netdataPoint(g, Date.now()) });
       } catch (e) {
-        return json(res, 200, { ok: false, url: a.glancesUrl || a.netdataUrl || '', via: null, error: e.message || String(e) });
+        return json(res, 200, { ok: false, url: a.netdataUrl || '', via: null, error: e.message || String(e) });
       }
     }
 
