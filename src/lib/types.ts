@@ -38,6 +38,7 @@ export interface Device {
   fails: number;
   lastCheck: number;
   lastChange: number;
+  lastSuccess?: number | null; // timestamp последнего успешного пинга
   checking: boolean;
   approx: boolean;
   // SNMP
