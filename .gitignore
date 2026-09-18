@@ -1,5 +1,1 @@
-```
-# Build artifacts
-dist/
-build/
-```
+Nothing should be ignored based on the provided file changes. The only modified file is a source code file (`server/src/server.js`), which should not be added to .gitignore.
