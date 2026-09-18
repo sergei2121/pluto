@@ -82,8 +82,8 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
                             {r.alive ? <Wifi className="h-3.5 w-3.5 text-ok" /> : <WifiOff className="h-3.5 w-3.5 text-crit" />}{r.ip}
                           </span>
                           <div className="flex flex-col items-end gap-0.5">
+                            {showLastSuccess && <span className="font-mono text-[9px] text-warn">последний успех: <TimeAgo ts={r.lastSuccess} /></span>}
                             <span className={cls('font-mono text-[11.5px] font-semibold', r.alive ? 'text-ok' : 'text-crit')}>{r.alive ? `${r.latency ?? 0} мс` : 'нет ответа'}</span>
-                            {showLastSuccess && <span className="font-mono text-[9px] text-dim">был онлайн <TimeAgo ts={r.lastSuccess} /></span>}
                           </div>
                         </div>
                       );
