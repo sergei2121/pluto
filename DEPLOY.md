@@ -124,21 +124,89 @@ sc.exe stop pluto-agent         # остановить
 sc.exe delete pluto-agent       # удалить
 ```
 
-### 3.3 Glances · журнал Bars (агент не нужен)
+### 3.3 Netdata — сбор телеметрии (агент не нужен)
 
-Для Linux-серверов (Rocky Linux и др.), где Glances запущен в веб-режиме (`glances -w`,
-по умолчанию порт **61208**), агент ставить не нужно: ядро PLUTO само периодически
-запрашивает веб-страницу и разбирает столбцы:
+Для Linux-серверов, где установлен **Netdata** (по умолчанию порт **19999**), агент ставить не нужно: ядро PLUTO само периодически запрашивает API Netdata v2 и собирает метрики:
 
-- **CPU** (+ user, system, iowait, idle, irq, nice, steal), %
-- **MEM** (%, total/used/free, ГБ)
-- **Rx/s**, **Tx/s** — сетевые счётчики
-- **Package** — температура процессора, °C
+- **CPU**: user, system, iowait, %
+- **RAM**: used, total, %
+- **Swap**: used, total, %
+- **Сеть**: received/sent (КБ/с)
+- **Disk I/O**: reads/writes (операции/с)
+- **Температуры**: CPU
 
-Добавление: **Журнал телеметрии Bars → «Добавить устройство»**: *Имя*, *Адрес мониторинга*
-(`http://<IP>:61208`), *Ссылка на физ. сервер* (кликабельная). Данные хранятся **30 дней**
-с ярусным сжатием и почасовой автоочисткой. График в карточке устройства, период — от 5 минут
-до 30 дней. Интервал опроса меняется в **Настройки → Опросы → «Glances (Bars)»**.
+**Установка Netdata на целевой сервер:**
+
+```bash
+# Автоматическая установка Netdata (рекомендуется)
+wget -O /tmp/netdata-kickstart.sh https://get.netdata.cloud/kickstart.sh && sh /tmp/netdata-kickstart.sh
+
+# Или через Docker:
+docker run -d --name=netdata \
+  --pid=host --network=host \
+  -v netdataconfig:/etc/netdata \
+  -v netdatalib:/var/lib/netdata \
+  -v netlog:/var/log/netdata \
+  -v /etc/passwd:/host/etc/passwd:ro \
+  -v /etc/group:/host/etc/group:ro \
+  -v /proc:/host/proc:ro \
+  -v /sys:/host/sys:ro \
+  -v /etc/os-release:/host/etc/os-release:ro \
+  netdata/netdata:latest
+```
+
+**Настройка доступа к Netdata API:**
+
+По умолчанию Netdata слушает только localhost. Для доступа из PLUTO есть два варианта:
+
+**Вариант A: Открыть порт Netdata (для внутренней сети)**
+
+```bash
+# /etc/netdata/netdata.conf
+[web]
+  bind to = 0.0.0.0:19999
+```
+
+**Вариант B: Через reverse proxy (рекомендуется для безопасности)**
+
+```nginx
+# /etc/nginx/sites-available/netdata
+server {
+    listen 19999;
+    server_name _;
+    
+    location / {
+        proxy_pass http://localhost:19999;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        
+        # Опционально: ограничить доступ IP-адресом сервера PLUTO
+        # allow 192.168.1.100;  # IP сервера PLUTO
+        # deny all;
+    }
+}
+```
+
+**Добавление в PLUTO:**
+
+1. Откройте консоль PLUTO → **Агенты**
+2. Нажмите **«Добавить агента»**
+3. Заполните:
+   - **Имя**: произвольное (например, `Web-сервер`)
+   - **IP-адрес**: IP целевого сервера
+   - **Netdata URL**: `http://<IP>:19999` (или ваш прокси)
+4. Сохраните
+
+Данные хранятся **30 дней** с ярусным сжатием и почасовой автоочисткой. График в карточке агента, период — от 5 минут до 30 дней. Интервал опроса меняется в **Настройки → Опросы** (параметр `intervals.netdata`, по умолчанию 20 сек).
+
+**Проверка подключения:**
+
+```bash
+# С сервера PLUTO проверьте доступность API:
+curl http://<IP-целевого>:19999/api/v2/data?context=system.cpu&format=json&after=-60
+
+# Должен вернуться JSON с метриками CPU
+```
 
 ## 4. Зеркало-ретранслятор (выход в открытый интернет)
 

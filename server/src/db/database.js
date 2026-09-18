@@ -104,15 +104,15 @@ export class Database {
       targets: Array.isArray(a.targets) ? a.targets : [],
       tags: Array.isArray(a.tags) ? a.tags : [],
       latHist: Array.isArray(a.latHist) ? a.latHist : [],
-      glances: Array.isArray(a.glances) ? a.glances : [],
-      glancesLatest: a.glancesLatest || null,
-      glancesError: a.glancesError || null,
+      netdata: Array.isArray(a.netdata) ? a.netdata : [],
+      netdataLatest: a.netdataLatest || null,
+      netdataError: a.netdataError || null,
       relayUrl: a.relayUrl || '',
-      glancesUrl: a.glancesUrl || '',
+      netdataUrl: a.netdataUrl || '',
       netdataUrl: a.netdataUrl || undefined,
       telemetryUrl: a.telemetryUrl || undefined,
       telemetrySource: a.telemetrySource || '',
-      lastGlances: a.lastGlances || 0,
+      lastNetdata: a.lastNetdata || 0,
       favorite: !!a.favorite,
       pingsFavorite: !!a.pingsFavorite,
       pingsShowcase: !!a.pingsShowcase,
@@ -128,7 +128,7 @@ export class Database {
         : u.role === 'admin'
           ? []
           : Array.isArray(u.scope)
-            ? u.scope.filter((s) => s !== 'agent' && s !== 'glances')
+            ? u.scope.filter((s) => s !== 'agent' && s !== 'netdata')
             : [],
       deviceScope: Array.isArray(u.deviceScope)
         ? u.deviceScope
