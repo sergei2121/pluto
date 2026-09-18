@@ -529,7 +529,11 @@ async function pollAgent(agent) {
   const ping = await checkPing(agent.ip, db.settings.timeoutMs || 3000);
   agent.online = ping.ok;
   agent.latency = ping.ok ? ping.latency : null;
-  if (ping.ok) { agent.lastSeen = now; if (!agent.onlineSince) agent.onlineSince = now; }
+  if (ping.ok) { 
+    agent.lastSeen = now; 
+    agent.lastPingSuccess = now; 
+    if (!agent.onlineSince) agent.onlineSince = now; 
+  }
   else agent.onlineSince = 0;
   agent.latHist = [...(agent.latHist || []), { t: now, ms: ping.ok ? ping.latency : null }].slice(-480);
   if (ping.ok && !wasOnline) { await pushEvent('ok', 'agent', `Агент «${agent.name}» в сети`); notify('agentOn', 'PLUTO: агент в сети', agent.name); }
@@ -771,7 +775,7 @@ const server = http.createServer(async (req, res) => {
         favorite: !!a.favorite, pingsFavorite: !!a.pingsFavorite, pingsShowcase: !!a.pingsShowcase,
         statsView: a.statsView === 'bars' || a.statsView === 'ws' ? a.statsView : '',
         online: !!a.online, latency: a.latency ?? null,
-        onlineSince: a.onlineSince || 0, lastSeen: a.lastSeen || 0, lastPoll: a.lastPoll || 0,
+        onlineSince: a.onlineSince || 0, lastSeen: a.lastSeen || 0, lastPingSuccess: a.lastPingSuccess || 0, lastPoll: a.lastPoll || 0,
         lastNetdata: a.lastNetdata || 0, netdataError: a.netdataError || null,
         netdataLatest: a.netdataLatest || null, netdata: (a.netdata || []).slice(-120),
         latHist: (a.latHist || []).slice(-120), createdAt: a.createdAt,
@@ -840,7 +844,7 @@ const server = http.createServer(async (req, res) => {
         tags: Array.isArray(b.tags) ? b.tags : [],
         targets: [], favorite: !!b.favorite, pingsFavorite: !!b.pingsFavorite, pingsShowcase: !!b.pingsShowcase,
         statsView: b.statsView === 'bars' || b.statsView === 'ws' ? b.statsView : '',
-        online: false, latency: null, onlineSince: 0, lastSeen: 0, lastPoll: 0, lastNetdata: 0,
+        online: false, latency: null, onlineSince: 0, lastSeen: 0, lastPingSuccess: 0, lastPoll: 0, lastNetdata: 0,
         latHist: [], netdata: [], netdataLatest: null, netdataError: null, createdAt: Date.now(),
       };
       db.agents.push(a);
