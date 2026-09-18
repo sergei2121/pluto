@@ -943,7 +943,8 @@ const server = http.createServer(async (req, res) => {
       const ip = String(b.ip || '').trim();
       const a = {
         id: uid(), name: String(b.name || '').trim() || ('ПК ' + ip), ip,
-        relayUrl: String(b.relayUrl || '').trim(), glancesUrl: String(b.glancesUrl || '').trim(),
+        relayUrl: String(b.relayUrl || '').trim(),
+        glancesUrl: String(b.glancesUrl || '').trim() || '',
         netdataUrl: String(b.netdataUrl || '').trim() || undefined,
         telemetryUrl: String(b.telemetryUrl || '').trim() || undefined,
         telemetrySource: b.telemetrySource || '',
@@ -966,7 +967,8 @@ const server = http.createServer(async (req, res) => {
       if (!a) return json(res, 404, { error: 'агент не найден' });
       if (method === 'PUT' || method === 'PATCH') {
         const b = await readBody(req);
-        for (const k of ['name', 'ip', 'relayUrl', 'glancesUrl', 'favorite', 'pingsFavorite', 'pingsShowcase']) if (k in b) a[k] = b[k];
+        for (const k of ['name', 'ip', 'relayUrl', 'favorite', 'pingsFavorite', 'pingsShowcase']) if (k in b) a[k] = b[k];
+        if ('glancesUrl' in b) a.glancesUrl = String(b.glancesUrl || '').trim();
         if ('netdataUrl' in b) a.netdataUrl = String(b.netdataUrl || '').trim() || undefined;
         if ('telemetryUrl' in b) a.telemetryUrl = String(b.telemetryUrl || '').trim() || undefined;
         if ('telemetrySource' in b) a.telemetrySource = b.telemetrySource || '';

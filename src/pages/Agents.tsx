@@ -54,8 +54,10 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
     if (!open) return;
     setErr('');
     if (initial) {
-      setName(initial.name); setIp(initial.ip); setRelayUrl(initial.relayUrl); setGlancesUrl(initial.glancesUrl || '');
-      setNetdataUrl(initial.netdataUrl || ''); setTelemetryUrl(initial.telemetryUrl || '');
+      setName(initial.name); setIp(initial.ip); setRelayUrl(initial.relayUrl); 
+      setGlancesUrl(initial.glancesUrl || '');
+      setNetdataUrl(initial.netdataUrl || ''); 
+      setTelemetryUrl(initial.telemetryUrl || '');
       // Автоматически определяем источник телеметрии по наличию URL
       const source = initial.telemetrySource || (initial.netdataUrl ? 'netdata' : initial.glancesUrl ? 'glances' : '');
       setTelemetrySource(source as TelemetrySource);
@@ -69,7 +71,8 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
       setPingTargets(targets.length ? targets : [{ id: uid('tgt'), name: '', range: '' }]);
       setStatsView(initial.statsView); setSelTags(initial.tags);
     } else {
-      setName(''); setIp(''); setRelayUrl(''); setGlancesUrl('');
+      setName(''); setIp(''); setRelayUrl(''); 
+      setGlancesUrl('');
       setNetdataUrl(''); setTelemetryUrl(''); setTelemetrySource('');
       setPingTargets([{ id: uid('tgt'), name: '', range: '' }]);
       setStatsView(''); setSelTags([]);
