@@ -166,6 +166,7 @@ const DeviceRow = memo(function DeviceRow({ d, isAdmin, onEdit }: { d: Device; i
           <div className="min-w-0">
             <div className="truncate text-[13px] font-semibold text-ink">{d.name}</div>
             <div className="font-mono text-[11px] text-dim">{d.address}</div>
+            {d.lastSuccess != null && <div className="font-mono text-[9px] text-warn">последний успех: <TimeAgo ts={d.lastSuccess} /></div>}
           </div>
         </div>
       </td>
