@@ -89,7 +89,7 @@ async function runCheck(id: string) {
   else if (degraded && d.status !== 'degraded') store.pushEvent('warn', 'device', `${d.name}: деградация ${latency} мс`);
 
   store.updateDevice(id, {
-    status, fails: 0, latency, baseline, lastCheck: now,
+    status, fails: 0, latency, baseline, lastCheck: now, lastSuccess: now,
     lastChange: status === d.status ? d.lastChange : now, history, checking: false, approx: true,
   });
 }

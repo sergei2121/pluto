@@ -185,14 +185,14 @@ export const store = {
   },
 
   // ── устройства ──
-  async addDevice(d: Omit<Device, 'id' | 'status' | 'latency' | 'baseline' | 'history' | 'fails' | 'lastCheck' | 'lastChange' | 'checking' | 'approx' | 'createdAt'>): Promise<void> {
+  async addDevice(d: Omit<Device, 'id' | 'status' | 'latency' | 'baseline' | 'history' | 'fails' | 'lastCheck' | 'lastChange' | 'lastSuccess' | 'checking' | 'approx' | 'createdAt'>): Promise<void> {
     if (getState().apiMode === 'server') {
       const { api } = await import('./api');
       await api.addDevice(d);
       await syncAll();
       return;
     }
-    const dev: Device = { ...d, id: uid('dv'), status: 'unknown', latency: null, baseline: null, history: [], fails: 0, lastCheck: 0, lastChange: Date.now(), checking: false, approx: false, createdAt: Date.now() };
+    const dev: Device = { ...d, id: uid('dv'), status: 'unknown', latency: null, baseline: null, history: [], fails: 0, lastCheck: 0, lastChange: Date.now(), lastSuccess: null, checking: false, approx: false, createdAt: Date.now() };
     set({ devices: [...state.devices, dev] });
     get().pushEvent('info', 'device', `Добавлено устройство «${dev.name}» (${dev.address})`);
   },
