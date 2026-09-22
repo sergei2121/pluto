@@ -46,10 +46,20 @@ export function timeAgo(ts: number): string {
   if (!ts) return '—';
   const d = Math.max(0, Date.now() - ts);
   if (d < 5_000) return 'только что';
-  if (d < 60_000) return `${Math.floor(d / 1000)} с назад`;
-  if (d < 3_600_000) return `${Math.floor(d / 60_000)} мин назад`;
-  if (d < 86_400_000) return `${Math.floor(d / 3_600_000)} ч назад`;
-  return `${Math.floor(d / 86_400_000)} д назад`;
+  if (d < 60_000) {
+    const sec = Math.floor(d / 1000);
+    return sec > 0 ? `${sec} с назад` : 'только что';
+  }
+  if (d < 3_600_000) {
+    const min = Math.floor(d / 60_000);
+    return min > 0 ? `${min} мин назад` : 'только что';
+  }
+  if (d < 86_400_000) {
+    const hr = Math.floor(d / 3_600_000);
+    return hr > 0 ? `${hr} ч назад` : 'только что';
+  }
+  const days = Math.floor(d / 86_400_000);
+  return days > 0 ? `${days} д назад` : 'только что';
 }
 
 export function fmtClock(ts: number): string {
