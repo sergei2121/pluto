@@ -89,16 +89,16 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
                       
                       return (
                         <div key={r.ip} className="flex items-center justify-between rounded border border-line/40 bg-panel/50 px-2.5 py-1.5 transition-colors hover:bg-raised/60">
-                          <span className="flex items-center gap-2 font-mono text-[11.5px] text-mut">
-                            {r.alive ? <Wifi className="h-3.5 w-3.5 text-ok" /> : <WifiOff className="h-3.5 w-3.5 text-crit" />}{r.ip}
-                          </span>
-                          <div className="flex flex-col items-end gap-0.5">
-                            {r.lastSuccess != null && <span className="font-mono text-[9px] text-warn">последний успех: <TimeAgo ts={r.lastSuccess} /></span>}
+                          <div className="flex flex-col gap-0.5">
+                            <span className="flex items-center gap-2 font-mono text-[11.5px] text-mut">
+                              {r.alive ? <Wifi className="h-3.5 w-3.5 text-ok" /> : <WifiOff className="h-3.5 w-3.5 text-crit" />}{r.ip}
+                            </span>
+                            {r.lastSuccess != null && <span className="font-mono text-[9px] text-dim">последний успех: <TimeAgo ts={r.lastSuccess} /></span>}
                             {!r.alive && r.offlineDuration30d && r.offlineDuration30d > 0 && (
-                              <span className="font-mono text-[9px] text-crit">офлайн за 30д: {offlineDuration}</span>
+                              <span className="font-mono text-[9px] text-crit">в офлайне (30 дн.): {offlineDuration}</span>
                             )}
-                            <span className={cls('font-mono text-[11.5px] font-semibold', r.alive ? 'text-ok' : 'text-crit')}>{r.alive ? `${r.latency ?? 0} мс` : 'нет ответа'}</span>
                           </div>
+                          <span className={cls('font-mono text-[11.5px] font-semibold', r.alive ? 'text-ok' : 'text-crit')}>{r.alive ? `${r.latency ?? 0} мс` : 'нет ответа'}</span>
                         </div>
                       );
                     })}

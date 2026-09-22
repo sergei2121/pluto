@@ -226,11 +226,22 @@ async function relayPing(agent, targets) {
   if (!agent.relayUrl) return [];
   const base = String(agent.relayUrl).replace(/\/+$/, '');
   const url = base + '/ping?targets=' + encodeURIComponent(targets.join(','));
+  const now = Date.now();
   try {
     const txt = await fetchText(url, 15000);
     const arr = JSON.parse(txt);
     if (Array.isArray(arr)) {
-      return arr.map((r) => ({ ip: r.ip, alive: !!r.alive, latency: r.latencyMs != null ? r.latencyMs : (r.latency != null ? r.latency : null), lastSuccess: r.alive ? Date.now() : null }));
+      return arr.map((r) => {
+        const alive = !!r.alive;
+        return { 
+          ip: r.ip, 
+          alive, 
+          latency: r.latencyMs != null ? r.latencyMs : (r.latency != null ? r.latency : null), 
+          lastSuccess: alive ? now : null,
+          offlineSince: !alive ? now : null,
+          offlineDuration30d: 0
+        };
+      });
     }
   } catch { /* relay недоступен */ }
   return [];
