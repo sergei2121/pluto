@@ -103,7 +103,7 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
                           <div className="flex min-w-0 items-center gap-2">
                             {r.alive ? <Wifi className="h-3.5 w-3.5 shrink-0 text-ok" /> : <WifiOff className="h-3.5 w-3.5 shrink-0 text-crit" />}
                             <span className="font-mono text-[11.5px] text-mut">{r.ip}</span>
-                            <span className="hidden font-mono text-[9px] md:inline">
+                            <span className="hidden font-mono text-[9px] md:inline" style={{ fontWeight: 500 }}>
                               последний успех: <span className={lastSuccessStr === '—' ? 'text-crit' : 'text-dim'}>{lastSuccessStr || '—'}</span>
                             </span>
                             {!r.alive && r.offlineDuration30d && r.offlineDuration30d > 0 && (
