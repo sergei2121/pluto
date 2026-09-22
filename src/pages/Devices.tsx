@@ -189,7 +189,7 @@ const DeviceRow = memo(function DeviceRow({ d, isAdmin, onEdit }: { d: Device; i
       <td className="hidden py-2.5 pr-3 lg:table-cell"><Sparkbar data={d.history} height={22} width={110} /></td>
       <td className="hidden py-2.5 pr-3 lg:table-cell">
         {d.lastSuccess != null ? (
-          <div className="font-mono text-[11px] text-mut">{new Date(d.lastSuccess).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
+          <div className="font-mono text-[11px] text-dim">последний пинг: {new Date(d.lastSuccess).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
         ) : (
           <span className="text-[11px] text-dim">—</span>
         )}

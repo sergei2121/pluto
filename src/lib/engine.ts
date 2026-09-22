@@ -1,6 +1,6 @@
 // ─── PLUTO: встроенный движок (браузерная эмуляция без серверного ядра) ──────
 import { getState, store, useToasts } from './store';
-import type { Agent, Device, GlancesPoint } from './types';
+import type { Agent, Device, GlancesPoint, RelayPingResult, RelayTargetResult } from './types';
 import { clamp, hashStr, mulberry32, rnd } from './util';
 
 let timer: number | null = null;
@@ -215,7 +215,91 @@ function stepAgent(id: string, now: number) {
     glancesLatest, glances,
     latHist: [...a.latHist, { t: now, ms }].slice(-480),
     glancesError: online ? null : 'агент недоступен (эмуляция)',
+    targets: emulateRelayPings(a.targets, now, id),
   });
+}
+
+// Эмуляция пингов relay-агента для его целей (IP/диапазоны)
+function emulateRelayPings(targets: RelayTargetResult[], now: number, agentId: string): RelayTargetResult[] {
+  const rng = mulberry32(hashStr(agentId) ^ Math.floor(now / 5000));
+  return targets.map((target) => {
+    const ips = expandIpRange(target.range || '');
+    const results: RelayPingResult[] = ips.map((ip, idx) => {
+      const ipRng = mulberry32(hashStr(ip) ^ Math.floor(now / 10000) ^ idx);
+      const alive = ipRng() > 0.05; // 5% шанс офлайна
+      const latency = alive ? Math.round(1 + ipRng() * 50) : null;
+      
+      // Находим существующий результат для этого IP, если есть
+      const existingResults = Array.isArray(target.results) ? target.results : [];
+      const existing = existingResults.find(r => r.ip === ip);
+      
+      let lastSuccess = existing?.lastSuccess ?? null;
+      let offlineSince = existing?.offlineSince ?? null;
+      let offlineDuration30d = existing?.offlineDuration30d ?? 0;
+      
+      if (alive) {
+        lastSuccess = now;
+        // Если был в офлайне, добавляем длительность к накопленной
+        if (offlineSince !== null) {
+          const offlineTime = now - offlineSince;
+          const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+          offlineDuration30d = Math.min(thirtyDaysMs, offlineDuration30d + offlineTime);
+          offlineSince = null;
+        }
+      } else {
+        // Ушёл в офлайн
+        if (offlineSince === null) {
+          offlineSince = now;
+        }
+      }
+      
+      return {
+        ip,
+        alive,
+        latency,
+        lastSuccess,
+        offlineSince,
+        offlineDuration30d,
+      };
+    });
+    
+    return { ...target, results, lastCheck: now };
+  });
+}
+
+// Раскрытие диапазона IP в список отдельных IP
+function expandIpRange(range: string): string[] {
+  if (!range) return [];
+  // Проверка на диапазон вида "192.168.1.10-192.168.1.20"
+  const rangeMatch = range.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3})\.(\d+)-(\d+)$/);
+  if (rangeMatch) {
+    const base = rangeMatch[1];
+    const start = parseInt(rangeMatch[2], 10);
+    const end = parseInt(rangeMatch[3], 10);
+    const result: string[] = [];
+    for (let i = Math.min(start, end); i <= Math.max(start, end); i++) {
+      result.push(`${base}.${i}`);
+    }
+    return result;
+  }
+  // Одиночный IP или CIDR (упрощённо)
+  if (range.includes('/')) {
+    // Простая эмуляция для CIDR /24
+    const cidrMatch = range.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3})\.(\d+)\/(\d+)$/);
+    if (cidrMatch && cidrMatch[3] === '24') {
+      const base = cidrMatch[1];
+      const result: string[] = [];
+      for (let i = 1; i <= 254; i++) {
+        result.push(`${base}.${i}`);
+      }
+      return result;
+    }
+  }
+  // Просто IP без диапазона
+  if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(range)) {
+    return [range];
+  }
+  return [];
 }
 
 export function sendTestNotification(): void {
