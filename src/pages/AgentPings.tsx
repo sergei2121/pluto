@@ -62,17 +62,19 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
             const displayName = target.name || target.target || target.range || 'Без имени';
             const hasResults = Array.isArray(target.results) && target.results.length > 0;
             const targetKey = target.target || displayName;
-            const isExpanded = expandedTargets[targetKey] ?? true; // По умолчанию раскрыто
+            const isExpanded = expandedTargets[targetKey] ?? false; // По умолчанию закрыто
             
             return (
               <div key={targetKey} className="overflow-hidden rounded-lg border border-line/40 bg-raised/30 transition-all">
                 {/* Заголовок подгруппы - всегда виден, кликабельный */}
                 <button 
                   onClick={() => toggleTarget(targetKey)}
-                  className="flex w-full items-center justify-between border-b border-line/30 bg-raised/50 px-3 py-2 transition-colors hover:bg-raised/70"
+                  className="flex w-full items-center justify-between border-b border-line/30 bg-raised/50 px-3 py-2.5 transition-colors hover:bg-raised/70"
                 >
                   <div className="flex items-center gap-2">
-                    {isExpanded ? <ChevronUp className="h-3.5 w-3.5 text-mut" /> : <ChevronDown className="h-3.5 w-3.5 text-mut" />}
+                    <div className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-raised/70">
+                      {isExpanded ? <ChevronUp className="h-4 w-4 text-mut" /> : <ChevronDown className="h-4 w-4 text-mut" />}
+                    </div>
                     <LayoutGrid className="h-3.5 w-3.5 text-mut" />
                     <span className="font-mono text-[12px] font-bold text-ink">{displayName}</span>
                     {target.range && <span className="font-mono text-[10px] text-dim">({target.range})</span>}
