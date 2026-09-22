@@ -208,10 +208,9 @@ export function Bar({ value, color = '#8f7df0', className }: { value: number; co
 export function TimeAgo({ ts, className }: { ts: number; className?: string }) {
   const [, force] = useState(0);
   useEffect(() => { const t = setInterval(() => force((x) => x + 1), 5000); return () => clearInterval(t); }, []);
+  if (!ts || ts <= 0) return null;
   const text = timeAgo(ts);
-  // Убираем "0" если текст начинается с "0 "
-  const displayText = text.startsWith('0 ') ? text.slice(2) : text;
-  return <span className={className}>{displayText}</span>;
+  return <span className={className}>{text}</span>;
 }
 
 export function CopyBlock({ code, label }: { code: string; label?: string }) {
