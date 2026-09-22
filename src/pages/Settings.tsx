@@ -1,6 +1,6 @@
 // ─── PLUTO: настройки системы ───────────────────────────────────────────────
 import { useEffect, useState } from 'react';
-import { Send, Tag as TagIcon, Bell, Users, Radio, Plus, Trash2, Monitor, Server, Check, Pencil, ShieldCheck, KeyRound, X, Eye, EyeOff } from 'lucide-react';
+import { Send, Tag as TagIcon, Bell, Users, Radio, Plus, Trash2, Monitor, Server, Check, Pencil, ShieldCheck, KeyRound, X, Eye, EyeOff, FileBarChart } from 'lucide-react';
 import { Panel, Field, Toggle, EmptyState } from '../components/ui';
 import { store, useCurrentUser, usePluto, useToasts } from '../lib/store';
 import { sendTestNotification, requestPushPermission } from '../lib/engine';
@@ -166,7 +166,6 @@ const MENU_GRANTS: { route: Route; label: string }[] = [
   { route: 'network-map', label: 'Карта сети' },
   { route: 'stats-bars', label: 'Статистика Bars' },
   { route: 'stats-ws', label: 'Статистика WS' },
-  { route: 'sla', label: 'SLA-отчёт' },
   { route: 'deploy', label: 'Развёртывание' },
 ];
 
@@ -387,15 +386,77 @@ function MirrorTab() {
   );
 }
 
+interface SlaReportConfig {
+  enabled: boolean;
+  schedule: 'daily' | 'weekly' | 'monthly';
+  hour: number;
+  dayOfWeek?: number;
+  dayOfMonth?: number;
+  outputPath: string;
+}
+
 function SlaReportTab() {
   const settings = usePluto((s) => s.settings);
-  const [draft, setDraft] = useState(settings.slaReport || { enabled: false, schedule: 'daily', hour: 8, outputPath: './data/Отчет SLA' });
+  const devices = usePluto((s) => s.devices);
+  const [draft, setDraft] = useState<SlaReportConfig>(settings.slaReport || { enabled: false, schedule: 'daily', hour: 8, outputPath: './data/Отчет SLA' });
   useEffect(() => setDraft(settings.slaReport || { enabled: false, schedule: 'daily', hour: 8, outputPath: './data/Отчет SLA' }), [settings.slaReport]);
+  const [generating, setGenerating] = useState(false);
 
   const setCfg = (patch: Partial<typeof draft>) => setDraft({ ...draft, ...patch });
 
+  const generateReportNow = async () => {
+    setGenerating(true);
+    try {
+      // Собираем данные по всем устройствам за последние 30 дней
+      const reportData = devices.map((d) => {
+        const h = d.history.slice(-1500);
+        const checks = h.length;
+        const downCount = h.filter((v) => v < 0).length;
+        const uptimePct = checks ? Math.round(((checks - downCount) / checks) * 1000) / 10 : 100;
+        const ups = h.filter((v) => v >= 0);
+        const avgLatency = ups.length ? Math.round(ups.reduce((a, b) => a + b, 0) / ups.length) : null;
+        return {
+          id: d.id,
+          name: d.name,
+          type: d.type,
+          address: d.address,
+          uptimePct,
+          downCount,
+          checks,
+          avgLatency,
+        };
+      });
+
+      const overall = reportData.length
+        ? Math.round((reportData.reduce((a, r) => a + r.uptimePct, 0) / reportData.length) * 100) / 100
+        : 100;
+
+      const report = {
+        generatedAt: new Date().toISOString(),
+        period: '30 дней',
+        overallUptime: overall,
+        deviceCount: reportData.length,
+        devices: reportData,
+      };
+
+      // В реальном серверном режиме здесь был бы вызов API для сохранения на сервер
+      // Для демонстрации скачиваем файл
+      const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `pluto-sla-report-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      
+      useToasts.push('ok', 'SLA-отчет сгенерирован и загружен');
+    } catch (err) {
+      useToasts.push('crit', 'Ошибка генерации отчета');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   return (
-    <Panel title="Авто-отчет SLA" icon={<Monitor className="h-4 w-4" />}>
+    <Panel title="Авто-отчет SLA" icon={<FileBarChart className="h-4 w-4" />}>
       <p className="mb-4 text-[12px] leading-relaxed text-dim">
         Автоматическая генерация SLA-отчета по расписанию с выгрузкой в папку на локальном сервере.
         Отчет формируется за последние 30 дней по всем устройствам.
@@ -444,9 +505,14 @@ function SlaReportTab() {
         </p>
       </div>
 
-      <button onClick={() => void store.saveSettings({ ...settings, slaReport: draft })} className="btn-acc mt-4">
-        <Check className="h-4 w-4" />Сохранить
-      </button>
+      <div className="mt-4 flex gap-2">
+        <button onClick={() => void store.saveSettings({ ...settings, slaReport: draft })} className="btn-acc">
+          <Check className="h-4 w-4" />Сохранить настройки
+        </button>
+        <button onClick={generateReportNow} disabled={generating} className="btn-ghost">
+          <FileBarChart className="h-4 w-4" />{generating ? 'Генерация...' : 'Сгенерировать отчет сейчас'}
+        </button>
+      </div>
     </Panel>
   );
 }
@@ -467,7 +533,7 @@ export default function SettingsPage() {
     { id: 'alerts', label: 'HDD Error', icon: <Bell className="h-3.5 w-3.5" /> },
     { id: 'users', label: 'Пользователи', icon: <Users className="h-3.5 w-3.5" /> },
     { id: 'mirror', label: 'Зеркало', icon: <Radio className="h-3.5 w-3.5" /> },
-    { id: 'sla', label: 'SLA-отчет', icon: <Monitor className="h-3.5 w-3.5" /> },
+    { id: 'sla', label: 'SLA-отчёт', icon: <FileBarChart className="h-3.5 w-3.5" /> },
   ];
 
   const toggleTheme = () => {
