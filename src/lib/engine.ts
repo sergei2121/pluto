@@ -71,7 +71,9 @@ async function runCheck(id: string) {
     const fails = d.fails + 1;
     const history = [...d.history, -1].slice(-48);
     if (fails >= cfg.failThreshold && d.status !== 'down') {
-      store.updateDevice(id, { status: 'down', fails, latency: null, lastCheck: now, lastChange: now, history, checking: false, approx: true });
+      // Устройство ушло в офлайн — фиксируем время начала офлайна
+      const offlineSince = d.offlineSince || now;
+      store.updateDevice(id, { status: 'down', fails, latency: null, lastCheck: now, lastChange: now, history, checking: false, approx: true, offlineSince });
       store.pushEvent('crit', 'device', `${d.name} (${d.address}) — потеря связи`);
     } else {
       store.updateDevice(id, { fails, lastCheck: now, history, checking: false, approx: true });
@@ -85,12 +87,22 @@ async function runCheck(id: string) {
   const status = degraded ? 'degraded' : 'up';
   const history = [...d.history, latency].slice(-48);
 
+  // Вычисляем время в офлайне за последние 30 дня перед восстановлением
+  let offlineDuration30d = d.offlineDuration30d || 0;
+  if (d.status === 'down' && d.offlineSince) {
+    const offlineTime = now - d.offlineSince;
+    const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+    // Добавляем к накопленной длительности, ограничивая 30 днями
+    offlineDuration30d = Math.min(thirtyDaysMs, (offlineDuration30d || 0) + offlineTime);
+  }
+
   if (d.status === 'down') store.pushEvent('ok', 'device', `${d.name} — связь восстановлена`);
   else if (degraded && d.status !== 'degraded') store.pushEvent('warn', 'device', `${d.name}: деградация ${latency} мс`);
 
   store.updateDevice(id, {
     status, fails: 0, latency, baseline, lastCheck: now, lastSuccess: now,
     lastChange: status === d.status ? d.lastChange : now, history, checking: false, approx: true,
+    offlineSince: null, offlineDuration30d,
   });
 }
 

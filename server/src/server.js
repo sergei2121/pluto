@@ -180,12 +180,23 @@ async function applyResult(d, res) {
     d.fails = (d.fails || 0) + 1;
     d.history = [...(d.history || []), -1].slice(-48);
     if (d.fails >= cfg.failThreshold && d.status !== 'down') {
+      // Устройство ушло в офлайн — фиксируем время начала офлайна
+      d.offlineSince = d.offlineSince || now;
       d.status = 'down'; d.latency = null; d.lastChange = now;
       await pushEvent('crit', 'device', `${d.name} (${d.address}) — потеря связи`);
       notify('down', `PLUTO: авария`, `${d.name} (${d.address}) — потеря связи`);
     }
     await saveDb();
     return;
+  }
+
+  // Вычисляем время в офлайне за последние 30 дня перед восстановлением
+  let offlineDuration30d = d.offlineDuration30d || 0;
+  if (d.status === 'down' && d.offlineSince) {
+    const offlineTime = now - d.offlineSince;
+    const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+    // Добавляем к накопленной длительности, ограничивая 30 днями
+    offlineDuration30d = Math.min(thirtyDaysMs, offlineDuration30d + offlineTime);
   }
 
   const baseline = d.baseline ?? res.latency;
@@ -199,6 +210,10 @@ async function applyResult(d, res) {
   if (prev === 'down') { await pushEvent('ok', 'device', `${d.name} — связь восстановлена`); notify('recover', 'PLUTO: восстановление', `${d.name} снова в строю`); }
   else if (degraded && prev !== 'degraded') { await pushEvent('warn', 'device', `${d.name}: деградация ${res.latency} мс`); notify('degraded', 'PLUTO: деградация', `${d.name}: ${res.latency} мс`); }
   if (status !== prev) d.lastChange = now;
+  
+  // Сбрасываем таймер офлайна при восстановлении, сохраняем накопленную длительность
+  d.offlineSince = null;
+  d.offlineDuration30d = offlineDuration30d;
   await saveDb();
 }
 
@@ -550,14 +565,41 @@ async function pollAgent(agent) {
       const prev = (agent.targets || []).find((t) => t.range === rangeStr || t.target === rangeStr || t.name === targetName);
       // Если нет новых результатов, используем предыдущие (сохраняем lastSuccess)
       const finalResults = results.length ? results : (Array.isArray(prev?.results) ? prev.results : []);
-      // Для офлайн-устройств сохраняем lastSuccess из предыдущих результатов
-      if (finalResults.length && !results.length && Array.isArray(prev?.results)) {
+      
+      // Для офлайн-устройств сохраняем lastSuccess и обновляем offlineSince/offlineDuration30d
+      if (finalResults.length && Array.isArray(finalResults)) {
         finalResults.forEach((r, idx) => {
-          if (!r.alive && prev.results[idx] && prev.results[idx].lastSuccess) {
+          // Сохраняем lastSuccess из предыдущих результатов если реле недоступен
+          if (!r.alive && !results.length && Array.isArray(prev?.results) && prev.results[idx] && prev.results[idx].lastSuccess) {
             r.lastSuccess = prev.results[idx].lastSuccess;
+          }
+          
+          // Обновляем offlineSince для устройств в офлайне
+          if (!r.alive) {
+            // Если устройство уже было в офлайне, сохраняем время начала
+            if (prev?.results?.[idx] && !prev.results[idx].alive && prev.results[idx].offlineSince) {
+              r.offlineSince = prev.results[idx].offlineSince;
+            } else if (!r.offlineSince) {
+              // Устройство только что ушло в офлайн
+              r.offlineSince = now;
+            }
+            
+            // Копируем накопленную длительность офлайна
+            if (prev?.results?.[idx]?.offlineDuration30d) {
+              r.offlineDuration30d = prev.results[idx].offlineDuration30d;
+            }
+          } else {
+            // Устройство восстановилось — вычисляем длительность офлайна
+            if (r.offlineSince) {
+              const offlineTime = now - r.offlineSince;
+              const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+              r.offlineDuration30d = Math.min(thirtyDaysMs, (r.offlineDuration30d || 0) + offlineTime);
+              r.offlineSince = null;
+            }
           }
         });
       }
+      
       out.push({ target: targetName || rangeStr, name: targetName, range: rangeStr, lastCheck: now, results: finalResults });
     }
     agent.targets = out;
