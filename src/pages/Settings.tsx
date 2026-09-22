@@ -5,12 +5,13 @@ import { Panel, Field, Toggle, EmptyState } from '../components/ui';
 import { store, useCurrentUser, usePluto, useToasts } from '../lib/store';
 import { sendTestNotification, requestPushPermission } from '../lib/engine';
 import { cls, TAG_COLORS, uid, timeAgo } from '../lib/util';
+import DeployPage from './Deploy';
 import {
   DEVICE_TYPES, DEVICE_TYPE_META, type DeviceType, type Settings as TSettings,
   type User, type Role, type Route,
 } from '../lib/types';
 
-type Tab = 'polling' | 'tags' | 'notify' | 'alerts' | 'users' | 'mirror' | 'sla';
+type Tab = 'polling' | 'tags' | 'notify' | 'alerts' | 'users' | 'mirror' | 'sla' | 'deploy';
 
 function NumField({ label, value, onChange, min, suffix, hint }: { label: string; value: number; onChange: (v: number) => void; min: number; suffix?: string; hint?: string }) {
   return (
@@ -537,6 +538,7 @@ export default function SettingsPage() {
     { id: 'users', label: 'Пользователи', icon: <Users className="h-3.5 w-3.5" /> },
     { id: 'mirror', label: 'Зеркало', icon: <Radio className="h-3.5 w-3.5" /> },
     { id: 'sla', label: 'SLA-отчёт', icon: <FileBarChart className="h-3.5 w-3.5" /> },
+    { id: 'deploy', label: 'Развёртывание', icon: <Rocket className="h-3.5 w-3.5" /> },
   ];
 
   const toggleTheme = () => {
@@ -569,6 +571,7 @@ export default function SettingsPage() {
       {tab === 'users' && <UsersTab />}
       {tab === 'mirror' && <MirrorTab />}
       {tab === 'sla' && <SlaReportTab />}
+      {tab === 'deploy' && <DeployPage />}
     </div>
   );
 }
