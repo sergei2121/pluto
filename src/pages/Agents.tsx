@@ -396,7 +396,7 @@ function AgentDrawer({ id, onClose, onEdit }: { id: string; onClose: () => void;
                       {results.map((r) => (
                         <div key={r.ip} className="flex items-center justify-between rounded border border-line/40 bg-raised/30 px-2.5 py-1">
                           <span className="flex items-center gap-2 font-mono text-[11.5px] text-mut"><StatusDot status={r.alive ? 'up' : 'down'} pulse={false} />{r.ip}</span>
-                          <span className={cls('font-mono text-[11.5px]', r.alive ? 'text-ok' : 'text-crit')}>{r.alive ? `${r.latency ?? 0} мс` : 'нет ответа'}</span>
+                          <span className={cls('font-mono text-[11.5px]', r.alive ? 'text-ok' : 'text-crit')}>{r.alive && r.latency != null ? `${r.latency} мс` : (r.alive ? '—' : 'нет ответа')}</span>
                         </div>
                       ))}
                     </div>
