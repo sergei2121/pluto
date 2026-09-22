@@ -1,1 +1,7 @@
-(src/pages/Devices.tsx)
+```
+# Build artifacts
+dist/
+build/
+*.js
+*.css
+```
