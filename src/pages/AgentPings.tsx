@@ -1,6 +1,6 @@
 // ─── PLUTO: пинги агентов (локальные устройства через relay) ────────────────
 import { memo, useMemo, useState } from 'react';
-import { Crosshair, Star, Eye, RefreshCw, Search, Wifi, WifiOff, Activity, LayoutGrid } from 'lucide-react';
+import { Crosshair, Star, Eye, RefreshCw, Search, Wifi, WifiOff, Activity, LayoutGrid, ChevronDown, ChevronUp } from 'lucide-react';
 import { Panel, StatusDot, EmptyState, TimeAgo } from '../components/ui';
 import { store, useCurrentUser, usePluto, useToasts, agentsWithPings } from '../lib/store';
 import { cls, fmtMs, pingStats } from '../lib/util';
@@ -16,6 +16,13 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
   const onShowcase = () => store.toggleAgentPingsShowcase(a.id);
   const onPoll = () => { void store.pollAgentNow(a.id); useToasts.push('info', `Опрашиваю «${a.name}»…`); };
 
+  // Состояние для раскрытия каждой цели
+  const [expandedTargets, setExpandedTargets] = useState<Record<string, boolean>>({});
+
+  const toggleTarget = (key: string) => {
+    setExpandedTargets(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+  
   return (
     <div className="rise rounded-xl border border-line bg-panel/90 p-4 transition-all duration-200 hover:border-mint/35 hover:shadow-[0_14px_40px_-16px_rgba(0,0,0,.8)]">
       <div className="flex items-start justify-between gap-2">
@@ -49,17 +56,23 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
       {allTargets.length === 0 ? (
         <p className="mt-3 text-[12px] text-dim">Цели не заданы. Добавьте IP/диапазоны в «Агенты → Изменить».</p>
       ) : (
-        <div className="mt-3 space-y-3">
+        <div className="mt-3 space-y-2">
           {allTargets.map((target) => {
             const targetStats = pingStats([target]);
             const displayName = target.name || target.target || target.range || 'Без имени';
             const hasResults = Array.isArray(target.results) && target.results.length > 0;
+            const targetKey = target.target || displayName;
+            const isExpanded = expandedTargets[targetKey] ?? true; // По умолчанию раскрыто
             
             return (
-              <div key={target.target || displayName} className="rounded-lg border border-line/40 bg-raised/30">
-                {/* Заголовок подгруппы */}
-                <div className="flex items-center justify-between border-b border-line/30 bg-raised/50 px-3 py-2">
+              <div key={targetKey} className="overflow-hidden rounded-lg border border-line/40 bg-raised/30 transition-all">
+                {/* Заголовок подгруппы - всегда виден, кликабельный */}
+                <button 
+                  onClick={() => toggleTarget(targetKey)}
+                  className="flex w-full items-center justify-between border-b border-line/30 bg-raised/50 px-3 py-2 transition-colors hover:bg-raised/70"
+                >
                   <div className="flex items-center gap-2">
+                    {isExpanded ? <ChevronUp className="h-3.5 w-3.5 text-mut" /> : <ChevronDown className="h-3.5 w-3.5 text-mut" />}
                     <LayoutGrid className="h-3.5 w-3.5 text-mut" />
                     <span className="font-mono text-[12px] font-bold text-ink">{displayName}</span>
                     {target.range && <span className="font-mono text-[10px] text-dim">({target.range})</span>}
@@ -68,12 +81,13 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
                     <span className={cls(targetStats.offline > 0 ? 'text-crit' : 'text-ok')}>
                       {targetStats.online}/{targetStats.total}
                     </span>
+                    <span className="text-[9px] text-dim">{hasResults ? target.results!.length : 0} устр.</span>
                   </div>
-                </div>
+                </button>
                 
-                {/* Список устройств в подгруппе */}
-                {hasResults ? (
-                  <div className="max-h-40 space-y-1 overflow-y-auto scroll-thin p-2">
+                {/* Список устройств в подгруппе - раскрывающийся */}
+                {isExpanded && hasResults ? (
+                  <div className="max-h-48 space-y-1 overflow-y-auto scroll-thin p-2">
                     {(target.results || []).map((r) => {
                       // Форматирование времени в офлайне за 30 дней
                       const formatOfflineDuration = (ms?: number | null) => {
@@ -106,18 +120,15 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
                             <span className="hidden font-mono text-[9px] md:inline" style={{ fontWeight: 600 }}>
                               последний успех: <span className={lastSuccessStr === '—' ? 'text-crit' : 'text-dim'}>{lastSuccessStr}</span>
                             </span>
-                            {!r.alive && r.offlineDuration30d && r.offlineDuration30d > 0 && (
-                              <span className="hidden font-mono text-[9px] text-crit md:inline">· в офлайне (30 дн.): {offlineDuration}</span>
-                            )}
                           </div>
                           <span className={cls('font-mono text-[11.5px] font-semibold', r.alive ? 'text-ok' : 'text-crit')}>{r.alive && r.latency != null ? `${r.latency} мс` : (r.alive ? '—' : 'нет ответа')}</span>
                         </div>
                       );
                     })}
                   </div>
-                ) : (
+                ) : isExpanded ? (
                   <p className="p-3 text-[11.5px] text-dim">Нет данных</p>
-                )}
+                ) : null}
               </div>
             );
           })}
