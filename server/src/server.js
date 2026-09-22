@@ -233,14 +233,13 @@ async function relayPing(agent, targets) {
     if (Array.isArray(arr)) {
       return arr.map((r) => {
         const alive = !!r.alive;
-        // При успешном пинге обновляем lastSuccess, при ошибке — ставим null (будет сохранено из предыдущих результатов в caller)
+        // При успешном пинге обновляем lastSuccess, при ошибке — НЕ устанавливаем ничего (будет сохранено из предыдущих результатов в caller)
         const result = { 
           ip: r.ip, 
           alive, 
           latency: r.latencyMs != null ? r.latencyMs : (r.latency != null ? r.latency : null),
           offlineSince: !alive ? now : undefined,
-          offlineDuration30d: 0,
-          lastSuccess: null
+          offlineDuration30d: 0
         };
         if (alive) {
           result.lastSuccess = now;
@@ -590,8 +589,8 @@ async function pollAgent(agent) {
       if (finalResults.length && Array.isArray(finalResults)) {
         finalResults.forEach((r, idx) => {
           // Сохраняем lastSuccess из предыдущих результатов если устройство офлайн и у него нет lastSuccess
-          // Это нужно чтобы при отключении устройства не показывало 0 вместо даты последнего пинга
-          if (!r.alive && r.lastSuccess === undefined && Array.isArray(prev?.results) && prev.results[idx] && prev.results[idx].lastSuccess > 0) {
+          // Это нужно чтобы при отключении устройства не показывало дату последнего пинга
+          if (!r.alive && r.lastSuccess === undefined && Array.isArray(prev?.results) && prev.results[idx] && prev.results[idx].lastSuccess) {
             r.lastSuccess = prev.results[idx].lastSuccess;
           }
           
