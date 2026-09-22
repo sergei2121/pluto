@@ -2,6 +2,4 @@
 # Build artifacts
 dist/
 build/
-*.js
-*.css
 ```

@@ -54,7 +54,6 @@ const NAV: { route: Route; label: string; icon: ReactNode; adminOnly?: boolean }
   { route: 'agent-pings', label: 'Пинги агентов', icon: <Crosshair className="h-[17px] w-[17px]" /> },
   { route: 'stats-bars', label: 'Статистика Bars', icon: <BarChart3 className="h-[17px] w-[17px]" /> },
   { route: 'stats-ws', label: 'Статистика WS', icon: <Waves className="h-[17px] w-[17px]" /> },
-  { route: 'sla', label: 'SLA-отчёт', icon: <FileBarChart className="h-[17px] w-[17px]" /> },
   { route: 'deploy', label: 'Развёртывание', icon: <Radio className="h-[17px] w-[17px]" /> },
   { route: 'settings', label: 'Настройки системы', icon: <SettingsIcon className="h-[17px] w-[17px]" />, adminOnly: true },
 ];
