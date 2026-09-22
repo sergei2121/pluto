@@ -43,7 +43,7 @@ export function cls(...parts: Array<string | false | null | undefined>): string 
 // ─── Форматирование ──────────────────────────────────────────────────────────
 
 export function timeAgo(ts: number): string {
-  if (!ts) return '—';
+  if (!ts || ts <= 0) return '—';
   const d = Math.max(0, Date.now() - ts);
   if (d < 5_000) return 'только что';
   if (d < 60_000) {
