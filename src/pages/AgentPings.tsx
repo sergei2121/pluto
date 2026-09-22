@@ -130,7 +130,12 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
                               последний успех: <span className={lastSuccessStr === '—' ? 'text-crit' : 'text-dim'}>{lastSuccessStr}</span>
                             </span>
                           </div>
-                          <span className={cls('font-mono text-[11.5px] font-semibold', r.alive ? 'text-ok' : 'text-crit')}>{r.alive && r.latency != null ? `${r.latency} мс` : (r.alive ? '—' : 'нет ответа')}</span>
+                          <div className="flex flex-col items-end gap-0.5">
+                            <span className={cls('font-mono text-[11.5px] font-semibold', r.alive ? 'text-ok' : 'text-crit')}>{r.alive && r.latency != null ? `${r.latency} мс` : (r.alive ? '—' : 'нет ответа')}</span>
+                            {r.offlineSince != null && r.offlineSince > 0 && (
+                              <span className="font-mono text-[9px] text-dim">офлайн с: {formatLastSuccess(r.offlineSince)}</span>
+                            )}
+                          </div>
                         </div>
                       );
                     })}
