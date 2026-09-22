@@ -184,12 +184,15 @@ async function applyResult(d, res) {
       d.offlineSince = d.offlineSince || now;
       d.status = 'down'; d.latency = null; d.lastChange = now;
       await pushEvent('crit', 'device', `${d.name} (${d.address}) — потеря связи`);
-      notify('down', `PLUTO: авария`, `${d.name} (${d.address}) — потеря связи`);
+      notify('down', `PLUTO: авария`, `${d.name} (${d.address}) — потеря связь`);
     }
     await saveDb();
     return;
   }
 
+  // Успешный пинг — обновляем lastSuccess
+  d.lastSuccess = now;
+  
   // Вычисляем время в офлайне за последние 30 дня перед восстановлением
   let offlineDuration30d = d.offlineDuration30d || 0;
   if (d.status === 'down' && d.offlineSince) {
