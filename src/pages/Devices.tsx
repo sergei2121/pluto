@@ -159,19 +159,6 @@ const DeviceRow = memo(function DeviceRow({ d, isAdmin, onEdit }: { d: Device; i
   const m = STATUS_META[d.status];
   const tagObjs = d.tags.map((id) => tags.find((t) => t.id === id)).filter(Boolean) as { id: string; label: string; color: string }[];
   
-  // Форматирование времени в офлайне за 30 дней
-  const formatOfflineDuration = (ms?: number | null) => {
-    if (!ms || ms <= 0) return '—';
-    const minutes = Math.floor(ms / 60000);
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
-    if (days > 0) return `${days}д ${hours % 24}ч`;
-    if (hours > 0) return `${hours}ч ${minutes % 60}м`;
-    return `${minutes}м`;
-  };
-  
-  const offlineDuration = formatOfflineDuration(d.offlineDuration30d);
-  
   return (
     <tr className="border-b border-line/30 transition-colors hover:bg-raised/40">
       <td className="py-2.5 pr-3">
@@ -193,9 +180,6 @@ const DeviceRow = memo(function DeviceRow({ d, isAdmin, onEdit }: { d: Device; i
         ) : (
           <span className="text-[11px] text-dim">—</span>
         )}
-      </td>
-      <td className="hidden py-2.5 pr-3 lg:table-cell">
-        <span className={cls('font-mono text-[11px] font-semibold', d.offlineDuration30d && d.offlineDuration30d > 0 ? 'text-crit' : 'text-ok')}>{offlineDuration}</span>
       </td>
       <td className="hidden py-2.5 pr-3 xl:table-cell">
         <div className="flex flex-wrap gap-1">{tagObjs.map((t) => <span key={t.id} className="rounded-full border px-2 py-0.5 text-[10px] font-semibold" style={{ borderColor: t.color, color: t.color }}>{t.label}</span>)}</div>
@@ -297,7 +281,7 @@ export default function Devices() {
                 <tr className="border-b border-line/60 text-[10px] font-bold uppercase tracking-[0.12em] text-dim">
                   <th className="py-2 pr-3">Устройство</th><th className="py-2 pr-3">Тип</th><th className="py-2 pr-3">Статус</th>
                   <th className="py-2 pr-3">Задержка</th><th className="hidden py-2 pr-3 lg:table-cell">История</th>
-                  <th className="hidden py-2 pr-3 lg:table-cell">Последний успех</th><th className="hidden py-2 pr-3 lg:table-cell">В офлайне (30 дн.)</th><th className="hidden py-2 pr-3 xl:table-cell">Теги</th><th className="hidden py-2 pr-3 md:table-cell">Опрос</th>
+                  <th className="hidden py-2 pr-3 lg:table-cell">Последний успех</th><th className="hidden py-2 pr-3 xl:table-cell">Теги</th><th className="hidden py-2 pr-3 md:table-cell">Опрос</th>
                   <th className="py-2 text-right">Действия</th>
                 </tr>
               </thead>
