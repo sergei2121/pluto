@@ -103,11 +103,18 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
                       };
                       const offlineDuration = formatOfflineDuration(r.offlineDuration30d);
                       
-                      // Форматирование последнего успешного пинга
+                      // Форматирование последнего успешного пинга в формате ДД.ММ.ГГГГ ЧЧ:ММ:СС
                       const formatLastSuccess = (ts?: number | null) => {
                         if (ts == null || ts <= 0) return '—';
                         try {
-                          return new Date(ts).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+                          const date = new Date(ts);
+                          const dd = String(date.getDate()).padStart(2, '0');
+                          const mm = String(date.getMonth() + 1).padStart(2, '0');
+                          const yyyy = date.getFullYear();
+                          const hh = String(date.getHours()).padStart(2, '0');
+                          const min = String(date.getMinutes()).padStart(2, '0');
+                          const ss = String(date.getSeconds()).padStart(2, '0');
+                          return `${dd}.${mm}.${yyyy} ${hh}:${min}:${ss}`;
                         } catch {
                           return '—';
                         }
