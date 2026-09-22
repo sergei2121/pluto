@@ -233,7 +233,10 @@ function emulateRelayPings(targets: RelayTargetResult[], now: number, agentId: s
       const existingResults = Array.isArray(target.results) ? target.results : [];
       const existing = existingResults.find(r => r.ip === ip);
       
-      let lastSuccess = (existing?.lastSuccess != null && existing.lastSuccess > 0) ? existing.lastSuccess : null;
+      let lastSuccess: number | null = null;
+      if (existing?.lastSuccess != null && existing.lastSuccess > 0) {
+        lastSuccess = existing.lastSuccess;
+      }
       let offlineSince = existing?.offlineSince ?? null;
       let offlineDuration30d = existing?.offlineDuration30d ?? 0;
       
