@@ -1,1 +1,28 @@
-(server/src/server.js)
+```
+# Build artifacts
+dist/
+build/
+*.js
+*.css
+
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
+.vscode/
+.idea/
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Compiled files
+*.pyc
+__pycache__/
+```
