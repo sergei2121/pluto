@@ -75,6 +75,18 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
                 {hasResults ? (
                   <div className="max-h-40 space-y-1 overflow-y-auto scroll-thin p-2">
                     {(target.results || []).map((r) => {
+                      // Форматирование времени в офлайне за 30 дней
+                      const formatOfflineDuration = (ms?: number | null) => {
+                        if (!ms || ms <= 0) return '—';
+                        const minutes = Math.floor(ms / 60000);
+                        const hours = Math.floor(minutes / 60);
+                        const days = Math.floor(hours / 24);
+                        if (days > 0) return `${days}д ${hours % 24}ч`;
+                        if (hours > 0) return `${hours}ч ${minutes % 60}м`;
+                        return `${minutes}м`;
+                      };
+                      const offlineDuration = formatOfflineDuration(r.offlineDuration30d);
+                      
                       return (
                         <div key={r.ip} className="flex items-center justify-between rounded border border-line/40 bg-panel/50 px-2.5 py-1.5 transition-colors hover:bg-raised/60">
                           <span className="flex items-center gap-2 font-mono text-[11.5px] text-mut">
@@ -82,6 +94,9 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
                           </span>
                           <div className="flex flex-col items-end gap-0.5">
                             {r.lastSuccess != null && <span className="font-mono text-[9px] text-warn">последний успех: <TimeAgo ts={r.lastSuccess} /></span>}
+                            {!r.alive && r.offlineDuration30d && r.offlineDuration30d > 0 && (
+                              <span className="font-mono text-[9px] text-crit">офлайн за 30д: {offlineDuration}</span>
+                            )}
                             <span className={cls('font-mono text-[11.5px] font-semibold', r.alive ? 'text-ok' : 'text-crit')}>{r.alive ? `${r.latency ?? 0} мс` : 'нет ответа'}</span>
                           </div>
                         </div>

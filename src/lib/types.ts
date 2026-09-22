@@ -39,6 +39,8 @@ export interface Device {
   lastCheck: number;
   lastChange: number;
   lastSuccess?: number | null; // timestamp последнего успешного пинга
+  offlineSince?: number | null; // timestamp ухода в офлайн (для статистики 30 дней)
+  offlineDuration30d?: number; // суммарное время в офлайне за 30 дней (мс)
   checking: boolean;
   approx: boolean;
   // SNMP
@@ -57,6 +59,8 @@ export interface RelayPingResult {
   alive: boolean;
   latency: number | null; // мс
   lastSuccess?: number | null; // timestamp последнего успешного пинга
+  offlineSince?: number | null; // timestamp ухода в офлайн (для статистики 30 дней)
+  offlineDuration30d?: number; // суммарное время в офлайне за 30 дней (мс)
 }
 
 /** Результат опроса одной цели (IP / диапазон) через relay-агент. */
