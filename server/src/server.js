@@ -590,7 +590,7 @@ async function pollAgent(agent) {
         finalResults.forEach((r, idx) => {
           // Сохраняем lastSuccess из предыдущих результатов если устройство офлайн и у него нет lastSuccess
           // Это нужно чтобы при отключении устройства не показывало 0 вместо даты последнего пинга
-          if (!r.alive && !r.lastSuccess && Array.isArray(prev?.results) && prev.results[idx] && prev.results[idx].lastSuccess) {
+          if (!r.alive && r.lastSuccess === undefined && Array.isArray(prev?.results) && prev.results[idx] && prev.results[idx].lastSuccess) {
             r.lastSuccess = prev.results[idx].lastSuccess;
           }
           
