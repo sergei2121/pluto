@@ -233,17 +233,19 @@ async function relayPing(agent, targets) {
     if (Array.isArray(arr)) {
       return arr.map((r) => {
         const alive = !!r.alive;
+        // При успешном пинге обновляем lastSuccess, при ошибке — не сбрасываем (будет сохранено из предыдущих результатов)
         return { 
           ip: r.ip, 
           alive, 
           latency: r.latencyMs != null ? r.latencyMs : (r.latency != null ? r.latency : null), 
-          lastSuccess: alive ? now : null,
-          offlineSince: !alive ? now : null,
+          lastSuccess: alive ? now : undefined,
+          offlineSince: !alive ? now : undefined,
           offlineDuration30d: 0
         };
       });
     }
   } catch { /* relay недоступен */ }
+  // При ошибке relay возвращаем пустой массив — предыдущие результаты будут использованы в caller
   return [];
 }
 
@@ -583,8 +585,9 @@ async function pollAgent(agent) {
       // Для офлайн-устройств сохраняем lastSuccess и обновляем offlineSince/offlineDuration30d
       if (finalResults.length && Array.isArray(finalResults)) {
         finalResults.forEach((r, idx) => {
-          // Сохраняем lastSuccess из предыдущих результатов если реле недоступен
-          if (!r.alive && !results.length && Array.isArray(prev?.results) && prev.results[idx] && prev.results[idx].lastSuccess) {
+          // Сохраняем lastSuccess из предыдущих результатов если устройство офлайн
+          // Это нужно чтобы при отключении устройства не показывало 0 вместо даты последнего пинга
+          if (!r.alive && Array.isArray(prev?.results) && prev.results[idx] && prev.results[idx].lastSuccess) {
             r.lastSuccess = prev.results[idx].lastSuccess;
           }
           
