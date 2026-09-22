@@ -307,6 +307,15 @@ export interface User {
 
 export interface MirrorSettings { enabled: boolean; url: string; secret: string; interval: number; }
 
+export interface SlaReportSettings {
+  enabled: boolean;
+  schedule: 'daily' | 'weekly' | 'monthly';
+  hour: number; // час генерации (0-23)
+  dayOfWeek?: number; // для weekly (0-6, 0=воскресенье)
+  dayOfMonth?: number; // для monthly (1-31)
+  outputPath: string; // путь к папке "Отчет SLA" на локальном сервере
+}
+
 export interface Settings {
   intervals: Record<DeviceType | 'agent' | 'glances', number>;
   timeoutMs: number;
@@ -318,6 +327,7 @@ export interface Settings {
   backup: { enabled: boolean; keep: number; lastAt: number | null }; // авто-бэкап (раз в сутки)
   prometheus: { enabled: boolean }; // /metrics для Prometheus
   telegramBot: { enabled: boolean; token: string }; // команды бота (/status, /ping)
+  slaReport: SlaReportSettings; // настройки авто-отчета SLA
   notifications: {
     telegram: { enabled: boolean; botToken: string; chatId: string };
     email: { enabled: boolean; smtp: string; from: string; to: string };

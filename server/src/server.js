@@ -726,6 +726,97 @@ setInterval(() => {
   }).catch(() => {});
 }, Math.max(30, db.settings.mirror?.interval || 60) * 1000);
 
+// ─── Авто-отчет SLA (генерация и выгрузка по расписанию) ───────────────────
+
+let lastSlaReportRun = 0;
+setInterval(() => {
+  const cfg = db.settings.slaReport;
+  if (!cfg || !cfg.enabled || !cfg.outputPath) return;
+  
+  const now = new Date();
+  const currentHour = now.getHours();
+  const currentDayOfWeek = now.getDay(); // 0=воскресенье
+  const currentDayOfMonth = now.getDate(); // 1-31
+  
+  // Проверяем расписание
+  let shouldRun = false;
+  if (cfg.schedule === 'daily') {
+    shouldRun = currentHour === cfg.hour && now.getMinutes() === 0;
+  } else if (cfg.schedule === 'weekly') {
+    shouldRun = currentHour === cfg.hour && now.getMinutes() === 0 && currentDayOfWeek === (cfg.dayOfWeek ?? 0);
+  } else if (cfg.schedule === 'monthly') {
+    shouldRun = currentHour === cfg.hour && now.getMinutes() === 0 && currentDayOfMonth === (cfg.dayOfMonth ?? 1);
+  }
+  
+  // Не запускать дважды в течение одного часа
+  if (shouldRun && Date.now() - lastSlaReportRun < 3600000) shouldRun = false;
+  
+  if (shouldRun) {
+    lastSlaReportRun = Date.now();
+    generateAndSaveSlaReport(cfg.outputPath).catch(err => {
+      console.error('[pluto] ошибка генерации SLA-отчета:', err.message);
+    });
+  }
+}, 60000); // Проверка каждую минуту
+
+async function generateAndSaveSlaReport(outputPath) {
+  try {
+    const fsMod = await import('node:fs');
+    const pathMod = await import('node:path');
+    
+    // Создаём папку если не существует
+    fsMod.mkdirSync(outputPath, { recursive: true });
+    
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const fileName = `SLA-${dateStr}.json`;
+    const filePath = pathMod.join(outputPath, fileName);
+    
+    // Генерируем SLA данные за последние 30 дней
+    const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const slaData = db.devices.map(d => {
+      const history = d.history || [];
+      const totalChecks = history.length;
+      const failedChecks = history.filter(h => h === -1).length;
+      const uptimePct = totalChecks > 0 ? ((totalChecks - failedChecks) / totalChecks) * 100 : 100;
+      const downCount = history.filter((h, i) => h === -1 && (i === 0 || history[i-1] !== -1)).length;
+      const validLatencies = history.filter(h => h !== -1 && h != null);
+      const avgLatency = validLatencies.length > 0 ? validLatencies.reduce((a, b) => a + b, 0) / validLatencies.length : null;
+      
+      return {
+        id: d.id,
+        name: d.name,
+        type: d.type,
+        uptimePct: Math.round(uptimePct * 100) / 100,
+        downCount,
+        avgLatency: avgLatency !== null ? Math.round(avgLatency * 100) / 100 : null,
+        periodStart: thirtyDaysAgo,
+        periodEnd: Date.now(),
+      };
+    });
+    
+    const report = {
+      generatedAt: Date.now(),
+      generatedAtISO: now.toISOString(),
+      period: '30 days',
+      devices: slaData,
+      summary: {
+        totalDevices: slaData.length,
+        avgUptime: slaData.length > 0 
+          ? Math.round((slaData.reduce((sum, d) => sum + d.uptimePct, 0) / slaData.length) * 100) / 100 
+          : 0,
+      },
+    };
+    
+    fsMod.writeFileSync(filePath, JSON.stringify(report, null, 2), 'utf8');
+    console.log(`[pluto] SLA-отчет сохранен: ${filePath}`);
+    await pushEvent('info', 'system', `SLA-отчет сгенерирован: ${fileName}`);
+  } catch (err) {
+    console.error('[pluto] ошибка генерации SLA-отчета:', err.message);
+    await pushEvent('crit', 'system', `Ошибка генерации SLA-отчета: ${err.message}`);
+  }
+}
+
 // ─── HTTP-сервер и REST API ────────────────────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
@@ -1023,6 +1114,7 @@ const server = http.createServer(async (req, res) => {
         notifications: { ...db.settings.notifications, ...(b.notifications || {}) },
         mirror: { ...db.settings.mirror, ...(b.mirror || {}) },
         showcase: { ...db.settings.showcase, ...(b.showcase || {}) },
+        slaReport: { ...db.settings.slaReport, ...(b.slaReport || {}) },
       };
       const prevPort = db.settings.showcase.port;
       await saveDb();

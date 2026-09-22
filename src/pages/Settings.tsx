@@ -10,7 +10,7 @@ import {
   type User, type Role, type Route,
 } from '../lib/types';
 
-type Tab = 'polling' | 'tags' | 'notify' | 'alerts' | 'users' | 'mirror';
+type Tab = 'polling' | 'tags' | 'notify' | 'alerts' | 'users' | 'mirror' | 'sla';
 
 function NumField({ label, value, onChange, min, suffix, hint }: { label: string; value: number; onChange: (v: number) => void; min: number; suffix?: string; hint?: string }) {
   return (
@@ -387,6 +387,70 @@ function MirrorTab() {
   );
 }
 
+function SlaReportTab() {
+  const settings = usePluto((s) => s.settings);
+  const [draft, setDraft] = useState(settings.slaReport || { enabled: false, schedule: 'daily', hour: 8, outputPath: './data/Отчет SLA' });
+  useEffect(() => setDraft(settings.slaReport || { enabled: false, schedule: 'daily', hour: 8, outputPath: './data/Отчет SLA' }), [settings.slaReport]);
+
+  const setCfg = (patch: Partial<typeof draft>) => setDraft({ ...draft, ...patch });
+
+  return (
+    <Panel title="Авто-отчет SLA" icon={<Monitor className="h-4 w-4" />}>
+      <p className="mb-4 text-[12px] leading-relaxed text-dim">
+        Автоматическая генерация SLA-отчета по расписанию с выгрузкой в папку на локальном сервере.
+        Отчет формируется за последние 30 дней по всем устройствам.
+      </p>
+      <div className="mb-4 flex items-center justify-between">
+        <span className="text-[13px] text-mut">Включить авто-отчет</span>
+        <Toggle checked={draft.enabled} onChange={(v) => setCfg({ enabled: v })} />
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Field label="Расписание">
+          <select className="inp" value={draft.schedule} onChange={(e) => setCfg({ schedule: e.target.value as 'daily' | 'weekly' | 'monthly' })} disabled={!draft.enabled}>
+            <option value="daily">Ежедневно</option>
+            <option value="weekly">Еженедельно</option>
+            <option value="monthly">Ежемесячно</option>
+          </select>
+        </Field>
+
+        <Field label="Час генерации" hint="0-23">
+          <input className="inp font-mono" type="number" min={0} max={23} value={draft.hour} onChange={(e) => setCfg({ hour: parseInt(e.target.value, 10) || 0 })} disabled={!draft.enabled} />
+        </Field>
+
+        {draft.schedule === 'weekly' && (
+          <Field label="День недели" hint="0=воскресенье, 6=суббота">
+            <input className="inp font-mono" type="number" min={0} max={6} value={draft.dayOfWeek ?? 0} onChange={(e) => setCfg({ dayOfWeek: parseInt(e.target.value, 10) || 0 })} disabled={!draft.enabled} />
+          </Field>
+        )}
+
+        {draft.schedule === 'monthly' && (
+          <Field label="День месяца" hint="1-31">
+            <input className="inp font-mono" type="number" min={1} max={31} value={draft.dayOfMonth ?? 1} onChange={(e) => setCfg({ dayOfMonth: parseInt(e.target.value, 10) || 1 })} disabled={!draft.enabled} />
+          </Field>
+        )}
+
+        <Field label="Путь к папке" hint="Папка для отчетов на локальном сервере" className="md:col-span-2">
+          <input className="inp font-mono" value={draft.outputPath} onChange={(e) => setCfg({ outputPath: e.target.value })} placeholder="./data/Отчет SLA" disabled={!draft.enabled} />
+        </Field>
+      </div>
+
+      <div className="mt-4 rounded-lg border border-line bg-raised/30 px-4 py-3">
+        <p className="text-[11.5px] text-mut">
+          <strong>Текущие настройки:</strong>{' '}
+          {draft.enabled 
+            ? `Генерация ${draft.schedule === 'daily' ? 'ежедневно' : draft.schedule === 'weekly' ? `каждую неделю (день ${draft.dayOfWeek ?? 0})` : `каждый месяц (число ${draft.dayOfMonth ?? 1})`} в ${draft.hour}:00 → ${draft.outputPath}`
+            : 'Отключено'}
+        </p>
+      </div>
+
+      <button onClick={() => void store.saveSettings({ ...settings, slaReport: draft })} className="btn-acc mt-4">
+        <Check className="h-4 w-4" />Сохранить
+      </button>
+    </Panel>
+  );
+}
+
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>('polling');
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -403,6 +467,7 @@ export default function SettingsPage() {
     { id: 'alerts', label: 'HDD Error', icon: <Bell className="h-3.5 w-3.5" /> },
     { id: 'users', label: 'Пользователи', icon: <Users className="h-3.5 w-3.5" /> },
     { id: 'mirror', label: 'Зеркало', icon: <Radio className="h-3.5 w-3.5" /> },
+    { id: 'sla', label: 'SLA-отчет', icon: <Monitor className="h-3.5 w-3.5" /> },
   ];
 
   const toggleTheme = () => {
@@ -434,6 +499,7 @@ export default function SettingsPage() {
       {tab === 'notify' && <NotifyTab />}
       {tab === 'users' && <UsersTab />}
       {tab === 'mirror' && <MirrorTab />}
+      {tab === 'sla' && <SlaReportTab />}
     </div>
   );
 }
