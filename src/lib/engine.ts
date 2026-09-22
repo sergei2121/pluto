@@ -67,14 +67,23 @@ async function runCheck(id: string) {
   const now = Date.now();
   const cfg = s.settings;
 
+  // Обновляем историю статусов (30 дней = 2592000000 мс)
+  const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+  let statusHistory = d.statusHistory ? [...d.statusHistory] : [];
+  // Добавляем новую запись
+  statusHistory.push({ t: now, ok });
+  // Удаляем старые записи (> 30 дней)
+  const cutoff = now - THIRTY_DAYS_MS;
+  statusHistory = statusHistory.filter(p => p.t >= cutoff);
+
   if (!ok) {
     const fails = d.fails + 1;
     const history = [...d.history, -1].slice(-48);
     if (fails >= cfg.failThreshold && d.status !== 'down') {
-      store.updateDevice(id, { status: 'down', fails, latency: null, lastCheck: now, lastChange: now, history, checking: false, approx: true });
+      store.updateDevice(id, { status: 'down', fails, latency: null, lastCheck: now, lastChange: now, history, statusHistory, checking: false, approx: true });
       store.pushEvent('crit', 'device', `${d.name} (${d.address}) — потеря связи`);
     } else {
-      store.updateDevice(id, { fails, lastCheck: now, history, checking: false, approx: true });
+      store.updateDevice(id, { fails, lastCheck: now, history, statusHistory, checking: false, approx: true });
     }
     return;
   }
@@ -90,7 +99,7 @@ async function runCheck(id: string) {
 
   store.updateDevice(id, {
     status, fails: 0, latency, baseline, lastCheck: now, lastSuccess: now,
-    lastChange: status === d.status ? d.lastChange : now, history, checking: false, approx: true,
+    lastChange: status === d.status ? d.lastChange : now, history, statusHistory, checking: false, approx: true,
   });
 }
 

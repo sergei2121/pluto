@@ -39,6 +39,8 @@ export interface Device {
   lastCheck: number;
   lastChange: number;
   lastSuccess?: number | null; // timestamp последнего успешного пинга
+  /** История статусов за 30 дней: каждый элемент - { t: timestamp, ok: boolean } */
+  statusHistory?: Array<{ t: number; ok: boolean }> | null;
   checking: boolean;
   approx: boolean;
   // SNMP
