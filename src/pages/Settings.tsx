@@ -441,10 +441,13 @@ function SlaReportTab() {
 
       // В реальном серверном режиме здесь был бы вызов API для сохранения на сервер
       // Для демонстрации скачиваем файл
-      const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+      const head = 'id;name;type;address;uptime_pct;down_count;checks;avg_latency_ms';
+      const body = reportData.map((r) => [r.id, r.name, r.type, r.address, r.uptimePct, r.downCount, r.checks, r.avgLatency ?? ''].join(';'));
+      const csvContent = '\uFEFF' + [head, ...body].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `pluto-sla-report-${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = `pluto-sla-report-${new Date().toISOString().slice(0, 10)}.csv`;
       a.click();
       
       useToasts.push('ok', 'SLA-отчет сгенерирован и загружен');
