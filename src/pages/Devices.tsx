@@ -297,7 +297,7 @@ export default function Devices() {
                 <tr className="border-b border-line/60 text-[10px] font-bold uppercase tracking-[0.12em] text-dim">
                   <th className="py-2 pr-3">Устройство</th><th className="py-2 pr-3">Тип</th><th className="py-2 pr-3">Статус</th>
                   <th className="py-2 pr-3">Задержка</th><th className="hidden py-2 pr-3 lg:table-cell">История</th>
-                  <th className="hidden py-2 pr-3 lg:table-cell">Последний успех</th><th className="hidden py-2 pr-3 xl:table-cell">Теги</th><th className="hidden py-2 pr-3 md:table-cell">Опрос</th>
+                  <th className="hidden py-2 pr-3 lg:table-cell">Последний успех</th><th className="hidden py-2 pr-3 lg:table-cell">В офлайне (30 дн.)</th><th className="hidden py-2 pr-3 xl:table-cell">Теги</th><th className="hidden py-2 pr-3 md:table-cell">Опрос</th>
                   <th className="py-2 text-right">Действия</th>
                 </tr>
               </thead>
