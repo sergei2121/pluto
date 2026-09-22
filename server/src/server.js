@@ -233,13 +233,14 @@ async function relayPing(agent, targets) {
     if (Array.isArray(arr)) {
       return arr.map((r) => {
         const alive = !!r.alive;
-        // При успешном пинге обновляем lastSuccess, при ошибке — не включаем поле (будет сохранено из предыдущих результатов в caller)
+        // При успешном пинге обновляем lastSuccess, при ошибке — ставим null (будет сохранено из предыдущих результатов в caller)
         const result = { 
           ip: r.ip, 
           alive, 
           latency: r.latencyMs != null ? r.latencyMs : (r.latency != null ? r.latency : null),
           offlineSince: !alive ? now : undefined,
-          offlineDuration30d: 0
+          offlineDuration30d: 0,
+          lastSuccess: null
         };
         if (alive) {
           result.lastSuccess = now;
