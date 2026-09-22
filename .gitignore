@@ -1,1 +1,1 @@
-Nothing needs to be added to .gitignore since only a source file (server/src/server.js) was modified and there are no build artifacts, dependencies, or temporary files in the changes.
+(src/pages/Devices.tsx)
