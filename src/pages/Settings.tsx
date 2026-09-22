@@ -1,6 +1,6 @@
 // ─── PLUTO: настройки системы ───────────────────────────────────────────────
 import { useEffect, useState } from 'react';
-import { Send, Tag as TagIcon, Bell, Users, Radio, Plus, Trash2, Monitor, Server, Check, Pencil, ShieldCheck, KeyRound, X, Eye, EyeOff, FileBarChart } from 'lucide-react';
+import { Send, Tag as TagIcon, Bell, Users, Radio, Plus, Trash2, Monitor, Server, Check, Pencil, ShieldCheck, KeyRound, X, Eye, EyeOff, FileBarChart, Rocket } from 'lucide-react';
 import { Panel, Field, Toggle, EmptyState } from '../components/ui';
 import { store, useCurrentUser, usePluto, useToasts } from '../lib/store';
 import { sendTestNotification, requestPushPermission } from '../lib/engine';
