@@ -89,7 +89,7 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
                       
                       // Форматирование последнего успешного пинга
                       const formatLastSuccess = (ts?: number | null) => {
-                        if (ts == null || ts === 0 || ts <= 0) return '—';
+                        if (ts == null || ts <= 0) return '—';
                         try {
                           return new Date(ts).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
                         } catch {
