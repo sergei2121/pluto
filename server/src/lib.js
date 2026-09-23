@@ -10,7 +10,7 @@ export const DEFAULT_SETTINGS = {
   intervals: { ping: 60, http: 60, api: 180, rtsp: 120, sip: 120, agent: 30, netdata: 20 },
   timeoutMs: 3000, failThreshold: 3, degradeFactor: 10, degradeMinMs: 250,
   mirror: { enabled: false, url: '', secret: '', interval: 60 },
-  slaReport: { enabled: false, schedule: 'daily', hour: 8, outputPath: './data/Отчет SLA' },
+  slaReport: { enabled: false, schedule: 'daily', hour: 8, outputPath: '/home/pluto/Downloads' },
   notifications: {
     telegram: { enabled: false, botToken: '', chatId: '' },
     email: { enabled: false, smtp: '', from: '', to: '' },
