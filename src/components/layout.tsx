@@ -2,7 +2,7 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   LayoutDashboard, Server, Monitor, Crosshair, BarChart3, Waves, LayoutGrid, Settings as SettingsIcon,
-  Radio, LogOut, Search, X, AlertTriangle, Bell, Check, Orbit, FileBarChart,
+  Radio, LogOut, Search, X, AlertTriangle, Bell, Check, Orbit, FileBarChart, History,
 } from 'lucide-react';
 import { cls, fmtClock, CONSOLE_VERSION } from '../lib/util';
 import { store, useCurrentUser, usePluto, useToastList, useToasts, visibleAgents, visibleDevices } from '../lib/store';
@@ -52,6 +52,7 @@ const NAV: { route: Route; label: string; icon: ReactNode; adminOnly?: boolean }
   { route: 'devices', label: 'Устройства', icon: <Server className="h-[17px] w-[17px]" /> },
   { route: 'agents', label: 'Агенты', icon: <Monitor className="h-[17px] w-[17px]" /> },
   { route: 'agent-pings', label: 'Пинги агентов', icon: <Crosshair className="h-[17px] w-[17px]" /> },
+  { route: 'ping-history', label: 'История пингов', icon: <History className="h-[17px] w-[17px]" /> },
   { route: 'stats-bars', label: 'Статистика Bars', icon: <BarChart3 className="h-[17px] w-[17px]" /> },
   { route: 'stats-ws', label: 'Статистика WS', icon: <Waves className="h-[17px] w-[17px]" /> },
   { route: 'settings', label: 'Настройки системы', icon: <SettingsIcon className="h-[17px] w-[17px]" />, adminOnly: true },
@@ -130,6 +131,7 @@ const TITLES: Record<Route, string> = {
   devices: 'Устройства',
   agents: 'Агенты и локальные сети',
   'agent-pings': 'Пинги агентов · локальные устройства',
+  'ping-history': 'История пингов · месяц онлайн/офлайн',
   'network-map': 'Карта сети',
   'stats-bars': 'Статистика Bars · Glances',
   'stats-ws': 'Статистика WS · Glances',
