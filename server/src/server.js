@@ -975,10 +975,10 @@ const server = http.createServer(async (req, res) => {
     if (!user) return json(res, 401, { error: 'Требуется авторизация' });
     const isAdmin = user.role === 'admin';
 
-    // ── история пингов: доступ по пункту меню «История пингов» (admin — всегда) ──
+    // ── история активности: доступ по пункту меню «История активности» (admin — всегда) ──
     if (p === '/api/ping-history' && method === 'GET') {
       if (!isAdmin && !(Array.isArray(user.menuScope) && user.menuScope.includes('ping-history'))) {
-        return json(res, 403, { error: 'Нет доступа к разделу «История пингов»' });
+        return json(res, 403, { error: 'Нет доступа к разделу «История активности»' });
       }
       const q = url.searchParams;
       const r = queryPingHistory(db, {

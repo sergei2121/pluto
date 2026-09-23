@@ -50,9 +50,9 @@ export function ToastHost() {
 const NAV: { route: Route; label: string; icon: ReactNode; adminOnly?: boolean }[] = [
   { route: 'dashboard', label: 'Главная', icon: <LayoutDashboard className="h-[17px] w-[17px]" /> },
   { route: 'devices', label: 'Устройства', icon: <Server className="h-[17px] w-[17px]" /> },
-  { route: 'agents', label: 'Агенты', icon: <Monitor className="h-[17px] w-[17px]" /> },
-  { route: 'agent-pings', label: 'Пинги агентов', icon: <Crosshair className="h-[17px] w-[17px]" /> },
-  { route: 'ping-history', label: 'История пингов', icon: <History className="h-[17px] w-[17px]" /> },
+  { route: 'agents', label: 'Хабы', icon: <Monitor className="h-[17px] w-[17px]" /> },
+  { route: 'agent-pings', label: 'Активность хабов', icon: <Crosshair className="h-[17px] w-[17px]" /> },
+  { route: 'ping-history', label: 'История активности', icon: <History className="h-[17px] w-[17px]" /> },
   { route: 'stats-bars', label: 'Статистика Bars', icon: <BarChart3 className="h-[17px] w-[17px]" /> },
   { route: 'stats-ws', label: 'Статистика WS', icon: <Waves className="h-[17px] w-[17px]" /> },
   { route: 'settings', label: 'Настройки системы', icon: <SettingsIcon className="h-[17px] w-[17px]" />, adminOnly: true },
@@ -129,9 +129,9 @@ export function Sidebar() {
 const TITLES: Record<Route, string> = {
   dashboard: 'Обзор инфраструктуры',
   devices: 'Устройства',
-  agents: 'Агенты и локальные сети',
-  'agent-pings': 'Пинги агентов · локальные устройства',
-  'ping-history': 'История пингов · месяц онлайн/офлайн',
+  agents: 'Хабы и локальные сети',
+  'agent-pings': 'Активность хабов · локальные устройства',
+  'ping-history': 'История активности · месяц онлайн/офлайн',
   'network-map': 'Карта сети',
   'stats-bars': 'Статистика Bars · Glances',
   'stats-ws': 'Статистика WS · Glances',
@@ -199,7 +199,7 @@ export function Topbar() {
             )}
             {results.ags.length > 0 && (
               <div className="border-t border-line/60">
-                <div className="px-3.5 pb-1 pt-2.5 text-[10px] font-bold uppercase tracking-[0.14em] text-dim">Агенты</div>
+                <div className="px-3.5 pb-1 pt-2.5 text-[10px] font-bold uppercase tracking-[0.14em] text-dim">Хабы</div>
                 {results.ags.map((a) => (
                   <button key={a.id} onClick={() => { store.nav('agents', a.ip); setQ(''); setFocus(false); }}
                     className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left transition-colors hover:bg-raised/70">

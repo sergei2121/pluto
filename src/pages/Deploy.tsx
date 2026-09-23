@@ -37,7 +37,7 @@ glances -w
 # Windows: pip install glances, затем
 glances -w
 
-# В консоли PLUTO: Агенты -> Изменить -> укажите http://<IP-ПК>:61208`;
+# В консоли PLUTO: Хабы -> Изменить -> укажите http://<IP-ПК>:61208`;
 
 const ARCH = [
   { from: 'Консоль (браузер)', to: 'Ядро :8080', what: 'REST API + поллинг состояния' },
@@ -80,7 +80,7 @@ export default function Deploy() {
           <Panel title="2 · Relay-агент на ПК" icon={<Monitor className="h-4 w-4" />}>
             <p className="mb-3 text-[12px] leading-relaxed text-dim">
               Один Go-бинарник без зависимостей. Ставится на ПК внутри VLAN/NAT и пингует устройства,
-              недоступные серверу напрямую. Адрес указывается в «Агенты → Изменить».
+              недоступные серверу напрямую. Адрес указывается в «Хабы → Изменить».
             </p>
             <CopyBlock label="powershell / bash" code={RELAY_INSTALL} />
           </Panel>

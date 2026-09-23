@@ -439,7 +439,7 @@ export default function Agents() {
   return (
     <div className="space-y-4">
       {/* Упрощённая сводка — вид по умолчанию */}
-      <Panel title="Телеметрия · Агенты" icon={<Server className="h-4 w-4" />}>
+      <Panel title="Телеметрия · Хабы" icon={<Server className="h-4 w-4" />}>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-xl border border-line bg-panel/60 p-4 text-center">
             <div className="font-mono text-[28px] font-bold text-vio">{summary.count}</div>

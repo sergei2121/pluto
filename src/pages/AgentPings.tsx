@@ -54,7 +54,7 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
       </div>
 
       {allTargets.length === 0 ? (
-        <p className="mt-3 text-[12px] text-dim">Цели не заданы. Добавьте IP/диапазоны в «Агенты → Изменить».</p>
+        <p className="mt-3 text-[12px] text-dim">Цели не заданы. Добавьте IP/диапазоны в «Хабы → Изменить».</p>
       ) : (
         <div className="mt-3 space-y-2">
           {allTargets.map((target) => {
@@ -185,7 +185,7 @@ export default function AgentPings() {
 
   return (
     <div className="space-y-4">
-      <Panel title={`Пинги агентов · ${totalOnline}/${totalDevices} устройств онлайн`} icon={<Crosshair className="h-4 w-4" />}>
+      <Panel title={`Активность хабов · ${totalOnline}/${totalDevices} устройств онлайн`} icon={<Crosshair className="h-4 w-4" />}>
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-2 rounded-lg border border-line bg-raised/50 px-3 py-1.5">
             <Search className="h-3.5 w-3.5 text-dim" />
@@ -201,7 +201,7 @@ export default function AgentPings() {
 
         {list.length === 0 ? (
           <EmptyState icon={<Crosshair className="h-6 w-6" />} title="Пингов пока нет"
-            text="Добавьте агенту цели для пинга (IP, диапазон или подсеть) в «Агенты → Изменить» — результаты появятся здесь."
+            text="Добавьте агенту цели для пинга (IP, диапазон или подсеть) в «Хабы → Изменить» — результаты появятся здесь."
             action={<button onClick={() => store.nav('agents')} className="rounded-lg border border-vio/50 bg-vio/20 px-4 py-2 text-[13px] font-bold text-ink transition-all hover:bg-vio/30">К агентам</button>} />
         ) : (
           <div className="grid gap-4 lg:grid-cols-2">
