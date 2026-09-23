@@ -106,19 +106,6 @@ export function Sidebar() {
       </nav>
 
       <div className="space-y-3 border-t border-line/60 p-4">
-        <div className={cls('rounded-lg border px-3 py-2.5 transition-colors', serverMode ? 'border-ok/30 bg-ok/5' : 'border-warn/30 bg-warn/5')}>
-          <div className="flex items-center gap-2">
-            <span className={cls('h-2 w-2 shrink-0 rounded-full', serverMode ? 'dot-live bg-ok' : 'dot-crit bg-warn')} />
-            <span className="text-[11px] font-semibold text-mut">{serverMode ? 'Ядро: серверное' : 'Ядро: встроенное'}</span>
-            <span className="ml-auto font-mono text-[10px] text-dim">v{serverMode && coreVersion ? coreVersion : CONSOLE_VERSION}</span>
-          </div>
-          <p className="mt-1 text-[10.5px] leading-relaxed text-dim">
-            {serverMode
-              ? 'данные реальные · опрос по расписанию'
-              : coreDiag || 'эмуляция · подключите серверное ядро'}
-          </p>
-        </div>
-
         {user && (
           <div className="flex items-center gap-2.5">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-vio/20 font-display text-[12px] font-bold text-vio ring-1 ring-vio/30">
