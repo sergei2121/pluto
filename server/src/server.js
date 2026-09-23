@@ -906,17 +906,8 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/version') return json(res, 200, { version: VERSION });
 
-    // ── история пингов (месячная: онлайн/офлайн устройств) ──
-    if (p === '/api/ping-history' && method === 'GET') {
-      const q = url.searchParams;
-      const r = queryPingHistory(db, {
-        agentId: q.get('agentId') || undefined,
-        range: q.get('range') ?? undefined,
-        ip: q.get('ip') || undefined,
-        days: parseInt(q.get('days') || '30', 10),
-      });
-      return json(res, 200, r);
-    }
+    // список пингуемых устройств для фильтров страницы «История пингов»
+    // (доступ проверяется на самом запросе истории ниже)
     if (p === '/api/ping-history/devices' && method === 'GET') {
       // список всех пингуемых устройств с текущим состоянием (для фильтров страницы)
       const items = [];
@@ -966,6 +957,21 @@ const server = http.createServer(async (req, res) => {
     const user = authUser(req);
     if (!user) return json(res, 401, { error: 'Требуется авторизация' });
     const isAdmin = user.role === 'admin';
+
+    // ── история пингов: доступ по пункту меню «История пингов» (admin — всегда) ──
+    if (p === '/api/ping-history' && method === 'GET') {
+      if (!isAdmin && !(Array.isArray(user.menuScope) && user.menuScope.includes('ping-history'))) {
+        return json(res, 403, { error: 'Нет доступа к разделу «История пингов»' });
+      }
+      const q = url.searchParams;
+      const r = queryPingHistory(db, {
+        agentId: q.get('agentId') || undefined,
+        range: q.get('range') ?? undefined,
+        ip: q.get('ip') || undefined,
+        days: parseInt(q.get('days') || '30', 10),
+      });
+      return json(res, 200, r);
+    }
 
     if (p === '/api/auth/me') return json(res, 200, publicUser(user));
 
