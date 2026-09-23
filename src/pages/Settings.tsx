@@ -193,18 +193,61 @@ function NotifyTab() {
         </div>
       </Panel>
 
-      {/* ─── События ──────────────────────────────────────────────────────── */}
+      {/* ─── События по группам: устройства / агенты / пинги ─────────────── */}
       <Panel title="Какие события отправлять" icon={<Bell className="h-4 w-4" />}>
-        <div className="grid gap-3 md:grid-cols-2">
-          {([
-            ['down', 'Авария устройства'], ['degraded', 'Деградация связи'], ['recover', 'Восстановление'],
-            ['agentOff', 'Агент офлайн'], ['agentOn', 'Агент снова в сети'],
-          ] as const).map(([k, label]) => (
-            <div key={k} className="flex items-center justify-between rounded-lg border border-line/60 bg-raised/30 px-3 py-2.5">
-              <span className="text-[13px] text-mut">{label}</span>
-              <Toggle checked={n.on[k]} onChange={(v) => setN({ on: { ...n.on, [k]: v } })} />
+        <div className="grid gap-5 lg:grid-cols-3">
+          {/* Группа: Устройства */}
+          <div className="rounded-lg border border-line/60 bg-raised/20 p-3">
+            <p className="mb-2.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">
+              <Monitor className="h-3.5 w-3.5" /> Устройства
+            </p>
+            <div className="space-y-2">
+              {([
+                ['down', 'Авария устройства'], ['degraded', 'Деградация связи'], ['recover', 'Восстановление'],
+              ] as const).map(([k, label]) => (
+                <div key={k} className="flex items-center justify-between rounded-md border border-line/60 bg-raised/30 px-3 py-2">
+                  <span className="text-[13px] text-mut">{label}</span>
+                  <Toggle checked={n.on.device[k]} onChange={(v) => setN({ on: { ...n.on, device: { ...n.on.device, [k]: v } } })} />
+                </div>
+              ))}
             </div>
-          ))}
+          </div>
+
+          {/* Группа: Агенты */}
+          <div className="rounded-lg border border-line/60 bg-raised/20 p-3">
+            <p className="mb-2.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">
+              <Server className="h-3.5 w-3.5" /> Агенты
+            </p>
+            <div className="space-y-2">
+              {([
+                ['agentOff', 'Агент офлайн'], ['agentOn', 'Агент снова в сети'],
+              ] as const).map(([k, label]) => (
+                <div key={k} className="flex items-center justify-between rounded-md border border-line/60 bg-raised/30 px-3 py-2">
+                  <span className="text-[13px] text-mut">{label}</span>
+                  <Toggle checked={n.on.agent[k]} onChange={(v) => setN({ on: { ...n.on, agent: { ...n.on.agent, [k]: v } } })} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Группа: Пинги агентов */}
+          <div className="rounded-lg border border-line/60 bg-raised/20 p-3">
+            <p className="mb-2.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">
+              <Activity className="h-3.5 w-3.5" /> Пинги агентов
+            </p>
+            <div className="space-y-2">
+              {([
+                ['pingDown', 'Устройство недоступен (relay-пинг)'],
+                ['pingRecover', 'Устройство восстановлен (relay-пинг)'],
+                ['threshold', 'Порог: уменьшение дисков ≥ 1TB'],
+              ] as const).map(([k, label]) => (
+                <div key={k} className="flex items-center justify-between rounded-md border border-line/60 bg-raised/30 px-3 py-2">
+                  <span className="text-[13px] text-mut">{label}</span>
+                  <Toggle checked={n.on.ping[k]} onChange={(v) => setN({ on: { ...n.on, ping: { ...n.on.ping, [k]: v } } })} />
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </Panel>
 

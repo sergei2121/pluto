@@ -140,8 +140,15 @@ export async function notify(type, title, message) {
 
   const notification = settings.notifications;
   
-  // Проверка, включены ли уведомления для этого типа события
-  const shouldNotify = notification.on?.[type] ?? true;
+  // Проверка, включены ли уведомления для этого типа события (группы: device/agent/ping)
+  const onGroups = notification.on || {};
+  const groupOf = {
+    down: 'device', degraded: 'device', recover: 'device',
+    agentOff: 'agent', agentOn: 'agent',
+    threshold: 'ping', pingDown: 'ping', pingRecover: 'ping',
+  };
+  const g = groupOf[type];
+  const shouldNotify = g ? (onGroups[g]?.[type] ?? true) : (onGroups[type] ?? true);
   if (!shouldNotify) {
     logger.info(`Уведомления для типа "${type}" отключены`);
     return;

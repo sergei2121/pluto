@@ -44,7 +44,11 @@ function defaultSettings(): Settings {
       telegram: { enabled: false, botToken: '', chatId: '' },
       email: { enabled: false, smtp: '', from: '', to: '' },
       push: { enabled: false },
-      on: { down: true, degraded: true, recover: true, agentOff: true, agentOn: false, threshold: true },
+      on: {
+        device: { down: true, degraded: true, recover: true },
+        agent: { agentOff: true, agentOn: false },
+        ping: { threshold: true, pingDown: true, pingRecover: false },
+      },
     },
   };
 }

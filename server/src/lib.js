@@ -20,7 +20,11 @@ export const DEFAULT_SETTINGS = {
       teams: { enabled: false, webhookUrl: '' },
       discord: { enabled: false, webhookUrl: '' },
     },
-    on: { down: true, degraded: true, recover: true, agentOff: true, agentOn: false, threshold: true },
+    on: {
+      device: { down: true, degraded: true, recover: true },
+      agent: { agentOff: true, agentOn: false },
+      ping: { threshold: true, pingDown: true, pingRecover: false },
+    },
   },
   showcase: { port: 8081 },
 };
@@ -99,14 +103,43 @@ export function loadDb() {
   db.settings = {
     ...DEFAULT_SETTINGS, ...(db.settings || {}),
     intervals: { ...DEFAULT_SETTINGS.intervals, ...((db.settings || {}).intervals || {}) },
-    notifications: { 
-      ...DEFAULT_SETTINGS.notifications, 
-      ...((db.settings || {}).notifications || {}),
-      integrations: {
-        ...DEFAULT_SETTINGS.notifications.integrations,
-        ...((db.settings || {}).notifications || {}).integrations,
+    notifications: (() => {
+      const nn = (db.settings || {}).notifications || {};
+      const defOn = DEFAULT_SETTINGS.notifications.on;
+      const oldOn = nn.on || {};
+      let on;
+      if (!oldOn.device && !oldOn.agent && !oldOn.ping) {
+        // Миграция со старой плоской структуры на группы
+        on = {
+          device: {
+            down: oldOn.down ?? defOn.device.down,
+            degraded: oldOn.degraded ?? defOn.device.degraded,
+            recover: oldOn.recover ?? defOn.device.recover,
+          },
+          agent: {
+            agentOff: oldOn.agentOff ?? defOn.agent.agentOff,
+            agentOn: oldOn.agentOn ?? defOn.agent.agentOn,
+          },
+          ping: {
+            threshold: oldOn.threshold ?? defOn.ping.threshold,
+            pingDown: defOn.ping.pingDown,
+            pingRecover: defOn.ping.pingRecover,
+          },
+        };
+      } else {
+        on = {
+          device: { ...defOn.device, ...(oldOn.device || {}) },
+          agent: { ...defOn.agent, ...(oldOn.agent || {}) },
+          ping: { ...defOn.ping, ...(oldOn.ping || {}) },
+        };
       }
-    },
+      return {
+        ...DEFAULT_SETTINGS.notifications,
+        ...nn,
+        integrations: { ...DEFAULT_SETTINGS.notifications.integrations, ...(nn.integrations || {}) },
+        on,
+      };
+    })(),
     mirror: { ...DEFAULT_SETTINGS.mirror, ...((db.settings || {}).mirror || {}) },
     showcase: { ...DEFAULT_SETTINGS.showcase, ...((db.settings || {}).showcase || {}) },
     slaReport: { ...DEFAULT_SETTINGS.slaReport, ...((db.settings || {}).slaReport || {}) },
