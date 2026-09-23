@@ -10,19 +10,34 @@ import {
 } from './lib.js';
 import { loginRateLimiter } from './middleware/rateLimiter.js';
 import telemetryCollectors from './telemetry/collectors.js';
-import { initPingHistory, recordPingState, rollupPingDaily, queryPingHistory } from './db/pingHistory.js';
+import { initPingHistory, recordPingState, seedPingHistoryFromAgents, savePingEvents, rollupPingDaily, queryPingHistory } from './db/pingHistory.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const VERSION = '2.0.0';
+const VERSION = '2.0.1';
 const WEB_DIR = path.join(__dirname, '..', 'web');
 const HTTP_PORT = parseInt(process.env.HTTP_PORT || '8080', 10);
 
 const db = loadDb();
 initPingHistory(db);
 
+// Восстанавливаем цели пингов из сохранённых результатов при пустом списке
+// pingTargets (иначе страница «История пингов» и опрос целей остаются пустыми)
+function restorePingTargets() {
+  let changed = false;
+  for (const a of db.agents || []) {
+    if ((a.pingTargets || []).length || !(a.targets || []).length) continue;
+    a.pingTargets = a.targets.map((t) => ({ name: t.name || '', range: t.range || t.target || '' }));
+    changed = true;
+  }
+  if (changed) void saveDb().catch(() => {});
+}
+restorePingTargets();
+
 // Суточная агрегация истории пингов (аптайм по дням за месяц) — каждые 10 минут
 setInterval(() => { void rollupPingDaily(db).catch((e) => console.error('[pluto] rollupPingDaily:', e.message)); }, 10 * 60 * 1000);
 setTimeout(() => { void rollupPingDaily(db).catch(() => {}); }, 30 * 1000);
+// Сохранение накопленных событий истории пингов на диске — каждые 30 секунд
+setInterval(() => { void savePingEvents(db).catch((e) => console.error('[pluto] savePingEvents:', e.message)); }, 30 * 1000);
 
 // ─── Health Check для зависимостей (пункт 20) ────────────────────────────────
 
@@ -696,6 +711,8 @@ async function pollAgent(agent) {
       out.push({ target: targetName || rangeStr, name: targetName, range: rangeStr, lastCheck: now, results: finalResults });
     }
     agent.targets = out;
+    // первичное заполнение истории пингов текущими состояниями устройств
+    seedPingHistoryFromAgents(db);
   }
 
   // 3) Телеметрия (Netdata или Pluto Agent, отдельный интервал, хранение 30 дней)
@@ -1134,7 +1151,10 @@ const server = http.createServer(async (req, res) => {
         if ('agentUrl' in b) a.agentUrl = String(b.agentUrl || '').trim() || undefined;
         if ('statsView' in b) a.statsView = b.statsView === 'bars' || b.statsView === 'ws' ? b.statsView : '';
         if (Array.isArray(b.pingTargets)) {
+          const prevRanges = new Set((a.pingTargets || []).map((t) => (typeof t === 'string' ? t : t.range)));
           a.pingTargets = b.pingTargets.map(t => typeof t === 'string' ? { name: '', range: t } : t);
+          // при изменении списка целей историю нужно досеять по новым устройствам
+          if (a.pingTargets.some((t) => !prevRanges.has(t.range))) db._pingSeeded = false;
         }
         if (Array.isArray(b.tags)) a.tags = b.tags.map(String);
         await saveDb();
