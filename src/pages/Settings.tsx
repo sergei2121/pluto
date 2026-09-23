@@ -1,6 +1,6 @@
 // ─── PLUTO: настройки системы ───────────────────────────────────────────────
 import { useEffect, useState } from 'react';
-import { Send, Tag as TagIcon, Bell, Users, Radio, Plus, Trash2, Monitor, Server, Check, Pencil, ShieldCheck, KeyRound, X, Eye, EyeOff, FileBarChart } from 'lucide-react';
+import { Send, Tag as TagIcon, Bell, Users, Radio, Plus, Trash2, Monitor, Server, Check, Pencil, ShieldCheck, KeyRound, X, Eye, EyeOff, FileBarChart, Rocket } from 'lucide-react';
 import { Panel, Field, Toggle, EmptyState } from '../components/ui';
 import { store, useCurrentUser, usePluto, useToasts } from '../lib/store';
 import { sendTestNotification, requestPushPermission } from '../lib/engine';
@@ -11,7 +11,7 @@ import {
   type User, type Role, type Route,
 } from '../lib/types';
 
-type Tab = 'polling' | 'tags' | 'notify' | 'alerts' | 'users' | 'mirror' | 'sla' | 'deploy';
+type Tab = 'polling' | 'tags' | 'notify' | 'alerts' | 'users' | 'mirror' | 'sla' | 'deploy' | 'core';
 
 function NumField({ label, value, onChange, min, suffix, hint }: { label: string; value: number; onChange: (v: number) => void; min: number; suffix?: string; hint?: string }) {
   return (
@@ -521,6 +521,94 @@ function SlaReportTab() {
   );
 }
 
+function CoreStatusTab() {
+  const apiMode = usePluto((s) => s.apiMode);
+  const coreVersion = usePluto((s) => s.coreVersion);
+  const coreDiag = usePluto((s) => s.coreDiag);
+  const [pingResult, setPingResult] = useState<{ ok: boolean; ms: number | null; error?: string } | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  const checkYaRu = async () => {
+    setChecking(true);
+    setPingResult(null);
+    try {
+      const start = performance.now();
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      await fetch('https://ya.ru', { method: 'HEAD', signal: controller.signal, mode: 'no-cors' });
+      clearTimeout(timeout);
+      const ms = Math.round(performance.now() - start);
+      setPingResult({ ok: true, ms });
+    } catch (e) {
+      setPingResult({ ok: false, ms: null, error: e instanceof Error ? e.message : 'Ошибка пинга' });
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  return (
+    <Panel title="Ядро системы" icon={<Server className="h-4 w-4" />}>
+      <div className="space-y-4">
+        <div className="rounded-lg border border-line bg-raised/30 p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[13px] font-semibold text-mut">Режим работы</span>
+            <span className={cls(
+              'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-[0.08em]',
+              apiMode === 'server' ? 'bg-emr/20 text-emr' : 'bg-amb/20 text-amb'
+            )}>
+              {apiMode === 'server' ? '● Серверное ядро' : '● Эмуляция'}
+            </span>
+          </div>
+          {apiMode === 'server' ? (
+            <p className="text-[13px] text-mut">
+              Подключено к PLUTO Core <span className="font-mono text-ink">{coreVersion}</span>
+            </p>
+          ) : (
+            <p className="text-[13px] text-mut">
+              Серверное ядро недоступно. Система работает в режиме эмуляции данных.
+              {coreDiag && <span className="mt-1 block text-[11px] text-dim">Диагноз: {coreDiag}</span>}
+            </p>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-line bg-raised/30 p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <p className="text-[14px] font-bold text-ink">Проверка связи с интернетом</p>
+              <p className="text-[12px] text-dim">Пинг до ya.ru (без CORS)</p>
+            </div>
+            <button onClick={checkYaRu} disabled={checking} className={cls('btn-acc', checking && 'opacity-50')}>
+              {checking ? 'Проверка...' : 'Проверить'}
+            </button>
+          </div>
+          {pingResult && (
+            <div className={cls(
+              'rounded-md px-3 py-2 text-[13px]',
+              pingResult.ok ? 'bg-emr/15 text-emr' : 'bg-crit/15 text-crit'
+            )}>
+              {pingResult.ok ? (
+                <span>✓ Ответ получен за <strong className="font-mono">{pingResult.ms} мс</strong></span>
+              ) : (
+                <span>✗ Ошибка: {pingResult.error}</span>
+              )}
+            </div>
+          )}
+          <p className="mt-3 text-[11px] text-dim">
+            Эта проверка определяет только доступность интернета. Данные устройств и агентов эмулируются, если ядро не подключено.
+          </p>
+        </div>
+
+        <div className="rounded-lg border border-amb/30 bg-amb/5 p-4">
+          <p className="text-[12px] leading-relaxed text-amb">
+            <strong>Внимание:</strong> В режиме эмуляции все данные о устройствах и агентах генерируются случайно.
+            Для работы с реальными данными необходимо запустить сервер PLUTO Core и авторизоваться в системе.
+          </p>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>('polling');
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -539,6 +627,7 @@ export default function SettingsPage() {
     { id: 'mirror', label: 'Зеркало', icon: <Radio className="h-3.5 w-3.5" /> },
     { id: 'sla', label: 'SLA-отчёт', icon: <FileBarChart className="h-3.5 w-3.5" /> },
     { id: 'deploy', label: 'Развёртывание', icon: <Rocket className="h-3.5 w-3.5" /> },
+    { id: 'core', label: 'Ядро системы', icon: <Server className="h-3.5 w-3.5" /> },
   ];
 
   const toggleTheme = () => {
@@ -572,6 +661,7 @@ export default function SettingsPage() {
       {tab === 'mirror' && <MirrorTab />}
       {tab === 'sla' && <SlaReportTab />}
       {tab === 'deploy' && <DeployPage />}
+      {tab === 'core' && <CoreStatusTab />}
     </div>
   );
 }
