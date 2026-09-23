@@ -1164,6 +1164,44 @@ const server = http.createServer(async (req, res) => {
       await pushEvent('info', 'system', 'Системные настройки сохранены');
       return json(res, 200, db.settings);
     }
+
+    // ── Web Push подписка ──
+    if (p === '/api/push/subscribe' && method === 'POST') {
+      try {
+        const subscription = await readBody(req);
+        const webpush = await import('./notifications/webpush.js');
+        const saved = await webpush.savePushSubscription(subscription);
+        
+        if (saved) {
+          notificationLogger.info('Новая push-подписка сохранена', { endpoint: subscription.endpoint });
+          return json(res, 200, { ok: true });
+        } else {
+          return json(res, 200, { ok: true, message: 'Подписка уже существует' });
+        }
+      } catch (e) {
+        notificationLogger.error('Ошибка сохранения push-подписки', { error: e.message });
+        return json(res, 500, { ok: false, error: e.message });
+      }
+    }
+
+    // ── Web Push отписка ──
+    if (p === '/api/push/unsubscribe' && method === 'POST') {
+      try {
+        const { endpoint } = await readBody(req);
+        const webpush = await import('./notifications/webpush.js');
+        const removed = await webpush.removePushSubscription(endpoint);
+        
+        if (removed) {
+          notificationLogger.info('Push-подписка удалена', { endpoint });
+          return json(res, 200, { ok: true });
+        } else {
+          return json(res, 404, { ok: false, error: 'Подписка не найдена' });
+        }
+      } catch (e) {
+        notificationLogger.error('Ошибка удаления push-подписки', { error: e.message });
+        return json(res, 500, { ok: false, error: e.message });
+      }
+    }
     if (p === '/api/showcase/restart' && method === 'POST' && isAdmin) {
       startShowcase();
       return json(res, 200, { ok: true, port: db.settings.showcase.port });

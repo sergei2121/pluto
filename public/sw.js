@@ -1,4 +1,4 @@
-/* PLUTO service worker — офлайн-оболочка + установка как приложение */
+/* PLUTO service worker — офлайн-оболочка + установка как приложение + Push уведомления */
 const CACHE = 'pluto-shell-v1';
 const SHELL = ['/', '/manifest.webmanifest', '/icon.svg', '/icon-maskable.svg'];
 
@@ -14,6 +14,58 @@ self.addEventListener('activate', (e) => {
       .keys()
       .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
+  );
+});
+
+// Обработка push-уведомлений
+self.addEventListener('push', (e) => {
+  let data = {};
+  try {
+    data = e.data?.json() || {};
+  } catch {
+    data = { title: 'PLUTO', body: e.data?.text() || 'Уведомление' };
+  }
+
+  const options = {
+    body: data.body || 'Новое уведомление',
+    icon: data.icon || '/icon.svg',
+    badge: data.badge || '/icon-maskable.svg',
+    tag: data.tag || 'pluto-notification',
+    requireInteraction: data.requireInteraction ?? false,
+    data: data.data || {},
+    vibrate: data.vibrate || [200, 100, 200],
+    actions: [
+      { action: 'open', title: 'Открыть' },
+      { action: 'dismiss', title: 'Закрыть' },
+    ],
+  };
+
+  e.waitUntil(
+    self.registration.showNotification(data.title || 'PLUTO', options)
+  );
+});
+
+// Обработка кликов по уведомлениям
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+
+  if (e.action === 'dismiss') {
+    return;
+  }
+
+  // Открываем приложение при клике
+  e.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true })
+      .then((clientList) => {
+        for (const client of clientList) {
+          if (client.url === self.location.origin && 'focus' in client) {
+            return client.focus();
+          }
+        }
+        if (clients.openWindow) {
+          return clients.openWindow(self.location.origin);
+        }
+      })
   );
 });
 
