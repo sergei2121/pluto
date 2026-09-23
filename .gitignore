@@ -1,1 +1,5 @@
-Nothing should be ignored based on the provided file changes. The modification of 'src/pages/Settings.tsx' is a source code file that should be tracked in version control. No build artifacts, dependencies, or temporary files are present in the changes.
+```
+# Build artifacts
+dist/
+build/
+```
