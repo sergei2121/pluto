@@ -443,7 +443,7 @@ export default function Agents() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-xl border border-line bg-panel/60 p-4 text-center">
             <div className="font-mono text-[28px] font-bold text-vio">{summary.count}</div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-dim">Агентов всего</div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-dim">Всего хабов</div>
           </div>
           <div className="rounded-xl border border-line bg-panel/60 p-4 text-center">
             <div className="font-mono text-[28px] font-bold text-blu">{summary.pings}</div>
