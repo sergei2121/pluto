@@ -15,6 +15,11 @@ export const DEFAULT_SETTINGS = {
     telegram: { enabled: false, botToken: '', chatId: '' },
     email: { enabled: false, smtp: '', from: '', to: '' },
     push: { enabled: false },
+    integrations: {
+      slack: { enabled: false, webhookUrl: '' },
+      teams: { enabled: false, webhookUrl: '' },
+      discord: { enabled: false, webhookUrl: '' },
+    },
     on: { down: true, degraded: true, recover: true, agentOff: true, agentOn: false, threshold: true },
   },
   showcase: { port: 8081 },
@@ -94,7 +99,14 @@ export function loadDb() {
   db.settings = {
     ...DEFAULT_SETTINGS, ...(db.settings || {}),
     intervals: { ...DEFAULT_SETTINGS.intervals, ...((db.settings || {}).intervals || {}) },
-    notifications: { ...DEFAULT_SETTINGS.notifications, ...((db.settings || {}).notifications || {}) },
+    notifications: { 
+      ...DEFAULT_SETTINGS.notifications, 
+      ...((db.settings || {}).notifications || {}),
+      integrations: {
+        ...DEFAULT_SETTINGS.notifications.integrations,
+        ...((db.settings || {}).notifications || {}).integrations,
+      }
+    },
     mirror: { ...DEFAULT_SETTINGS.mirror, ...((db.settings || {}).mirror || {}) },
     showcase: { ...DEFAULT_SETTINGS.showcase, ...((db.settings || {}).showcase || {}) },
     slaReport: { ...DEFAULT_SETTINGS.slaReport, ...((db.settings || {}).slaReport || {}) },

@@ -1,6 +1,6 @@
 // ─── PLUTO: настройки системы ───────────────────────────────────────────────
 import { useEffect, useState } from 'react';
-import { Send, Tag as TagIcon, Bell, Users, Radio, Plus, Trash2, Monitor, Server, Check, Pencil, ShieldCheck, KeyRound, X, Eye, EyeOff, FileBarChart, Rocket, Cpu, Globe, Activity, Download, Terminal, ClipboardList, HardDrive, Thermometer, Video } from 'lucide-react';
+import { Send, Tag as TagIcon, Bell, Users, Radio, Plus, Trash2, Monitor, Server, Check, Pencil, ShieldCheck, KeyRound, X, Eye, EyeOff, FileBarChart, Rocket, Cpu, Globe, Activity, Download, Terminal, ClipboardList, HardDrive, Thermometer, Video, Slack, MessageSquare } from 'lucide-react';
 import { Panel, Field, Toggle, EmptyState } from '../components/ui';
 import { store, useCurrentUser, usePluto, useToasts } from '../lib/store';
 import { sendTestNotification, requestPushPermission } from '../lib/engine';
@@ -116,6 +116,54 @@ function NotifyTab() {
 
   return (
     <div className="space-y-4">
+      {/* ─── Интеграции (Slack, Teams, Discord) ───────────────────────────── */}
+      <Panel title="Интеграции с мессенджерами" icon={<MessageSquare className="h-4 w-4" />}>
+        <div className="space-y-4">
+          {/* Slack */}
+          <div className="rounded-lg border border-line/60 bg-raised/30 p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Slack className="h-4 w-4 text-[#4A154B]" />
+                <span className="font-semibold text-ink">Slack</span>
+              </div>
+              <Toggle checked={n.integrations?.slack?.enabled ?? false} onChange={(v) => setN({ integrations: { ...n.integrations, slack: { ...n.integrations?.slack, enabled: v } } })} />
+            </div>
+            <Field label="Webhook URL">
+              <input className="inp font-mono" value={n.integrations?.slack?.webhookUrl ?? ''} onChange={(e) => setN({ integrations: { ...n.integrations, slack: { ...n.integrations?.slack, webhookUrl: e.target.value } } })} placeholder="https://hooks.slack.com/services/..." />
+            </Field>
+          </div>
+
+          {/* Microsoft Teams */}
+          <div className="rounded-lg border border-line/60 bg-raised/30 p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Slack className="h-4 w-4 text-[#4C1D95]" />
+                <span className="font-semibold text-ink">Microsoft Teams</span>
+              </div>
+              <Toggle checked={n.integrations?.teams?.enabled ?? false} onChange={(v) => setN({ integrations: { ...n.integrations, teams: { ...n.integrations?.teams, enabled: v } } })} />
+            </div>
+            <Field label="Webhook URL">
+              <input className="inp font-mono" value={n.integrations?.teams?.webhookUrl ?? ''} onChange={(e) => setN({ integrations: { ...n.integrations, teams: { ...n.integrations?.teams, webhookUrl: e.target.value } } })} placeholder="https://outlook.office.com/webhook/..." />
+            </Field>
+          </div>
+
+          {/* Discord */}
+          <div className="rounded-lg border border-line/60 bg-raised/30 p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="h-4 w-4 text-[#5865F2]" />
+                <span className="font-semibold text-ink">Discord</span>
+              </div>
+              <Toggle checked={n.integrations?.discord?.enabled ?? false} onChange={(v) => setN({ integrations: { ...n.integrations, discord: { ...n.integrations?.discord, enabled: v } } })} />
+            </div>
+            <Field label="Webhook URL">
+              <input className="inp font-mono" value={n.integrations?.discord?.webhookUrl ?? ''} onChange={(e) => setN({ integrations: { ...n.integrations, discord: { ...n.integrations?.discord, webhookUrl: e.target.value } } })} placeholder="https://discord.com/api/webhooks/..." />
+            </Field>
+          </div>
+        </div>
+      </Panel>
+
+      {/* ─── Telegram ─────────────────────────────────────────────────────── */}
       <Panel title="Telegram" icon={<Bell className="h-4 w-4" />}>
         <div className="mb-3 flex items-center justify-between"><span className="text-[13px] text-mut">Отправлять в Telegram</span><Toggle checked={n.telegram.enabled} onChange={(v) => setN({ telegram: { ...n.telegram, enabled: v } })} /></div>
         <div className="grid gap-3 md:grid-cols-2">
@@ -124,6 +172,7 @@ function NotifyTab() {
         </div>
       </Panel>
 
+      {/* ─── E-mail ───────────────────────────────────────────────────────── */}
       <Panel title="E-mail (SMTP)" icon={<Bell className="h-4 w-4" />}>
         <div className="mb-3 flex items-center justify-between"><span className="text-[13px] text-mut">Отправлять по почте</span><Toggle checked={n.email.enabled} onChange={(v) => setN({ email: { ...n.email, enabled: v } })} /></div>
         <div className="grid gap-3 md:grid-cols-3">
@@ -133,6 +182,7 @@ function NotifyTab() {
         </div>
       </Panel>
 
+      {/* ─── Push браузера ───────────────────────────────────────────────── */}
       <Panel title="Всплывающие окна браузера" icon={<Bell className="h-4 w-4" />}>
         <div className="flex items-center justify-between">
           <span className="text-[13px] text-mut">Push-уведомления (работают, даже если вкладка не активна)</span>
@@ -143,6 +193,7 @@ function NotifyTab() {
         </div>
       </Panel>
 
+      {/* ─── События ──────────────────────────────────────────────────────── */}
       <Panel title="Какие события отправлять" icon={<Bell className="h-4 w-4" />}>
         <div className="grid gap-3 md:grid-cols-2">
           {([
