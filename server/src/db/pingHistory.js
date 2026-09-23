@@ -38,20 +38,73 @@ export function prunePingHistory(db) {
 }
 
 /**
- * Регистрация события смены состояния устройства (из pollAgent).
+ * Регистрация события смены состояния устройства (из pollAgent / seed).
  * state: true — стало онлайн, false — ушло в офлайн.
+ * Возвращает true, если событие реально добавлено (защита от дублей).
+ * Сохранение в db.json выполняет savePingEvents() (или любой saveDb()).
  */
-export async function recordPingState(db, agentId, agentName, range, targetName, ip, state, ts = Date.now()) {
+export function recordPingState(db, agentId, agentName, range, targetName, ip, state, ts = Date.now()) {
   initPingHistory(db);
-  const ev = { id: `${ip}|${ts}`, key: pingKey(agentId, range, ip), ts, up: !!state, agentId, agentName, range: range || '', target: targetName || range || '', ip };
+  const key = pingKey(agentId, range, ip);
+  const last = findLastEvent(db, key);
+  // дубликаты/мигание: состояние не менялось — событие не нужно
+  if (last && last.up === !!state) return false;
+  const ev = { id: `${ip}|${ts}`, key, ts, up: !!state, agentId, agentName, range: range || '', target: targetName || range || '', ip };
   db.pingEvents.push(ev);
   // усечение «на лет» — только по данной цели
-  const cnt = db.pingEvents.reduce((n, e) => (e.key === ev.key ? n + 1 : n), 0);
+  const cnt = db.pingEvents.reduce((n, e) => (e.key === key ? n + 1 : n), 0);
   if (cnt > MAX_EVENTS_PER_TARGET) {
     let excess = cnt - MAX_EVENTS_PER_TARGET;
-    db.pingEvents = db.pingEvents.filter((e) => (e.key === ev.key && excess-- > 0 ? false : true));
+    db.pingEvents = db.pingEvents.filter((e) => (e.key === key && excess-- > 0 ? false : true));
   }
+  db._pingDirty = true;
+  return true;
+}
+
+/** Сохраняет накопленные события истории на диске (если есть изменения). */
+export async function savePingEvents(db) {
+  if (!db._pingDirty) return;
+  db._pingDirty = false;
   await saveDb();
+}
+
+/** Последнее событие по ключу (или null). */
+function findLastEvent(db, key) {
+  let last = null;
+  for (const e of db.pingEvents) {
+    if (e.key === key && (!last || e.ts >= last.ts)) last = e;
+  }
+  return last;
+}
+
+/**
+ * Однократная инициализация истории при старте сервера: для каждого пингуемого
+ * устройства создаётся стартовое событие из известного состояния (alive /
+ * offlineSince / lastSuccess), иначе журнал был бы пуст до первой смены состояния.
+ * Выполняется лениво при первом опросе агента (agent.targets уже заполнены).
+ */
+export function seedPingHistoryFromAgents(db) {
+  if (db._pingSeeded) return false;
+  initPingHistory(db);
+  const now = Date.now();
+  let added = 0;
+  for (const a of db.agents || []) {
+    for (const t of a.targets || []) {
+      const rangeStr = t.range || '';
+      const targetName = t.name || t.target || rangeStr;
+      for (const r of t.results || []) {
+        const ip = r.ip || r.host || r.addr || '';
+        if (!ip) continue;
+        const key = pingKey(a.id, rangeStr, ip);
+        if (findLastEvent(db, key)) continue; // история по этому устройству уже ведётся
+        // время перехода в текущее состояние: offlineSince (ушёл в офлайн) или lastSuccess (восстановился)
+        const ts = !r.alive ? (r.offlineSince || now) : (r.lastSuccess || now);
+        if (recordPingState(db, a.id, a.name, rangeStr, targetName, ip, !!r.alive, Math.min(ts, now))) added++;
+      }
+    }
+  }
+  db._pingSeeded = true;
+  return db._pingDirty;
 }
 
 /**
@@ -136,13 +189,17 @@ export async function rollupPingDaily(db) {
   for (const [key, list] of byKey.entries()) {
     const meta = current.get(key) || list[list.length - 1];
     if (!meta) continue;
-    // вчера — финальный расчёт
-    upsertDaily(yesterday, { key, ...meta }, onlineMsIn(list, yStart, yStart + DAY_MS, false));
+    // вчера — финальный расчёт (только если за вчера есть события: иначе при
+    // пустой истории рисуются ложные нули доступности)
+    if (list.some((ev) => ev.ts >= yStart && ev.ts < yStart + DAY_MS)) {
+      upsertDaily(yesterday, { key, ...meta }, onlineMsIn(list, yStart, yStart + DAY_MS, false));
+    }
     // сегодня — промежуточный (обновляется при каждом роллапе)
     upsertDaily(today, { key, ...meta }, onlineMsIn(list, dayStart, now, meta.up ?? false));
   }
 
   prunePingHistory(db);
+  db._pingDirty = false; // история сохраняется ниже вместе с суточными агрегатами
   await saveDb();
 }
 
