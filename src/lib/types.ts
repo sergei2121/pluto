@@ -332,6 +332,11 @@ export interface Settings {
     telegram: { enabled: boolean; botToken: string; chatId: string };
     email: { enabled: boolean; smtp: string; from: string; to: string };
     push: { enabled: boolean };
+    integrations: {
+      slack: { enabled: boolean; webhookUrl: string };
+      teams: { enabled: boolean; webhookUrl: string };
+      discord: { enabled: boolean; webhookUrl: string };
+    };
     on: { down: boolean; degraded: boolean; recover: boolean; agentOff: boolean; agentOn: boolean; threshold: boolean };
   };
 }

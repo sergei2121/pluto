@@ -384,20 +384,45 @@ async function notify(kind, title, body) {
       });
     }
   }
-  
   // Email уведомления (заготовка для будущей реализации)
   if (n.email.enabled && n.email.smtp && n.email.from && n.email.to) {
     notificationLogger.info('Email уведомление (требуется реализация SMTP)', {
       kind, title, from: n.email.from, to: n.email.to
     });
   }
-  
-  // Push уведомления (заготовка для будущей реализации)
+
+  // Web Push уведомления
   if (n.push.enabled) {
-    notificationLogger.info('Push уведомление (требуется реализация Web Push)', { kind, title });
+    try {
+      const webpush = await import('./notifications/webpush.js');
+      await webpush.sendWebPush(title, body, { tag: `pluto-${kind}` });
+      notificationLogger.info('Web Push уведомление отправлено', { kind, title });
+    } catch (e) {
+      notificationLogger.error('Ошибка отправки Web Push уведомления', {
+        kind, title, error: e.message
+      });
+    }
+  }
+
+  // Интеграционные уведомления (Slack, Teams, Discord)
+  const integrations = n.integrations || {};
+  const hasIntegrations = 
+    (integrations.slack?.enabled && integrations.slack.webhookUrl) ||
+    (integrations.teams?.enabled && integrations.teams.webhookUrl) ||
+    (integrations.discord?.enabled && integrations.discord.webhookUrl);
+
+  if (hasIntegrations) {
+    try {
+      const integrationNotifier = await import('./notifications/integrations.js');
+      await integrationNotifier.sendIntegrationNotification(kind, title, body, integrations);
+      notificationLogger.info('Интеграционные уведомления отправлены', { kind, title });
+    } catch (e) {
+      notificationLogger.error('Ошибка отправки интеграционных уведомлений', {
+        kind, title, error: e.message
+      });
+    }
   }
 }
-
 // ─── Витрина (публичная, без входа) ────────────────────────────────────────
 
 function pingAgg(targets) {
