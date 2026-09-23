@@ -1,6 +1,6 @@
 // ─── PLUTO: настройки системы ───────────────────────────────────────────────
 import { useEffect, useState } from 'react';
-import { Send, Tag as TagIcon, Bell, Users, Radio, Plus, Trash2, Monitor, Server, Check, Pencil, ShieldCheck, KeyRound, X, Eye, EyeOff, FileBarChart, Rocket, Cpu, Globe, Activity } from 'lucide-react';
+import { Send, Tag as TagIcon, Bell, Users, Radio, Plus, Trash2, Monitor, Server, Check, Pencil, ShieldCheck, KeyRound, X, Eye, EyeOff, FileBarChart, Rocket, Cpu, Globe, Activity, Download, Terminal, ClipboardList, HardDrive, Thermometer, Video } from 'lucide-react';
 import { Panel, Field, Toggle, EmptyState } from '../components/ui';
 import { store, useCurrentUser, usePluto, useToasts } from '../lib/store';
 import { sendTestNotification, requestPushPermission } from '../lib/engine';
@@ -692,6 +692,152 @@ function SystemTab() {
           <div className="rounded-lg border border-line bg-raised/30 px-4 py-3">
             <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Время системы</p>
             <ClockDisplay />
+          </div>
+        </div>
+      </Panel>
+
+      <Panel title="Мониторинг Windows и Linux" icon={<HardDrive className="h-4 w-4" />}>
+        <div className="space-y-4">
+          <div className="rounded-xl border border-vio/30 bg-vio/5 p-4">
+            <h4 className="mb-2 flex items-center gap-2 text-[13px] font-bold text-vio">
+              <ClipboardList className="h-4 w-4" />Собираемые метрики
+            </h4>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="flex items-start gap-2 rounded-lg border border-line bg-panel/50 p-3">
+                <Cpu className="mt-0.5 h-4 w-4 text-ok" />
+                <div>
+                  <p className="text-[12px] font-semibold text-ink">Процессор (CPU)</p>
+                  <p className="text-[11px] text-dim">Загрузка total, user, system, iowait, softirq, guest</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-2 rounded-lg border border-line bg-panel/50 p-3">
+                <Server className="mt-0.5 h-4 w-4 text-blue" />
+                <div>
+                  <p className="text-[12px] font-semibold text-ink">Оперативная память (RAM)</p>
+                  <p className="text-[11px] text-dim">Процент, used, total, cached, buffers</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-2 rounded-lg border border-line bg-panel/50 p-3">
+                <HardDrive className="mt-0.5 h-4 w-4 text-purple" />
+                <div>
+                  <p className="text-[12px] font-semibold text-ink">Диски</p>
+                  <p className="text-[11px] text-dim">Количество, общий объем, использовано, I/O операции</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-2 rounded-lg border border-line bg-panel/50 p-3">
+                <Thermometer className="mt-0.5 h-4 w-4 text-warn" />
+                <div>
+                  <p className="text-[12px] font-semibold text-ink">Температуры</p>
+                  <p className="text-[11px] text-dim">CPU, SSD/HDD, GPU</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-2 rounded-lg border border-line bg-panel/50 p-3">
+                <Video className="mt-0.5 h-4 w-4 text-pink" />
+                <div>
+                  <p className="text-[12px] font-semibold text-ink">Видеокарта (GPU)</p>
+                  <p className="text-[11px] text-dim">Загрузка %, память used/total (если установлена)</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-2 rounded-lg border border-line bg-panel/50 p-3">
+                <Activity className="mt-0.5 h-4 w-4 text-cyan" />
+                <div>
+                  <p className="text-[12px] font-semibold text-ink">Сеть</p>
+                  <p className="text-[11px] text-dim">Входящий/исходящий трафик</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="rounded-xl border border-line bg-panel/50 p-4">
+              <h4 className="mb-3 flex items-center gap-2 text-[13px] font-bold text-ink">
+                <Download className="h-4 w-4" />Netdata (рекомендуется для Linux)
+              </h4>
+              <p className="mb-3 text-[12px] leading-relaxed text-dim">
+                Универсальная система мониторинга с веб-интерфейсом. Поддерживает Windows (через WSL) и Linux.
+              </p>
+              <div className="space-y-2">
+                <div className="rounded-lg bg-void/50 p-2.5">
+                  <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Linux — быстрая установка:</p>
+                  <code className="block overflow-x-auto text-[11.5px] text-mut">wget -O /tmp/netdata-kickstart.sh https://get.netdata.cloud/kickstart.sh &amp;&amp; sh /tmp/netdata-kickstart.sh</code>
+                </div>
+                <div className="rounded-lg bg-void/50 p-2.5">
+                  <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Windows — через Chocolatey:</p>
+                  <code className="block overflow-x-auto text-[11.5px] text-mut">choco install netdata</code>
+                </div>
+                <div className="rounded-lg bg-void/50 p-2.5">
+                  <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Windows — через winget:</p>
+                  <code className="block overflow-x-auto text-[11.5px] text-mut">winget install Netdata.Netdata</code>
+                </div>
+              </div>
+              <p className="mt-3 text-[11.5px] text-dim">
+                После установки укажите в настройках агента URL: <code className="font-mono text-mut">http://&lt;IP-сервера&gt;:19999</code>
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-line bg-panel/50 p-4">
+              <h4 className="mb-3 flex items-center gap-2 text-[13px] font-bold text-ink">
+                <Terminal className="h-4 w-4" />Pluto Agent (Windows/Linux)
+              </h4>
+              <p className="mb-3 text-[12px] leading-relaxed text-dim">
+                Легковесный агент для сбора системных метрик. Отдает данные в формате JSON на endpoint <code className="font-mono text-mut">/api/metrics</code>.
+              </p>
+              <div className="space-y-2">
+                <div className="rounded-lg bg-void/50 p-2.5">
+                  <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Windows — PowerShell скрипт:</p>
+                  <code className="block overflow-x-auto text-[11.5px] text-mut">powershell -ExecutionPolicy Bypass -File .\install-pluto-agent.ps1</code>
+                </div>
+                <div className="rounded-lg bg-void/50 p-2.5">
+                  <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Linux — bash скрипт:</p>
+                  <code className="block overflow-x-auto text-[11.5px] text-mut">sudo ./install-pluto-agent.sh</code>
+                </div>
+                <div className="rounded-lg bg-void/50 p-2.5">
+                  <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Node.js (кроссплатформенно):</p>
+                  <code className="block overflow-x-auto text-[11.5px] text-mut">npm install -g @pluto/agent &amp;&amp; pluto-agent install</code>
+                </div>
+              </div>
+              <p className="mt-3 text-[11.5px] text-dim">
+                Агент устанавливается как служба Windows или systemd-юнит в Linux.
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-line bg-panel/50 p-4">
+            <h4 className="mb-3 flex items-center gap-2 text-[13px] font-bold text-ink">
+              <ClipboardList className="h-4 w-4" />Формат данных Pluto Agent
+            </h4>
+            <p className="mb-2 text-[12px] text-dim">Агент должен отдавать метрики в следующем формате JSON:</p>
+            <pre className="max-h-64 overflow-auto rounded-lg bg-void/70 p-3 text-[11px] leading-relaxed text-mut">
+{`{
+  "cpu": { "usage": 45.2, "user": 30.1, "system": 10.5, "iowait": 4.6 },
+  "memory": { "used": 8589934592, "total": 17179869184, "usage_percent": 50.0 },
+  "swap": { "used": 1073741824, "total": 4294967296, "usage_percent": 25.0 },
+  "disks": [{ "name": "C:", "total": 500107862016, "used": 250053931008, "free": 250053931008 }],
+  "disk": { "read_per_sec": 1024000, "write_per_sec": 512000 },
+  "network": { "bytes_recv_per_sec": 102400, "bytes_sent_per_sec": 51200 },
+  "temperatures": { "cpu": 65.5, "ssd": 45.0, "gpu": 70.0 },
+  "gpu": { "name": "NVIDIA GeForce RTX 3080", "usage_percent": 75.0, "memory_used": 8589934592, "memory_total": 10737418240 }
+}`}
+            </pre>
+          </div>
+
+          <div className="rounded-xl border border-warn/30 bg-warn/5 p-4">
+            <h4 className="mb-2 flex items-center gap-2 text-[13px] font-bold text-warn">
+              <Activity className="h-4 w-4" />Диагностика
+            </h4>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Netdata — проверка API:</p>
+                <code className="block overflow-x-auto rounded bg-void/50 p-2 text-[11px] text-mut">curl "http://&lt;IP&gt;:19999/api/v2/data?context=system.cpu&amp;format=json"</code>
+              </div>
+              <div>
+                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Pluto Agent — проверка endpoint:</p>
+                <code className="block overflow-x-auto rounded bg-void/50 p-2 text-[11px] text-mut">curl http://&lt;IP&gt;:&lt;PORT&gt;/api/metrics</code>
+              </div>
+            </div>
+            <p className="mt-3 text-[11.5px] text-dim">
+              Полная документация: <code className="font-mono text-mut">MONITORING-WINDOWS-LINUX.md</code>
+            </p>
           </div>
         </div>
       </Panel>
