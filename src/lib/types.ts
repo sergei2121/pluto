@@ -337,7 +337,12 @@ export interface Settings {
       teams: { enabled: boolean; webhookUrl: string };
       discord: { enabled: boolean; webhookUrl: string };
     };
-    on: { down: boolean; degraded: boolean; recover: boolean; agentOff: boolean; agentOn: boolean; threshold: boolean };
+    // Группы событий: устройства / агенты / пинги агентов
+    on: {
+      device: { down: boolean; degraded: boolean; recover: boolean };
+      agent: { agentOff: boolean; agentOn: boolean };
+      ping: { threshold: boolean; pingDown: boolean; pingRecover: boolean };
+    };
   };
 }
 

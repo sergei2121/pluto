@@ -317,13 +317,19 @@ const notificationLogger = {
 async function notify(kind, title, body) {
   const n = db.settings.notifications;
   
-  // Проверка включённых типов уведомлений
-  if (kind === 'down' && !n.on.down) return;
-  if (kind === 'degraded' && !n.on.degraded) return;
-  if (kind === 'recover' && !n.on.recover) return;
-  if (kind === 'agentOff' && !n.on.agentOff) return;
-  if (kind === 'agentOn' && !n.on.agentOn) return;
-  if (kind === 'threshold' && !n.on.threshold) return;
+  // Проверка включённых типов уведомлений (по группам: устройства / агенты / пинги)
+  const on = n.on || {};
+  const dev = on.device || {};
+  const ag = on.agent || {};
+  const pg = on.ping || {};
+  if (kind === 'down' && dev.down === false) return;
+  if (kind === 'degraded' && dev.degraded === false) return;
+  if (kind === 'recover' && dev.recover === false) return;
+  if (kind === 'agentOff' && ag.agentOff === false) return;
+  if (kind === 'agentOn' && ag.agentOn === false) return;
+  if (kind === 'threshold' && pg.threshold === false) return;
+  if (kind === 'pingDown' && pg.pingDown === false) return;
+  if (kind === 'pingRecover' && pg.pingRecover === false) return;
 
   // Telegram уведомления
   if (n.telegram.enabled && n.telegram.botToken && n.telegram.chatId) {
@@ -612,6 +618,7 @@ async function pollAgent(agent) {
   //    сохраняем последний успешный результат, чтобы не «мигало».
   if (agent.relayUrl && (agent.pingTargets || []).length) {
     const out = [];
+    const pingEvents = []; // события пингов: отправляем после forEach (await внутри callback недопустим)
     let anyOk = false;
     for (const tgt of agent.pingTargets) {
       const rangeStr = typeof tgt === 'string' ? tgt : (tgt.range || '');
@@ -647,8 +654,20 @@ async function pollAgent(agent) {
             if (prev?.results?.[idx]?.offlineDuration30d) {
               r.offlineDuration30d = prev.results[idx].offlineDuration30d;
             }
+
+            // Уведомления группы «Пинги агентов»: устройство ушло в офлайн
+            const wasAlivePrev = prev?.results?.[idx] ? prev.results[idx].alive !== false : true;
+            if (wasAlivePrev && !r._pingNotified) {
+              r._pingNotified = true;
+              pingEvents.push({ level: 'warn', title: `Пинг агента «${agent.name}»: ${r.ip || r.host || r.addr || 'устройство'} недоступен`, kind: 'pingDown', msg: `Агент «${agent.name}»: устройство ${r.ip || r.host || r.addr || ''} недоступно` });
+            }
           } else {
             // Устройство восстановилось — вычисляем длительность офлайна
+            const wasOfflinePrev = prev?.results?.[idx]?.alive === false || !!prev?.results?.[idx]?.offlineSince;
+            if (wasOfflinePrev || r._pingNotified) {
+              pingEvents.push({ level: 'ok', title: `Пинг агента «${agent.name}»: ${r.ip || r.host || r.addr || 'устройство'} снова в сети`, kind: 'pingRecover', msg: `Агент «${agent.name}»: устройство ${r.ip || r.host || r.addr || ''} восстановлено` });
+            }
+            r._pingNotified = false;
             if (r.offlineSince) {
               const offlineTime = now - r.offlineSince;
               const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
@@ -659,6 +678,11 @@ async function pollAgent(agent) {
         });
       }
       
+      for (const ev of pingEvents.splice(0)) {
+        await pushEvent(ev.level, 'agent', ev.title);
+        notify(ev.kind, 'PLUTO: пинг агента', ev.msg);
+      }
+
       out.push({ target: targetName || rangeStr, name: targetName, range: rangeStr, lastCheck: now, results: finalResults });
     }
     agent.targets = out;
