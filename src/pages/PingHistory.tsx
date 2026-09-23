@@ -1,12 +1,36 @@
 // ─── PLUTO: история пингов — месячный журнал онлайн/офлайн устройств ────────
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { History, Wifi, WifiOff, RefreshCw, Search, CalendarDays, ArrowDownCircle, ArrowUpCircle } from 'lucide-react';
+import { History, Wifi, WifiOff, RefreshCw, Search, CalendarDays, ArrowDownCircle, ArrowUpCircle, Download } from 'lucide-react';
 import { Panel, EmptyState, Seg } from '../components/ui';
 import { api } from '../lib/api';
 import { cls } from '../lib/util';
+import { useToasts } from '../lib/store';
 import type { PingHistoryDevice, PingHistoryEvent, PingDailyRecord } from '../lib/types';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** ISO-дата YYYY-MM-DD в локальном часовом поясе. */
+function localDateStr(ts: number): string {
+  const d = new Date(ts);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** Экспорт CSV: ячейки кавычкуются и экранируются, разделитель «;» (Excel/RU). */
+function csvCell(v: unknown): string {
+  const s = v == null ? '' : String(v);
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
+function downloadCsv(filename: string, head: string[], rows: unknown[][]): void {
+  const content = '\uFEFF' + [head.map(csvCell).join(';'), ...rows.map((r) => r.map(csvCell).join(';'))].join('\r\n');
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 
 /** Ключ устройства в истории: agentId|range|ip */
 const devKey = (d: { agentId: string; range: string; ip: string }) => `${d.agentId}|${d.range}|${d.ip}`;
@@ -141,6 +165,51 @@ export default function PingHistoryPage() {
     return { down, up };
   }, [filteredEvents]);
 
+  // ─── экспорт CSV: все входящие данные с учётом текущих фильтров ───────────
+  const [exporting, setExporting] = useState(false);
+
+  const exportCsv = useCallback(async () => {
+    setExporting(true);
+    try {
+      // при выбранном устройстве данные уже загружены; иначе тянем историю по всем
+      let evs = filteredEvents;
+      let dailies = daily;
+      if (!sel) {
+        const hist = await api.pingHistory({ days: Number(days) });
+        evs = hist.events;
+        dailies = hist.daily;
+      }
+      const period = `${localDateStr(Date.now() - Number(days) * DAY_MS)}..${localDateStr(Date.now())}`;
+      const rows: unknown[][] = [];
+
+      // 1) события смены состояния (журнал онлайн/офлайн)
+      for (const e of [...evs].sort((a, b) => a.ts - b.ts)) {
+        rows.push(['event', '', e.ts, fmtDateTime(e.ts), e.agentName, e.range, e.target, e.ip, e.up ? 'online' : 'offline', '', '', '']);
+      }
+
+      // 2) суточные агрегаты доступности
+      for (const d of [...dailies].sort((a, b) => (a.date < b.date ? -1 : 1))) {
+        rows.push(['daily', d.date, '', '', d.agentName, '', d.target, d.ip, '', d.uptimePct, d.uptimeMs, d.downCount]);
+      }
+
+      // 3) текущее состояние устройств (для выбранных диапазонов дат)
+      for (const dv of devices) {
+        if (sel && devKey(dv) !== sel) continue;
+        const needle = q.trim().toLowerCase();
+        if (needle && !dv.ip.toLowerCase().includes(needle) && !dv.target.toLowerCase().includes(needle) && !dv.agentName.toLowerCase().includes(needle)) continue;
+        rows.push(['device', '', Date.now(), '', dv.agentName, dv.range, dv.target, dv.ip, dv.alive ? 'online' : 'offline', '', dv.latency ?? '', dv.offlineSince ?? '']);
+      }
+
+      const head = ['type', 'date', 'timestamp', 'datetime', 'agent', 'range', 'target', 'ip', 'state', 'uptime_pct', 'value_ms', 'down_count'];
+      downloadCsv(`pluto-ping-history-${period.replace('..', '_')}.csv`, head, rows);
+      useToasts.push('ok', `CSV-отчёт сформирован: ${rows.length} строк`);
+    } catch (e) {
+      useToasts.push('crit', e instanceof Error ? `Ошибка экспорта: ${e.message}` : 'Не удалось сформировать CSV-отчёт');
+    } finally {
+      setExporting(false);
+    }
+  }, [daily, days, devices, filteredEvents, q, sel]);
+
   return (
     <div className="space-y-4">
       {/* Панель фильтров */}
@@ -148,6 +217,10 @@ export default function PingHistoryPage() {
         right={
           <div className="flex items-center gap-2">
             <Seg options={[{ v: '7', label: '7 дней' }, { v: '30', label: '30 дней' }]} value={days} onChange={(v) => { setDays(v as '7' | '30'); setSel(''); }} />
+            <button onClick={() => void exportCsv()} disabled={exporting} title="Скачать CSV-отчёт со всеми данными (события, суточная доступность, текущее состояние)"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-raised/50 px-3 py-1.5 text-[12px] font-bold text-mut transition-all hover:border-vio/50 hover:text-ink disabled:opacity-50">
+              <Download className={cls('h-3.5 w-3.5', exporting && 'animate-pulse')} /> CSV
+            </button>
             <button onClick={() => void load()} title="Обновить" className="rounded-md p-1.5 text-dim transition-colors hover:bg-raised hover:text-vio">
               <RefreshCw className={cls('h-4 w-4', loading && 'animate-spin')} />
             </button>
