@@ -154,7 +154,7 @@ export interface GlancesSnapshot {
 export type StatsRange = '5m' | '30m' | '3h' | '24h' | '7d' | '30d';
 
 /** Куда попадает агент в статистике. */
-export type StatsView2 = '' | 'bars' | 'ws';
+export type StatsView2 = StatsView;
 
 /** Источник телеметрии: Glances, Netdata, Telegraf или Prometheus. */
 export type TelemetrySource = 'glances' | 'netdata' | 'telegraf' | 'prometheus' | '';

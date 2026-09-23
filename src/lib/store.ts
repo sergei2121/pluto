@@ -39,6 +39,7 @@ function defaultSettings(): Settings {
     backup: { enabled: true, keep: 7, lastAt: null },
     prometheus: { enabled: false },
     telegramBot: { enabled: false, token: '' },
+    slaReport: { enabled: false, schedule: 'daily', hour: 0, outputPath: '/data/sla-reports' },
     notifications: {
       telegram: { enabled: false, botToken: '', chatId: '' },
       email: { enabled: false, smtp: '', from: '', to: '' },
