@@ -769,7 +769,7 @@ async function generateAndSaveSlaReport(outputPath) {
     
     const now = new Date();
     const dateStr = now.toISOString().split('T')[0];
-    const fileName = `SLA-${dateStr}.json`;
+    const fileName = `SLA-${dateStr}.csv`;
     const filePath = pathMod.join(outputPath, fileName);
     
     // Генерируем SLA данные за последние 30 дней
@@ -795,20 +795,14 @@ async function generateAndSaveSlaReport(outputPath) {
       };
     });
     
-    const report = {
-      generatedAt: Date.now(),
-      generatedAtISO: now.toISOString(),
-      period: '30 days',
-      devices: slaData,
-      summary: {
-        totalDevices: slaData.length,
-        avgUptime: slaData.length > 0 
-          ? Math.round((slaData.reduce((sum, d) => sum + d.uptimePct, 0) / slaData.length) * 100) / 100 
-          : 0,
-      },
-    };
+    // Формируем CSV
+    const csvHeader = 'ID,Name,Type,Uptime %,Down Count,Avg Latency,Period Start,Period End';
+    const csvRows = slaData.map(d => 
+      `${d.id},"${d.name.replace(/"/g, '""')}",${d.type},${d.uptimePct},${d.downCount},${d.avgLatency !== null ? d.avgLatency : ''},${new Date(d.periodStart).toISOString()},${new Date(d.periodEnd).toISOString()}`
+    );
+    const csvContent = [csvHeader, ...csvRows].join('\n');
     
-    fsMod.writeFileSync(filePath, JSON.stringify(report, null, 2), 'utf8');
+    fsMod.writeFileSync(filePath, csvContent, 'utf8');
     console.log(`[pluto] SLA-отчет сохранен: ${filePath}`);
     await pushEvent('info', 'system', `SLA-отчет сгенерирован: ${fileName}`);
   } catch (err) {
