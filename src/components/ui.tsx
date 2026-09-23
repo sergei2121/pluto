@@ -113,9 +113,9 @@ export function Drawer({ open, onClose, title, children }: { open: boolean; onCl
   );
 }
 
-export function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
+export function Field({ label, children, hint, className }: { label: string; children: ReactNode; hint?: string; className?: string }) {
   return (
-    <label className="block">
+    <label className={cls('block', className)}>
       <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">{label}</span>
       {children}
       {hint && <span className="mt-1 block text-[11px] text-dim/80">{hint}</span>}
