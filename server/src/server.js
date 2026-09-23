@@ -263,19 +263,32 @@ async function collectNetdata(url) {
   return await telemetryCollectors.collectNetdata(url, fetchText);
 }
 
+/**
+ * Собирает метрики от Pluto Agent.
+ * Использует функцию collectFromAgent из telemetry/collectors.js
+ */
+async function collectFromAgent(url) {
+  return await telemetryCollectors.collectFromAgent(url, fetchJson);
+}
+
 function parseUptime(s) {
-  const m = /(\\d+):(\\d+):(\\d+)/.exec(String(s));
+  const m = /(\d+):(\d+):(\d+)/.exec(String(s));
   if (!m) return null;
   return parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseInt(m[3]);
 }
 
-/** Собирает телеметрию из Netdata API. */
+/** Собирает телеметрию из доступных источников (Netdata или Pluto Agent). */
 async function collectTelemetry(agent) {
+  // Приоритет: сначала пробуем Netdata, затем Pluto Agent
   if (agent.netdataUrl) {
     const g = await telemetryCollectors.collectNetdata(agent.netdataUrl, fetchText);
     return { ...g, via: 'netdata' };
   }
-  throw new Error('Нет доступного источника телеметрии (укажите Netdata URL)');
+  if (agent.agentUrl) {
+    const g = await telemetryCollectors.collectFromAgent(agent.agentUrl, fetchJson);
+    return { ...g, via: 'pluto_agent' };
+  }
+  throw new Error('Нет доступного источника телеметрии (укажите Netdata URL или Pluto Agent URL)');
 }
 
 function netdataPoint(g, t) {
@@ -626,14 +639,14 @@ async function pollAgent(agent) {
     agent.targets = out;
   }
 
-  // 3) Телеметрия (Netdata, отдельный интервал, хранение 30 дней)
+  // 3) Телеметрия (Netdata или Pluto Agent, отдельный интервал, хранение 30 дней)
   const giv = Math.max(10, db.settings.intervals.netdata || 20) * 1000;
-  const hasTelemetry = !!agent.netdataUrl;
+  const hasTelemetry = !!agent.netdataUrl || !!agent.agentUrl;
   if (hasTelemetry && now - (agent.lastNetdata || 0) >= giv) {
     agent.lastNetdata = now;
     try {
       const g = await collectTelemetry(agent);
-      // Сохраняем снимок телеметрии
+      // Сохраняем снимок телеметрии с расширенными метриками
       agent.netdataLatest = {
         t: now, cpu: g.cpu, cpuCores: g.cpuCores || [], gpu: g.gpu, gpuTemp: g.gpuTemp,
         ram: g.ram, ramUsedGB: g.ramUsedGB, ramTotalGB: g.ramTotalGB, swap: g.swap,
@@ -646,6 +659,14 @@ async function pollAgent(agent) {
         wifiSSID: g.wifiSSID, wifiQuality: g.wifiQuality, wifiSignal: g.wifiSignal,
         wifiBitrate: g.wifiBitrate, processes: g.processes || [], containers: g.containers || [],
         cloudProvider: g.cloudProvider, via: g.via,
+        // Расширенные метрики из collectors.js
+        cpuUser: g.cpuUser, cpuSystem: g.cpuSystem, cpuIowait: g.cpuIowait,
+        cpuSoftirq: g.cpuSoftirq, cpuGuest: g.cpuGuest,
+        ramUsed: g.ramUsed, ramTotal: g.ramTotal, ramCached: g.ramCached, ramBuffers: g.ramBuffers,
+        swapUsed: g.swapUsed, swapTotal: g.swapTotal,
+        diskCount: g.diskCount, diskTotalSpace: g.diskTotalSpace, diskUsedSpace: g.diskUsedSpace,
+        cpuTemp: g.cpuTemp, ssdTemp: g.ssdTemp, gpuUtil: g.gpuUtil,
+        gpuMemUsed: g.gpuMemUsed, gpuMemTotal: g.gpuMemTotal,
       };
       // Добавляем точку в историю (сокращённая версия)
       const pt = netdataPoint(g, now);
@@ -924,7 +945,7 @@ const server = http.createServer(async (req, res) => {
       const devices = isAdmin ? db.devices : db.devices.filter((d) => deviceScope.includes(d.type));
       const agentsRaw = isAdmin || menuScope.includes('agents') ? db.agents : [];
       const agents = agentsRaw.map((a) => ({
-        id: a.id, name: a.name, ip: a.ip, relayUrl: a.relayUrl || '', netdataUrl: a.netdataUrl || '',
+        id: a.id, name: a.name, ip: a.ip, relayUrl: a.relayUrl || '', netdataUrl: a.netdataUrl || '', agentUrl: a.agentUrl || '',
         pingTargets: a.pingTargets || [], targets: a.targets || [], tags: a.tags || [],
         favorite: !!a.favorite, pingsFavorite: !!a.pingsFavorite, pingsShowcase: !!a.pingsShowcase,
         statsView: a.statsView === 'bars' || a.statsView === 'ws' ? a.statsView : '',
@@ -994,6 +1015,7 @@ const server = http.createServer(async (req, res) => {
         id: uid(), name: String(b.name || '').trim() || ('ПК ' + ip), ip,
         relayUrl: String(b.relayUrl || '').trim(),
         netdataUrl: String(b.netdataUrl || '').trim() || undefined,
+        agentUrl: String(b.agentUrl || '').trim() || undefined,
         pingTargets: Array.isArray(b.pingTargets) ? b.pingTargets.map(t => typeof t === 'string' ? { name: '', range: t } : t) : [],
         tags: Array.isArray(b.tags) ? b.tags : [],
         targets: [], favorite: !!b.favorite, pingsFavorite: !!b.pingsFavorite, pingsShowcase: !!b.pingsShowcase,
@@ -1015,6 +1037,7 @@ const server = http.createServer(async (req, res) => {
         const b = await readBody(req);
         for (const k of ['name', 'ip', 'relayUrl', 'favorite', 'pingsFavorite', 'pingsShowcase']) if (k in b) a[k] = b[k];
         if ('netdataUrl' in b) a.netdataUrl = String(b.netdataUrl || '').trim() || undefined;
+        if ('agentUrl' in b) a.agentUrl = String(b.agentUrl || '').trim() || undefined;
         if ('statsView' in b) a.statsView = b.statsView === 'bars' || b.statsView === 'ws' ? b.statsView : '';
         if (Array.isArray(b.pingTargets)) {
           a.pingTargets = b.pingTargets.map(t => typeof t === 'string' ? { name: '', range: t } : t);
