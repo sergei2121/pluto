@@ -213,7 +213,7 @@ export default function PingHistoryPage() {
   return (
     <div className="space-y-4">
       {/* Панель фильтров */}
-      <Panel title="История пингов · месяц" icon={<History className="h-4 w-4 text-vio" />} delay={0}
+      <Panel title="История активности · месяц" icon={<History className="h-4 w-4 text-vio" />} delay={0}
         right={
           <div className="flex items-center gap-2">
             <Seg options={[{ v: '7', label: '7 дней' }, { v: '30', label: '30 дней' }]} value={days} onChange={(v) => { setDays(v as '7' | '30'); setSel(''); }} />
@@ -263,7 +263,7 @@ export default function PingHistoryPage() {
                   </div>
                 </div>
               ))}
-              {devices.length === 0 && <p className="px-1 text-[11px] text-dim">Нет пингуемых устройств. Добавьте цели в «Агенты → Изменить».</p>}
+              {devices.length === 0 && <p className="px-1 text-[11px] text-dim">Нет пингуемых устройств. Добавьте цели в «Хабы → Изменить».</p>}
             </div>
           </div>
 

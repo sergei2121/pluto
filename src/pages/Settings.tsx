@@ -43,7 +43,7 @@ function PollingTab() {
         {DEVICE_TYPES.map((t) => (
           <NumField key={t} label={`${DEVICE_TYPE_META[t].label} — интервал`} value={draft.intervals[t]} onChange={(v) => setInt(t, v)} min={5} suffix="сек" />
         ))}
-        <NumField label="Агенты — интервал опроса" value={draft.intervals.agent} onChange={(v) => setInt('agent', v)} min={10} suffix="сек" hint="Пинг до ПК и relay-пинги устройств" />
+        <NumField label="Хабы — интервал опроса" value={draft.intervals.agent} onChange={(v) => setInt('agent', v)} min={10} suffix="сек" hint="Пинг до ПК и relay-пинги устройств" />
         <NumField label="Glances — интервал" value={draft.intervals.glances} onChange={(v) => setInt('glances', v)} min={10} suffix="сек" hint="Опрос телеметрии Glances" />
         <NumField label="Таймаут проверки" value={draft.timeoutMs} onChange={(v) => setDraft({ ...draft, timeoutMs: v })} min={500} suffix="мс" />
         <NumField label="Сбоев подряд до «Аварии»" value={draft.failThreshold} onChange={(v) => setDraft({ ...draft, failThreshold: v })} min={1} />
@@ -213,14 +213,14 @@ function NotifyTab() {
             </div>
           </div>
 
-          {/* Группа: Агенты */}
+          {/* Группа: Хабы */}
           <div className="rounded-lg border border-line/60 bg-raised/20 p-3">
             <p className="mb-2.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">
-              <Server className="h-3.5 w-3.5" /> Агенты
+              <Server className="h-3.5 w-3.5" /> Хабы
             </p>
             <div className="space-y-2">
               {([
-                ['agentOff', 'Агент офлайн'], ['agentOn', 'Агент снова в сети'],
+                ['agentOff', 'Хаб офлайн'], ['agentOn', 'Хаб снова в сети'],
               ] as const).map(([k, label]) => (
                 <div key={k} className="flex items-center justify-between rounded-md border border-line/60 bg-raised/30 px-3 py-2">
                   <span className="text-[13px] text-mut">{label}</span>
@@ -230,10 +230,10 @@ function NotifyTab() {
             </div>
           </div>
 
-          {/* Группа: Пинги агентов */}
+          {/* Группа: Активность хабов */}
           <div className="rounded-lg border border-line/60 bg-raised/20 p-3">
             <p className="mb-2.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">
-              <Activity className="h-3.5 w-3.5" /> Пинги агентов
+              <Activity className="h-3.5 w-3.5" /> Активность хабов
             </p>
             <div className="space-y-2">
               {([
@@ -263,9 +263,9 @@ function NotifyTab() {
 const MENU_GRANTS: { route: Route; label: string }[] = [
   { route: 'dashboard', label: 'Главная' },
   { route: 'devices', label: 'Устройства' },
-  { route: 'agents', label: 'Агенты' },
-  { route: 'agent-pings', label: 'Пинги агентов' },
-  { route: 'ping-history', label: 'История пингов' },
+  { route: 'agents', label: 'Хабы' },
+  { route: 'agent-pings', label: 'Активность хабов' },
+  { route: 'ping-history', label: 'История активности' },
   { route: 'network-map', label: 'Карта сети' },
   { route: 'sla', label: 'SLA-отчёт' },
   { route: 'stats-bars', label: 'Статистика Bars' },

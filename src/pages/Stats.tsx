@@ -250,7 +250,7 @@ export default function Stats({ mode }: { mode: StatsView }) {
       {!agents.length ? (
         <Panel title="Нет источника данных">
           <EmptyState icon={<Activity className="h-7 w-7" />} title="В этой вкладке пока нет агентов"
-            text={`Назначьте агента во вкладку «${mode === 'bars' ? 'Статистика Bars' : 'Статистика WS'}»: «Агенты → Изменить → Показывать в статистике».`}
+            text={`Назначьте агента во вкладку «${mode === 'bars' ? 'Статистика Bars' : 'Статистика WS'}»: «Хабы → Изменить → Показывать в статистике».`}
             action={<button onClick={() => store.nav('agents')} className="rounded-xl border border-vio/50 bg-gradient-to-r from-vio/20 to-vio/10 px-5 py-2.5 text-[13px] font-bold text-ink transition-all hover:from-vio/30 hover:to-vio/20">К агентам</button>} />
         </Panel>
       ) : showAllAgents ? (
