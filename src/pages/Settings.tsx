@@ -1,6 +1,6 @@
 // ─── PLUTO: настройки системы ───────────────────────────────────────────────
 import { useEffect, useState } from 'react';
-import { Send, Tag as TagIcon, Bell, Users, Radio, Plus, Trash2, Monitor, Server, Check, Pencil, ShieldCheck, KeyRound, X, Eye, EyeOff, FileBarChart, Rocket } from 'lucide-react';
+import { Send, Tag as TagIcon, Bell, Users, Radio, Plus, Trash2, Monitor, Server, Check, Pencil, ShieldCheck, KeyRound, X, Eye, EyeOff, FileBarChart, Rocket, Cpu, Globe, Activity } from 'lucide-react';
 import { Panel, Field, Toggle, EmptyState } from '../components/ui';
 import { store, useCurrentUser, usePluto, useToasts } from '../lib/store';
 import { sendTestNotification, requestPushPermission } from '../lib/engine';
@@ -11,7 +11,14 @@ import {
   type User, type Role, type Route,
 } from '../lib/types';
 
-type Tab = 'polling' | 'tags' | 'notify' | 'alerts' | 'users' | 'mirror' | 'sla' | 'deploy';
+type Tab = 'polling' | 'tags' | 'notify' | 'alerts' | 'users' | 'mirror' | 'sla' | 'deploy' | 'system';
+
+interface PingResult {
+  success: boolean;
+  latencyMs: number | null;
+  timestamp: number | null;
+  error?: string;
+}
 
 function NumField({ label, value, onChange, min, suffix, hint }: { label: string; value: number; onChange: (v: number) => void; min: number; suffix?: string; hint?: string }) {
   return (
@@ -521,6 +528,186 @@ function SlaReportTab() {
   );
 }
 
+/** Компонент вкладки "Система" — отображение статуса ядра и пинг до ya.ru */
+function SystemTab() {
+  const apiMode = usePluto((s) => s.apiMode);
+  const coreVersion = usePluto((s) => s.coreVersion);
+  const coreDiag = usePluto((s) => s.coreDiag);
+  const [pingResult, setPingResult] = useState<PingResult>({ success: false, latencyMs: null, timestamp: null });
+  const [isPinging, setIsPinging] = useState(false);
+
+  const doPing = async () => {
+    setIsPinging(true);
+    setPingResult({ success: false, latencyMs: null, timestamp: null });
+    try {
+      const start = performance.now();
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+      
+      try {
+        await fetch('https://ya.ru/favicon.ico', {
+          method: 'HEAD',
+          mode: 'no-cors',
+          cache: 'no-cache',
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        const end = performance.now();
+        const latency = Math.round(end - start);
+        setPingResult({ success: true, latencyMs: latency, timestamp: Date.now() });
+      } catch (fetchError) {
+        clearTimeout(timeout);
+        throw fetchError;
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Неизвестная ошибка';
+      setPingResult({ 
+        success: false, 
+        latencyMs: null, 
+        timestamp: Date.now(), 
+        error: errorMsg 
+      });
+    } finally {
+      setIsPinging(false);
+    }
+  };
+
+  useEffect(() => {
+    void doPing();
+  }, []);
+
+  const isServer = apiMode === 'server';
+
+  return (
+    <div className="space-y-4">
+      <Panel title="Статус ядра системы" icon={<Cpu className="h-4 w-4" />}>
+        <div className="flex items-start gap-4">
+          <div className={cls(
+            'flex h-16 w-16 shrink-0 items-center justify-center rounded-xl',
+            isServer ? 'bg-ok/15 ring-2 ring-ok/30' : 'bg-warn/15 ring-2 ring-warn/30'
+          )}>
+            {isServer ? <Cpu className="h-8 w-8 text-ok" /> : <Monitor className="h-8 w-8 text-warn" />}
+          </div>
+          <div className="flex-1">
+            <div className="mb-2 flex items-center gap-2">
+              <span className={cls(
+                'inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide',
+                isServer ? 'bg-ok/15 text-ok' : 'bg-warn/15 text-warn'
+              )}>
+                {isServer ? 'Реальное ядро' : 'Эмуляция'}
+              </span>
+              {isServer && coreVersion && <span className="font-mono text-[11px] text-dim">v{coreVersion}</span>}
+            </div>
+            <p className="text-[13px] leading-relaxed text-mut">
+              {isServer 
+                ? 'Система работает в режиме серверного ядра PLUTO Core. Все проверки устройств выполняются реально.' 
+                : 'Система работает в режиме браузерной эмуляции. Для полноценной работы подключите PLUTO Core.'}
+            </p>
+            {coreDiag && !isServer && (
+              <p className="mt-2 rounded-lg border border-warn/30 bg-warn/5 px-3 py-2 text-[11.5px] text-warn">
+                <Activity className="mr-1.5 inline h-3.5 w-3.5" />
+                {coreDiag}
+              </p>
+            )}
+          </div>
+        </div>
+      </Panel>
+
+      <Panel title="Проверка интернет-соединения" icon={<Globe className="h-4 w-4" />}>
+        <p className="mb-4 text-[12px] leading-relaxed text-dim">
+          Реальный пинг до <code className="font-mono text-mut">ya.ru</code> для проверки доступности интернета.
+          Данные не эмулируются — выполняется настоящий HTTP-запрос.
+        </p>
+        
+        <div className="rounded-xl border border-line bg-raised/30 p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Globe className={cls('h-5 w-5', pingResult.success ? 'text-ok' : pingResult.error ? 'text-crit' : 'text-dim')} />
+              <div>
+                <p className="text-[13px] font-semibold text-ink">ya.ru</p>
+                <p className="text-[11px] text-dim">
+                  {isPinging 
+                    ? 'Выполняется пинг…' 
+                    : pingResult.success 
+                      ? `Ответ получен за ${pingResult.latencyMs} мс` 
+                      : pingResult.error 
+                        ? `Ошибка: ${pingResult.error}`
+                        : 'Нет данных'}
+                </p>
+              </div>
+            </div>
+            <button 
+              onClick={doPing} 
+              disabled={isPinging}
+              className={cls(
+                'inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold transition-all',
+                isPinging ? 'bg-raised text-dim cursor-not-allowed' : 'btn-acc'
+              )}
+            >
+              <Activity className="h-3.5 w-3.5" />
+              {isPinging ? 'Пинг…' : 'Проверить'}
+            </button>
+          </div>
+          
+          {pingResult.timestamp && (
+            <div className="mt-3 flex items-center gap-4 text-[11px] text-dim">
+              <span>Последняя проверка: {new Date(pingResult.timestamp).toLocaleTimeString()}</span>
+              {pingResult.success && pingResult.latencyMs !== null && (
+                <>
+                  <span className="font-mono text-ok">{pingResult.latencyMs} мс</span>
+                  <span className={cls(
+                    'rounded px-1.5 py-0.5',
+                    pingResult.latencyMs < 50 ? 'bg-ok/15 text-ok' : 
+                    pingResult.latencyMs < 150 ? 'bg-warn/15 text-warn' : 'bg-crit/15 text-crit'
+                  )}>
+                    {pingResult.latencyMs < 50 ? 'Отлично' : pingResult.latencyMs < 150 ? 'Нормально' : 'Высокая задержка'}
+                  </span>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </Panel>
+
+      <Panel title="Информация о системе" icon={<Monitor className="h-4 w-4" />}>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="rounded-lg border border-line bg-raised/30 px-4 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Режим работы</p>
+            <p className={cls('mt-1 text-[14px] font-bold', isServer ? 'text-ok' : 'text-warn')}>
+              {isServer ? 'Серверный (ядро активно)' : 'Браузерный (эмуляция)'}
+            </p>
+          </div>
+          <div className="rounded-lg border border-line bg-raised/30 px-4 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Интернет-соединение</p>
+            <p className={cls('mt-1 text-[14px] font-bold', pingResult.success ? 'text-ok' : 'text-crit')}>
+              {pingResult.success ? 'Активно' : pingResult.error ? 'Недоступно' : 'Не проверено'}
+            </p>
+          </div>
+          {isServer && coreVersion && (
+            <div className="rounded-lg border border-line bg-raised/30 px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Версия ядра</p>
+              <p className="mt-1 font-mono text-[14px] font-bold text-ink">{coreVersion}</p>
+            </div>
+          )}
+          <div className="rounded-lg border border-line bg-raised/30 px-4 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Время системы</p>
+            <ClockDisplay />
+          </div>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function ClockDisplay() {
+  const [time, setTime] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setTime(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return <p className="mt-1 font-mono text-[14px] font-bold text-ink">{new Date(time).toLocaleString('ru-RU')}</p>;
+}
+
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>('polling');
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -539,6 +726,7 @@ export default function SettingsPage() {
     { id: 'mirror', label: 'Зеркало', icon: <Radio className="h-3.5 w-3.5" /> },
     { id: 'sla', label: 'SLA-отчёт', icon: <FileBarChart className="h-3.5 w-3.5" /> },
     { id: 'deploy', label: 'Развёртывание', icon: <Rocket className="h-3.5 w-3.5" /> },
+    { id: 'system', label: 'Система', icon: <Cpu className="h-3.5 w-3.5" /> },
   ];
 
   const toggleTheme = () => {
@@ -572,6 +760,7 @@ export default function SettingsPage() {
       {tab === 'mirror' && <MirrorTab />}
       {tab === 'sla' && <SlaReportTab />}
       {tab === 'deploy' && <DeployPage />}
+      {tab === 'system' && <SystemTab />}
     </div>
   );
 }
