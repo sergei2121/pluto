@@ -1,23 +1,77 @@
-```
-# Build artifacts
-dist/
-build/
-*.css
-*.js
-
+```gitignore
 # Dependencies
 node_modules/
 
-# Logs and temp files
+# Build outputs
+dist/
+build/
+target/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.ENV
+.env
+.env.*
+.env.local
+.coverage
+htmlcov/
+.coverage.*
+.mypy_cache/
+.pytest_cache/
+.tox/
+
+# Logs
 *.log
-*.tmp
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
 
 # Environment
 .env
 .env.local
 *.env.*
 
-# Editors
-.vscode/
-.idea/
+# Coverage
+coverage/
+htmlcov/
+*.coverage
+
+# Compressed
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
 ```
