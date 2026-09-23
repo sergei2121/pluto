@@ -1,10 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import dotenv from 'dotenv';
 
-// Загружаем переменные окружения
-dotenv.config();
+// Vite сам загружает переменные из .env (префикс VITE_).
+// Для значений без префикса (например, VAPID_PUBLIC_KEY) используем process.env напрямую.
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
