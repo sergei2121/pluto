@@ -309,6 +309,71 @@ export function sendTestNotification(): void {
   useToasts.push('ok', 'Тестовое уведомление отправлено (эмуляция)');
 }
 
-export function requestPushPermission(): void {
-  if (typeof Notification !== 'undefined') void Notification.requestPermission();
+export async function requestPushPermission(): Promise<boolean> {
+  if (typeof Notification === 'undefined') {
+    useToasts.push('warn', 'Ваш браузер не поддерживает уведомления');
+    return false;
+  }
+
+  const permission = await Notification.requestPermission();
+  
+  if (permission === 'granted') {
+    // Проверяем, есть ли Service Worker
+    if ('serviceWorker' in navigator) {
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        
+        // Отправляем подписку на сервер
+        const subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(import.meta.env.VITE_VAPID_PUBLIC_KEY || ''),
+        }).catch((err) => {
+          console.warn('[PLUTO] Push Manager не доступен (возможно нет HTTPS или VAPID ключей):', err);
+          return null;
+        });
+
+        if (subscription) {
+          // Сохраняем подписку на сервере
+          const response = await fetch('/api/push/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(subscription),
+          });
+
+          if (response.ok) {
+            useToasts.push('ok', 'Push-уведомления подключены');
+            return true;
+          }
+        }
+        
+        useToasts.push('info', 'Разрешение получено, но push-сервер не настроен');
+        return true;
+      } catch (err) {
+        console.error('[PLUTO] Ошибка настройки push:', err);
+        useToasts.push('warn', 'Ошибка подключения push-уведомлений');
+        return false;
+      }
+    } else {
+      useToasts.push('warn', 'Service Worker не поддерживается');
+      return false;
+    }
+  } else {
+    useToasts.push('warn', 'Разрешение на уведомления отклонено');
+    return false;
+  }
+}
+
+// Вспомогательная функция для конвертации VAPID ключа
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  if (!base64String) {
+    return new Uint8Array();
+  }
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
 }

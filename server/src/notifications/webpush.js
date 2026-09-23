@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import webPush from 'web-push';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const VAPID_KEYS_FILE = path.join(__dirname, '../../data/vapid-keys.json');
@@ -11,8 +12,6 @@ const VAPID_KEYS_FILE = path.join(__dirname, '../../data/vapid-keys.json');
  * Ключи нужно сгенерировать один раз и сохранить
  */
 export function generateVapidKeys() {
-  // В продакшене использовать библиотеку web-push для генерации ключей
-  // Это упрощённая реализация
   const keys = {
     publicKey: process.env.VAPID_PUBLIC_KEY || '',
     privateKey: process.env.VAPID_PRIVATE_KEY || '',
@@ -20,8 +19,16 @@ export function generateVapidKeys() {
   
   if (!keys.publicKey || !keys.privateKey) {
     console.warn('[pluto][webpush] VAPID ключи не настроены. Установите переменные окружения VAPID_PUBLIC_KEY и VAPID_PRIVATE_KEY');
+    console.warn('[pluto][webpush] Сгенерируйте ключи: npx web-push generate-vapid-keys');
     return null;
   }
+  
+  // Настраиваем VAPID для библиотеки web-push
+  webPush.setVapidDetails(
+    'mailto:admin@pluto.local',
+    keys.publicKey,
+    keys.privateKey
+  );
   
   return keys;
 }
@@ -103,7 +110,7 @@ export function getAllPushSubscriptions() {
 
 /**
  * Отправка Web Push уведомления
- * Использует нативный https модуль для отправки через сервисы браузера
+ * Использует библиотеку web-push для корректной отправки через сервисы браузера
  */
 export async function sendWebPush(title, message, options = {}) {
   const subscriptions = getAllPushSubscriptions();
@@ -111,6 +118,12 @@ export async function sendWebPush(title, message, options = {}) {
   if (subscriptions.length === 0) {
     console.info('[pluto][webpush] Нет активных подписок');
     return { sent: 0, failed: 0 };
+  }
+  
+  const keys = generateVapidKeys();
+  if (!keys) {
+    console.error('[pluto][webpush] VAPID ключи не настроены, отправка невозможна');
+    return { sent: 0, failed: subscriptions.length };
   }
   
   const payload = JSON.stringify({
@@ -128,7 +141,7 @@ export async function sendWebPush(title, message, options = {}) {
   
   for (const subscription of subscriptions) {
     try {
-      await sendPushToEndpoint(subscription, payload);
+      await webPush.sendNotification(subscription, payload);
       sent++;
     } catch (error) {
       console.error('[pluto][webpush] Ошибка отправки пуша:', {
@@ -145,54 +158,6 @@ export async function sendWebPush(title, message, options = {}) {
   }
   
   return { sent, failed };
-}
-
-/**
- * Отправка уведомления на конкретный endpoint
- */
-async function sendPushToEndpoint(subscription, payload) {
-  const https = await import('node:https');
-  
-  const url = new URL(subscription.endpoint);
-  
-  return new Promise((resolve, reject) => {
-    const req = https.request(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        'Content-Length': Buffer.byteLength(payload),
-        'Content-Encoding': 'aesgcm',
-        // В полной реализации здесь должно быть TTL и URGENT заголовки
-        'TTL': '86400', // 24 часа
-      },
-      timeout: 10000,
-    }, (res) => {
-      let body = '';
-      res.on('data', (chunk) => (body += chunk));
-      res.on('end', () => {
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          resolve({ statusCode: res.statusCode });
-        } else {
-          const error = new Error(`Push service returned ${res.statusCode}`);
-          error.statusCode = res.statusCode;
-          reject(error);
-        }
-      });
-    });
-    
-    req.on('error', (e) => {
-      reject(e);
-    });
-    
-    req.on('timeout', () => {
-      req.destroy();
-      reject(new Error('Push request timeout'));
-    });
-    
-    // В полной реализации здесь должно быть шифрование payload
-    req.write(payload);
-    req.end();
-  });
 }
 
 /**
