@@ -1,5 +1,5 @@
 // ─── PLUTO: клиент REST API серверного ядра ─────────────────────────────────
-import type { Agent, AlertRule, AuditEntry, BackupEntry, Device, EventItem, Settings, SlaRow, SourceTestReport, Tag, User, Webhook } from './types';
+import type { Agent, AlertRule, AuditEntry, BackupEntry, Device, EventItem, PingHistoryDevice, PingHistoryResponse, Settings, SlaRow, SourceTestReport, Tag, User, Webhook } from './types';
 import { getState, store } from './store';
 
 const TOKEN_KEY = 'pluto_token';
@@ -119,6 +119,17 @@ export const api = {
 
   // SLA
   sla: (days: number) => req<SlaRow[]>('GET', `/api/sla?days=${days}`),
+
+  // история пингов (месячная: онлайн/офлайн устройств через агентов)
+  pingHistory: (f: { agentId?: string; range?: string; ip?: string; days?: number }) => {
+    const q = new URLSearchParams();
+    if (f.agentId) q.set('agentId', f.agentId);
+    if (f.range != null) q.set('range', f.range);
+    if (f.ip) q.set('ip', f.ip);
+    q.set('days', String(f.days ?? 30));
+    return req<PingHistoryResponse>('GET', `/api/ping-history?${q.toString()}`);
+  },
+  pingHistoryDevices: () => req<{ devices: PingHistoryDevice[] }>('GET', '/api/ping-history/devices'),
 
   // инвентаризация агента
   collectInventory: (id: string) => req<Agent>('POST', `/api/agents/${id}/inventory`),

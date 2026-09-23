@@ -10,6 +10,7 @@ import {
 } from './lib.js';
 import { loginRateLimiter } from './middleware/rateLimiter.js';
 import telemetryCollectors from './telemetry/collectors.js';
+import { initPingHistory, recordPingState, rollupPingDaily, queryPingHistory } from './db/pingHistory.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const VERSION = '2.0.0';
@@ -17,6 +18,11 @@ const WEB_DIR = path.join(__dirname, '..', 'web');
 const HTTP_PORT = parseInt(process.env.HTTP_PORT || '8080', 10);
 
 const db = loadDb();
+initPingHistory(db);
+
+// Суточная агрегация истории пингов (аптайм по дням за месяц) — каждые 10 минут
+setInterval(() => { void rollupPingDaily(db).catch((e) => console.error('[pluto] rollupPingDaily:', e.message)); }, 10 * 60 * 1000);
+setTimeout(() => { void rollupPingDaily(db).catch(() => {}); }, 30 * 1000);
 
 // ─── Health Check для зависимостей (пункт 20) ────────────────────────────────
 
@@ -660,12 +666,16 @@ async function pollAgent(agent) {
             if (wasAlivePrev && !r._pingNotified) {
               r._pingNotified = true;
               pingEvents.push({ level: 'warn', title: `Пинг агента «${agent.name}»: ${r.ip || r.host || r.addr || 'устройство'} недоступен`, kind: 'pingDown', msg: `Агент «${agent.name}»: устройство ${r.ip || r.host || r.addr || ''} недоступно` });
+              // История пингов: событие «ушло в офлайн»
+              void recordPingState(db, agent.id, agent.name, rangeStr, targetName, r.ip || r.host || r.addr || '', false, now);
             }
           } else {
             // Устройство восстановилось — вычисляем длительность офлайна
             const wasOfflinePrev = prev?.results?.[idx]?.alive === false || !!prev?.results?.[idx]?.offlineSince;
             if (wasOfflinePrev || r._pingNotified) {
               pingEvents.push({ level: 'ok', title: `Пинг агента «${agent.name}»: ${r.ip || r.host || r.addr || 'устройство'} снова в сети`, kind: 'pingRecover', msg: `Агент «${agent.name}»: устройство ${r.ip || r.host || r.addr || ''} восстановлено` });
+              // История пингов: событие «снова онлайн»
+              void recordPingState(db, agent.id, agent.name, rangeStr, targetName, r.ip || r.host || r.addr || '', true, now);
             }
             r._pingNotified = false;
             if (r.offlineSince) {
@@ -895,6 +905,35 @@ const server = http.createServer(async (req, res) => {
       return json(res, health.status === 'healthy' ? 200 : (health.status === 'degraded' ? 206 : 503), health);
     }
     if (p === '/api/version') return json(res, 200, { version: VERSION });
+
+    // ── история пингов (месячная: онлайн/офлайн устройств) ──
+    if (p === '/api/ping-history' && method === 'GET') {
+      const q = url.searchParams;
+      const r = queryPingHistory(db, {
+        agentId: q.get('agentId') || undefined,
+        range: q.get('range') ?? undefined,
+        ip: q.get('ip') || undefined,
+        days: parseInt(q.get('days') || '30', 10),
+      });
+      return json(res, 200, r);
+    }
+    if (p === '/api/ping-history/devices' && method === 'GET') {
+      // список всех пингуемых устройств с текущим состоянием (для фильтров страницы)
+      const items = [];
+      for (const a of db.agents || []) {
+        for (const t of a.targets || []) {
+          for (const r of t.results || []) {
+            items.push({
+              agentId: a.id, agentName: a.name,
+              range: t.range || '', target: t.name || t.target || '',
+              ip: r.ip, alive: !!r.alive, latency: r.latency ?? null,
+              lastSuccess: r.lastSuccess ?? null, offlineSince: r.offlineSince ?? null,
+            });
+          }
+        }
+      }
+      return json(res, 200, { devices: items });
+    }
 
     if (p === '/api/auth/login' && method === 'POST') {
       // Применяем rate limiter для защиты от brute-force (пункт 1)

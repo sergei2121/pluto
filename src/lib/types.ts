@@ -3,7 +3,7 @@
 export type DeviceType = 'ping' | 'http' | 'api' | 'rtsp' | 'sip' | 'snmp' | 'ssl';
 export type DeviceStatus = 'up' | 'down' | 'degraded' | 'unknown';
 export type Route =
-  | 'dashboard' | 'devices' | 'agents' | 'agent-pings' 
+  | 'dashboard' | 'devices' | 'agents' | 'agent-pings' | 'ping-history' 
   | 'network-map'
   | 'stats-bars' | 'stats-ws' | 'sla' | 'settings' | 'deploy';
 export type Severity = 'ok' | 'warn' | 'crit' | 'info';
@@ -70,6 +70,53 @@ export interface RelayTargetResult {
   range?: string; // диапазон IP
   lastCheck: number;
   results?: RelayPingResult[];
+}
+
+// ─── История пингов (месячное хранение онлайн/офлайн) ────────────────────────
+
+/** Событие смены состояния пингуемого устройства. */
+export interface PingHistoryEvent {
+  id: string;
+  key: string;      // agentId|range|ip
+  ts: number;       // время события
+  up: boolean;      // true — стало онлайн, false — ушло в офлайн
+  agentId: string;
+  agentName: string;
+  range: string;
+  target: string;   // имя цели (или диапазон)
+  ip: string;
+}
+
+/** Суточный агрегат доступности устройства. */
+export interface PingDailyRecord {
+  key: string;
+  date: string;     // YYYY-MM-DD
+  agentId: string;
+  agentName: string;
+  target: string;
+  ip: string;
+  uptimeMs: number;     // время в онлайне за сутки
+  uptimePct: number;    // % доступности за сутки
+  downCount: number;    // число уходов в офлайн за сутки
+}
+
+/** Текущее состояние пингуемого устройства (для фильтров страницы истории). */
+export interface PingHistoryDevice {
+  agentId: string;
+  agentName: string;
+  range: string;
+  target: string;
+  ip: string;
+  alive: boolean;
+  latency: number | null;
+  lastSuccess: number | null;
+  offlineSince: number | null;
+}
+
+export interface PingHistoryResponse {
+  events: PingHistoryEvent[];
+  daily: PingDailyRecord[];
+  days: number;
 }
 
 // ─── Телеметрия Glances ──────────────────────────────────────────────────────
@@ -364,6 +411,7 @@ export const MENU_ITEMS: { route: Route; label: string; adminOnly?: boolean }[] 
   { route: 'devices', label: 'Устройства' },
   { route: 'agents', label: 'Агенты' },
   { route: 'agent-pings', label: 'Пинги агентов' },
+  { route: 'ping-history', label: 'История пингов' },
   { route: 'network-map', label: 'Карта сети' },
   { route: 'stats-bars', label: 'Статистика Bars' },
   { route: 'stats-ws', label: 'Статистика WS' },
