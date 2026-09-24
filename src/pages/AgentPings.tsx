@@ -144,7 +144,7 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
                           </div>
                           <div className="flex flex-col items-end gap-0.5">
                             <span className={cls('font-mono text-[11.5px] font-semibold', r.alive ? 'text-ok' : 'text-crit')}
-                              title={r.pathMs != null && r.latency != null ? `RTT от ядра: локальный замер агента ${fmtMs(r.latency)} + путь до хаба ${fmtMs(Math.round((r.pathMs - r.latency) * 100) / 100)}` : undefined}>
+                              title={`Замер серией ICMP на агенте (его локальная сеть). Путь ядро→хаб — отдельно: ${r.hubRttMs != null ? fmtMs(r.hubRttMs) : '—'} и к RTT устройств не прибавляется.`}>
                               {r.alive && r.pathMs != null ? fmtMs(r.pathMs) : r.alive && r.latency != null ? fmtMs(r.latency) : (r.alive ? '—' : 'нет ответа')}
                             </span>
                             {/* Счётчик серии ICMP: отправлено/принято. Жёлтый — потеряно 2 из 10, красный — 3 и больше. */}
