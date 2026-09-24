@@ -44,6 +44,11 @@ function defaultSettings(): Settings {
       telegram: { enabled: false, botToken: '', chatId: '' },
       email: { enabled: false, smtp: '', from: '', to: '' },
       push: { enabled: false },
+      integrations: {
+        slack: { enabled: false, webhookUrl: '' },
+        teams: { enabled: false, webhookUrl: '' },
+        discord: { enabled: false, webhookUrl: '' },
+      },
       on: {
         device: { down: true, degraded: true, recover: true },
         agent: { agentOff: true, agentOn: false },
