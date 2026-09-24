@@ -147,6 +147,20 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
                               title={r.pathMs != null && r.latency != null ? `RTT от ядра: локальный замер агента ${fmtMs(r.latency)} + путь до хаба ${fmtMs(Math.round((r.pathMs - r.latency) * 100) / 100)}` : undefined}>
                               {r.alive && r.pathMs != null ? fmtMs(r.pathMs) : r.alive && r.latency != null ? fmtMs(r.latency) : (r.alive ? '—' : 'нет ответа')}
                             </span>
+                            {/* Счётчик серии ICMP: отправлено/принято. Жёлтый — потеряно 2 из 10, красный — 3 и больше. */}
+                            {(() => {
+                              const sent = typeof r.sent === 'number' && r.sent > 0 ? r.sent : null;
+                              if (sent == null) return null;
+                              const recv = typeof r.received === 'number' ? Math.min(r.received, sent) : (r.alive ? sent : 0);
+                              const lost = sent - recv;
+                              const color = lost >= 3 ? 'text-crit' : lost >= 2 ? 'text-warn' : 'text-dim';
+                              return (
+                                <span className={cls('font-mono text-[9px] tabular-nums', color)}
+                                  title={`Серия ICMP на агенте: отправлено ${sent}, принято ${recv}, потеряно ${lost}${r.lossPct != null ? ` (${r.lossPct}%)` : ''}. Жёлтый — потеряно 2 из 10, красный — 3 и больше из 10`}>
+                                  ↑{sent} ↓{recv}
+                                </span>
+                              );
+                            })()}
                             {r.offlineSince != null && r.offlineSince > 0 && (
                               <span className="font-mono text-[9px] text-dim">офлайн с: {formatLastSuccess(r.offlineSince)}</span>
                             )}

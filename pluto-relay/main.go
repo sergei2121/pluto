@@ -172,7 +172,7 @@ func selfHealth(timeoutMs, count int) map[string]interface{} {
 func main() {
 	port := flag.Int("port", 8091, "порт relay")
 	timeout := flag.Int("timeout", 2000, "суммарный бюджет времени на пинг одного устройства, мс")
-	count := flag.Int("count", 5, "сколько ICMP-пакетов на устройство в серии (первый отбрасывается как warm-up)")
+	count := flag.Int("count", 10, "сколько ICMP-пакетов на устройство в серии (первый отбрасывается как warm-up)")
 	concurrency := flag.Int("concurrency", 8, "сколько устройств пинговать параллельно")
 	flag.Parse()
 
