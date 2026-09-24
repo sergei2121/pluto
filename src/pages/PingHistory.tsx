@@ -82,10 +82,10 @@ export default function PingHistoryPage() {
   const [lastLoad, setLastLoad] = useState<number>(0);
   // раскрытые хабы в списке устройств (по умолчанию — все свёрнуты)
   const [openHubs, setOpenHubs] = useState<Set<string>>(new Set());
-  const toggleHub = (name: string) => {
+  const toggleHub = (hubKey: string) => {
     setOpenHubs((prev) => {
       const next = new Set(prev);
-      if (next.has(name)) next.delete(name); else next.add(name);
+      if (next.has(hubKey)) next.delete(hubKey); else next.add(hubKey);
       return next;
     });
   };
@@ -130,17 +130,22 @@ export default function PingHistoryPage() {
   }, [load]);
 
   // список устройств с группировкой по агентам (хабам) и диапазонам внутри хабов
+  // ключ хабa — agentId (уникальный): имена хабов могут повторяться, из-за чего
+  // свёрнутый/раскрытый state «перетекал» между одноимёнными хабами
   const grouped = useMemo(() => {
-    const byAgent = new Map<string, Map<string, PingHistoryDevice[]>>();
+    const byAgent = new Map<string, { agentId: string; agentName: string; ranges: Map<string, PingHistoryDevice[]> }>();
     for (const d of devices) {
-      if (!byAgent.has(d.agentName)) byAgent.set(d.agentName, new Map());
-      const ranges = byAgent.get(d.agentName)!;
+      const hk = d.agentId || d.agentName;
+      if (!byAgent.has(hk)) byAgent.set(hk, { agentId: d.agentId, agentName: d.agentName, ranges: new Map() });
+      const ranges = byAgent.get(hk)!.ranges;
       const rk = d.range || d.target;
       if (!ranges.has(rk)) ranges.set(rk, []);
       ranges.get(rk)!.push(d);
     }
     return [...byAgent.entries()]
-      .map(([agentName, ranges]) => ({
+      .map(([agentKey, { agentId, agentName, ranges }]) => ({
+        agentKey,
+        agentId,
         agentName,
         list: [...ranges.values()].flat(),
         ranges: [...ranges.entries()].sort((a, b) => a[0].localeCompare(b[0])),
@@ -154,16 +159,16 @@ export default function PingHistoryPage() {
   const needle = q.trim().toLowerCase();
   const devMatches = (d: PingHistoryDevice) =>
     d.ip.toLowerCase().includes(needle) || d.target.toLowerCase().includes(needle);
-  const hubOpen = (name: string, list: PingHistoryDevice[]) => {
+  const hubOpen = (hubKey: string, list: PingHistoryDevice[]) => {
     if (searchActive) return list.some(devMatches);
-    if (sel && list.some((d) => devKey(d) === sel)) return true;
-    return openHubs.has(name);
+    // выбранное устройство НЕ «прикалывает» хаб в раскрытом состоянии —
+    // иначе стрелка «Свернуть» для этого хабa не работала
+    return openHubs.has(hubKey);
   };
   // диапазон внутри хабa: при поиске раскрываем только совпавшие;selected-устройство тоже раскрывает свой диапазон
-  const rangeOpen = (hubName: string, rangeKey: string, list: PingHistoryDevice[]) => {
+  const rangeOpen = (hubKey: string, rangeKey: string, list: PingHistoryDevice[]) => {
     if (searchActive) return list.some(devMatches);
-    if (sel && list.some((d) => devKey(d) === sel)) return true;
-    return openRanges.has(`${hubName}|${rangeKey}`);
+    return openRanges.has(`${hubKey}|${rangeKey}`);
   };
 
   const filteredEvents = useMemo(() => {
@@ -188,11 +193,14 @@ export default function PingHistoryPage() {
     return eventsByDay.map(([dateStr, list]) => {
       const byHub = new Map<string, PingHistoryEvent[]>();
       for (const e of list) {
-        if (!byHub.has(e.agentName)) byHub.set(e.agentName, []);
-        byHub.get(e.agentName)!.push(e);
+        // ключ хабa должен быть уникальным: одноимённые хабы не должны «делиться»
+        // состоянием свёрнут/раскрыт в ленте событий
+        const hk = `${e.agentId || ''}|${e.agentName}`;
+        if (!byHub.has(hk)) byHub.set(hk, []);
+        byHub.get(hk)!.push(e);
       }
       const hubs = [...byHub.entries()]
-        .map(([agentName, evs]) => ({ agentName, evs, downs: evs.filter((e) => !e.up).length }))
+        .map(([hubKey, evs]) => ({ hubKey, agentName: evs[0]?.agentName || '', evs, downs: evs.filter((e) => !e.up).length }))
         .sort((a, b) => a.agentName.localeCompare(b.agentName));
       return { dateStr, hubs };
     });
@@ -317,19 +325,19 @@ export default function PingHistoryPage() {
               <span className="ml-2 font-mono text-[10px] text-dim">{devices.length}</span>
             </button>
             <div className="max-h-[420px] space-y-2 overflow-y-auto scroll-thin pr-1">
-              {grouped.map(({ agentName, list, ranges }) => {
+              {grouped.map(({ agentKey, agentName, list, ranges }) => {
                 if (searchActive && !list.some(devMatches)) return null;
-                const open = hubOpen(agentName, list);
+                const open = hubOpen(agentKey, list);
                 const onlineCount = list.filter((d) => d.alive).length;
                 return (
-                  <div key={agentName}>
+                  <div key={agentKey}>
                     {/* Заголовок хаба — клик раскрывает/сворачивает список диапазонов и IP */}
-                    <button onClick={() => toggleHub(agentName)}
+                    <button onClick={() => toggleHub(agentKey)}
                       className={cls('flex w-full items-center gap-1 rounded-lg border px-1.5 py-2.5 text-left transition-colors',
                         open ? 'border-vio/30 bg-vio/5' : 'border-line/60 bg-raised/30 hover:text-ink')}>
                       {/* Хитбокс стрелки свернуть/развернуть — увеличенная зона клика */}
                       <span role="button" aria-label={open ? 'Свернуть' : 'Развернуть'} title={open ? 'Свернуть' : 'Развернуть'}
-                        onClick={(e) => { e.stopPropagation(); toggleHub(agentName); }}
+                        onClick={(e) => { e.stopPropagation(); toggleHub(agentKey); }}
                         className="-my-1 -ml-0.5 flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-dim transition-colors hover:bg-vio/15 hover:text-vio">
                         {open
                           ? <ChevronDown className="h-4 w-4" />
@@ -346,10 +354,10 @@ export default function PingHistoryPage() {
                         {ranges.map(([rangeKey, rlist]) => {
                           const visible = rlist.filter((d) => !searchActive || devMatches(d));
                           if (searchActive && visible.length === 0) return null;
-                          const rOpen = rangeOpen(agentName, rangeKey, rlist);
+                          const rOpen = rangeOpen(agentKey, rangeKey, rlist);
                           const rOnline = rlist.filter((d) => d.alive).length;
                           const rTarget = rlist[0]?.target || '';
-                          const rKey = `${agentName}|${rangeKey}`;
+                          const rKey = `${agentKey}|${rangeKey}`;
                           return (
                             <div key={rKey}>
                               {/* Заголовок диапазона (цели) — клик раскрывает список IP */}
@@ -544,9 +552,9 @@ export default function PingHistoryPage() {
                         </button>
                         {dayOpen && (
                           <div className="space-y-1.5 border-l border-line/50 pl-2">
-                            {hubs.map(({ agentName, evs, downs }) => {
-                              const hdKey = `${dateStr}|${agentName}`;
-                              const hdOpen = searchActive || sel !== '' || openHubDays.has(hdKey);
+                            {hubs.map(({ hubKey, agentName, evs, downs }) => {
+                              const hdKey = `${dateStr}|${hubKey}`;
+                              const hdOpen = searchActive || openHubDays.has(hdKey);
                               return (
                                 <div key={hdKey}>
                                   {/* Заголовок хаба в ленте — клик раскрывает события этого хаба */}
