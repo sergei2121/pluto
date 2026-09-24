@@ -54,6 +54,18 @@ export async function relayPing(agent, targets, pingFn = checkPing) {
   const arr = Array.isArray(payload) ? payload : (Array.isArray(payload?.results) ? payload.results : null);
   if (!arr) return [];
 
+  // Диагностика «нарисованных» пингов: если >=3 живых цели диапазона дали
+  // ОДИНАКОВЫЙ RTT — это не сеть, а старый/чужой бинарник relay на хабе
+  // (или кэширующий прокси). Честные per-IP ICMP-серии всегда дают разные
+  // медианы. Предупреждаем в лог и помечаем результаты флагом suspectSameRtt.
+  const aliveLat = arr.filter((r) => r.alive && typeof r.latencyMs === 'number').map((r) => r.latencyMs);
+  const distinct = new Set(aliveLat.map((v) => v.toFixed(2))).size;
+  const suspectSameRtt = aliveLat.length >= 3 && distinct === 1;
+  if (suspectSameRtt) {
+    console.warn(`[pluto][relay] Агент ${agent.name || agent.ip}: ${aliveLat.length} целей диапазона имеют ОДИНАКОВЫЙ RTT (${aliveLat[0]} мс). ` +
+      `Похоже, на хабе запущен СТАРЫЙ pluto-relay (до серии из 10 пакетов) — замените бинарник и перезапустите агент. Проверка: curl http://<хаб>:8091/health → поле "build".`);
+  }
+
   return arr.map((r) => {
     const alive = !!r.alive;
     // Честный RTT устройства = только медиана серии ICMP, измеренная НА агенте.
@@ -75,6 +87,9 @@ export async function relayPing(agent, targets, pingFn = checkPing) {
       // RTT от ядра = замер агента без искусственных надбавок; путь до хаба — отдельно
       pathMs: alive && latency != null ? Math.round(latency * 100) / 100 : null,
       hubRttMs,
+      // true — все живые цели диапазона дали одинаковый RTT (подозрение на
+      // старый relay на хабе); UI может показать предупреждение.
+      suspectSameRtt,
       offlineSince: !alive ? tsAgent : undefined,
       offlineDuration30d: 0,
       // при успешном пинге фиксируем время последней связи (часы агента)
