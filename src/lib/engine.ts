@@ -1,12 +1,22 @@
 // ─── PLUTO: встроенный движок (браузерная эмуляция без серверного ядра) ──────
-import { getState, store, useToasts } from './store';
+// ВАЖНО: движок — это только офлайн-эмуляция для режима «embedded» (ядро недоступно).
+// В серверном режиме он не запускается и не может писать в стор: все мутации
+// стора защищены allowLocalMutation()/emuGuard() в store.ts.
+import { allowLocalMutation, getState, store, useToasts } from './store';
 import type { Agent, Device, GlancesPoint, RelayPingResult, RelayTargetResult } from './types';
 import { clamp, hashStr, mulberry32, rnd } from './util';
+
+/** Защита от записи фейковых данных: в серверном режиме мутация запрещена. */
+function emuGuard(op: string): boolean {
+  return allowLocalMutation(`engine.${op}`);
+}
 
 let timer: number | null = null;
 let barsPollTimer: number | null = null;
 
 export function startEngine() { 
+  // Защита от фейковых данных: эмуляция работает только без серверного ядра.
+  if (getState().apiMode === 'server') return;
   if (timer == null) timer = window.setInterval(tick, 1000); 
   if (barsPollTimer == null) barsPollTimer = window.setInterval(pollBarsAgents, 20000);
 }
@@ -17,6 +27,7 @@ export function stopEngine() {
 
 // Принудительный опрос агентов с тегом "Bars" каждые 20 секунд
 async function pollBarsAgents() {
+  if (!emuGuard('pollBarsAgents')) return;
   const s = getState();
   const barsAgents = s.agents.filter(a => a.tags.includes('Bars'));
   for (const a of barsAgents) {
@@ -37,6 +48,7 @@ async function pollBarsAgents() {
 }
 
 function tick() {
+  if (!emuGuard('tick')) return;
   const s = getState();
   if (!s.session) return;
   const now = Date.now();
@@ -56,6 +68,7 @@ function tick() {
 // ─── Устройства ──────────────────────────────────────────────────────────────
 
 async function runCheck(id: string) {
+  if (!emuGuard('runCheck')) return;
   const s = getState();
   const d = s.devices.find((x) => x.id === id);
   if (!d) return;
@@ -150,6 +163,7 @@ function mockGlancesPoint(t: number, agentId: string): GlancesPoint {
 const agentPrevDiskCount = new Map<string, number>();
 
 function stepAgent(id: string, now: number) {
+  if (!emuGuard('stepAgent')) return;
   const s = getState();
   const a = s.agents.find((x) => x.id === id);
   if (!a) return;

@@ -2,10 +2,26 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import { Plus, Search, Pencil, Trash2, Star, RefreshCw, LayoutGrid } from 'lucide-react';
 import { Panel, StatusDot, STATUS_META, Sparkbar, TypeBadge, Modal, Field, EmptyState, TimeAgo } from '../components/ui';
-import { store, useCurrentUser, usePluto, useToasts, visibleDevices } from '../lib/store';
+import { getState, store, useCurrentUser, usePluto, useToasts, visibleDevices } from '../lib/store';
 import { forceCheck } from '../lib/engine';
 import { cls, fmtMs, expandTargets, isTarget } from '../lib/util';
 import { DEVICE_TYPES, DEVICE_TYPE_META, type Device, type DeviceType } from '../lib/types';
+
+/** «Проверить сейчас»: в серверном режиме — реальная проверка ядром (REST),
+ *  фейковая браузерная эмуляция вызывается только когда ядро недоступно. */
+async function checkNow(id: string): Promise<void> {
+  if (getState().apiMode === 'server') {
+    const { api, syncAll } = await import('../lib/api');
+    try {
+      await api.checkDevice(id);
+      await syncAll();
+    } catch (e) {
+      useToasts.push('warn', e instanceof Error ? e.message : 'Ядро не ответило на проверку');
+    }
+    return;
+  }
+  await forceCheck(id);
+}
 
 const PAGE_SIZE = 50;
 
@@ -187,7 +203,7 @@ const DeviceRow = memo(function DeviceRow({ d, isAdmin, onEdit }: { d: Device; i
       <td className="hidden py-2.5 pr-3 font-mono text-[11px] text-dim md:table-cell">{d.interval} с</td>
       <td className="py-2.5 text-right">
         <div className="flex items-center justify-end gap-0.5">
-          <button onClick={() => void forceCheck(d.id)} title="Проверить сейчас" className="rounded-md p-1.5 text-dim transition-colors hover:bg-raised hover:text-vio"><RefreshCw className={cls('h-3.5 w-3.5', d.checking && 'animate-spin')} /></button>
+          <button onClick={() => void checkNow(d.id)} title="Проверить сейчас" className="rounded-md p-1.5 text-dim transition-colors hover:bg-raised hover:text-vio"><RefreshCw className={cls('h-3.5 w-3.5', d.checking && 'animate-spin')} /></button>
           <button onClick={() => store.toggleDeviceFav(d.id)} title="В избранное" className={cls('rounded-md p-1.5 transition-all', d.favorite ? 'text-warn' : 'text-dim/40 hover:text-dim')}><Star className={cls('h-3.5 w-3.5', d.favorite && 'fill-warn')} /></button>
           {isAdmin && <button onClick={() => onEdit(d)} title="Изменить" className="rounded-md p-1.5 text-dim transition-colors hover:bg-raised hover:text-ink"><Pencil className="h-3.5 w-3.5" /></button>}
           {isAdmin && <button onClick={() => { if (window.confirm(`Удалить «${d.name}»?`)) void store.removeDevice(d.id); }} title="Удалить" className="rounded-md p-1.5 text-dim transition-colors hover:bg-raised hover:text-crit"><Trash2 className="h-3.5 w-3.5" /></button>}

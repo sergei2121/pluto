@@ -1050,6 +1050,11 @@ const server = http.createServer(async (req, res) => {
       await runDeviceCheck(d);
       return json(res, 200, { ok: d.status !== 'down', latency: d.latency });
     }
+    // Тестовое уведомление — реальная отправка по настроенным каналам (Telegram/Push/Email).
+    if (p === '/api/notifications/test' && method === 'POST' && isAdmin) {
+      await notify('recover', 'PLUTO: тестовое уведомление', 'Проверка каналов уведомлений из раздела «Настройки».');
+      return json(res, 200, { ok: true });
+    }
 
     // ── агенты ──
     if (p === '/api/agents' && method === 'POST' && isAdmin) {

@@ -88,6 +88,7 @@ export const api = {
   updateTag: (id: string, patch: Partial<Tag>) => req<Tag>('PATCH', `/api/tags/${id}`, patch),
 
   saveSettings: (s: Settings) => req<Settings>('PUT', '/api/settings', s),
+  testNotification: () => req<{ ok: boolean }>('POST', '/api/notifications/test'),
   restartShowcase: () => req<{ ok: boolean; port: number }>('POST', '/api/showcase/restart'),
   mirrorSyncNow: () => req<{ ok: boolean; error?: string | null }>('POST', '/api/mirror/sync-now'),
 

@@ -2,8 +2,24 @@
 import { useEffect, useState } from 'react';
 import { Send, Tag as TagIcon, Bell, Users, Radio, Plus, Trash2, Monitor, Server, Check, Pencil, ShieldCheck, KeyRound, X, Eye, EyeOff, FileBarChart, Rocket, Cpu, Globe, Activity, Download, Terminal, ClipboardList, HardDrive, Thermometer, Video, Slack, MessageSquare } from 'lucide-react';
 import { Panel, Field, Toggle, EmptyState } from '../components/ui';
-import { store, useCurrentUser, usePluto, useToasts } from '../lib/store';
+import { getState, store, useCurrentUser, usePluto, useToasts } from '../lib/store';
 import { sendTestNotification, requestPushPermission } from '../lib/engine';
+
+/** «Отправить тест»: в серверном режиме — реальная отправка ядром по каналам;
+ *  фейковая эмуляция (просто тост) только когда ядро недоступно. */
+async function sendTestNotificationSmart(): Promise<void> {
+  if (getState().apiMode === 'server') {
+    const { api } = await import('../lib/api');
+    try {
+      await api.testNotification();
+      useToasts.push('ok', 'Тестовое уведомление отправлено через ядро (Telegram/Push/Email)');
+    } catch (e) {
+      useToasts.push('warn', e instanceof Error ? e.message : 'Ядро не ответило');
+    }
+    return;
+  }
+  sendTestNotification();
+}
 import { cls, TAG_COLORS, uid, timeAgo } from '../lib/util';
 import DeployPage from './Deploy';
 import {
@@ -253,7 +269,7 @@ function NotifyTab() {
 
       <div className="flex gap-2">
         <button onClick={() => void store.saveSettings(draft)} className="btn-acc"><Check className="h-4 w-4" />Сохранить</button>
-        <button onClick={() => sendTestNotification()} className="btn-ghost">Отправить тест</button>
+        <button onClick={() => void sendTestNotificationSmart()} className="btn-ghost">Отправить тест</button>
       </div>
     </div>
   );
