@@ -1,9 +1,9 @@
 // ─── PLUTO: пинги агентов (локальные устройства через relay) ────────────────
 import { memo, useMemo, useState } from 'react';
 import { Crosshair, Star, Eye, RefreshCw, Search, Wifi, WifiOff, Activity, LayoutGrid, ChevronDown, ChevronUp } from 'lucide-react';
-import { Panel, StatusDot, EmptyState, TimeAgo } from '../components/ui';
+import { Panel, EmptyState, TimeAgo } from '../components/ui';
 import { store, useCurrentUser, usePluto, useToasts, agentsWithPings } from '../lib/store';
-import { cls, fmtMs, pingStats } from '../lib/util';
+import { cls, pingStats } from '../lib/util';
 import type { Agent } from '../lib/types';
 
 const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
@@ -31,7 +31,9 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
             <Crosshair className="h-4 w-4 shrink-0 text-mint" />
             <span className="truncate">{a.name}</span>
           </div>
-          <div className="font-mono text-[11px] text-dim">{a.ip} · пинг до ПК {fmtMs(a.latency)}</div>
+          <div className="font-mono text-[11px] text-dim">
+            {a.ip} · <span className={a.online ? 'text-ok' : 'text-crit'}>{a.online ? 'хаб онлайн' : 'хаб офлайн'}</span>
+          </div>
         </div>
         <div className="flex items-center gap-1">
           <button onClick={onFav} title="На главную (избранное)" className={cls('rounded-md p-1.5 transition-all hover:bg-raised', a.pingsFavorite ? 'text-warn' : 'text-dim/40 hover:text-dim')}>
@@ -46,11 +48,10 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
         </div>
       </div>
 
-      <div className="mt-3 grid grid-cols-4 gap-2 text-center">
+      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
         <div className="rounded-lg border border-line/60 bg-raised/40 py-2"><div className="font-mono text-[17px] font-bold text-ink">{st.total}</div><div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">всего</div></div>
         <div className="rounded-lg border border-line/60 bg-raised/40 py-2"><div className="font-mono text-[17px] font-bold text-ok">{st.online}</div><div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">онлайн</div></div>
         <div className="rounded-lg border border-line/60 bg-raised/40 py-2"><div className={cls('font-mono text-[17px] font-bold', st.offline ? 'text-crit' : 'text-dim')}>{st.offline}</div><div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">офлайн</div></div>
-        <div className="rounded-lg border border-line/60 bg-raised/40 py-2"><div className="font-mono text-[17px] font-bold text-blu">{st.avg != null ? st.avg : '—'}</div><div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">ср. мс</div></div>
       </div>
 
       {allTargets.length === 0 ? (
@@ -126,15 +127,7 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
                           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
                             {r.alive ? <Wifi className="h-3.5 w-3.5 shrink-0 text-ok" /> : <WifiOff className="h-3.5 w-3.5 shrink-0 text-crit" />}
                             <span className="font-mono text-[11.5px] text-mut">{r.ip}</span>
-                            {/* Статистика серии пакетов: разброс min..max, джиттер, потери */}
-                            {r.alive && r.minMs != null && r.maxMs != null && (
-                              <span className="font-mono text-[9px] text-dim" title={`Серия ICMP на агенте: min ${fmtMs(r.minMs)}, max ${fmtMs(r.maxMs)}, джиттер — разброс между ними`}>
-                                min {fmtMs(r.minMs)} · max {fmtMs(r.maxMs)}
-                              </span>
-                            )}
-                            {r.alive && r.jitterMs != null && (
-                              <span className={cls('font-mono text-[9px]', r.jitterMs > 5 ? 'text-warn' : 'text-dim')} title="Джиттер: разброс RTT в серии (max−min)">±{fmtMs(r.jitterMs)}</span>
-                            )}
+                            {/* Потери серии пакетов — только статусные метрики, задержки в «Хабах» не показываем */}
                             {r.alive && r.lossPct != null && r.lossPct > 0 && (
                               <span className="font-mono text-[9px] text-crit" title={`Потери: ${r.received ?? 0}/${r.sent ?? '?'} пакетов серии`}>потери {r.lossPct}%</span>
                             )}
@@ -143,9 +136,9 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
                             </span>
                           </div>
                           <div className="flex flex-col items-end gap-0.5">
-                            <span className={cls('font-mono text-[11.5px] font-semibold', r.alive ? 'text-ok' : 'text-crit')}
-                              title={`Замер серией ICMP на агенте (его локальная сеть). Путь ядро→хаб — отдельно: ${r.hubRttMs != null ? fmtMs(r.hubRttMs) : '—'} и к RTT устройств не прибавляется.`}>
-                              {r.alive && r.pathMs != null ? fmtMs(r.pathMs) : r.alive && r.latency != null ? fmtMs(r.latency) : (r.alive ? '—' : 'нет ответа')}
+                            {/* Статус устройства вместо задержки (RTTrelay даёт одинаковый для всех IP) */}
+                            <span className={cls('font-mono text-[11.5px] font-semibold', r.alive ? 'text-ok' : 'text-crit')}>
+                              {r.alive ? 'онлайн' : 'офлайн'}
                             </span>
                             {/* Счётчик серии ICMP: отправлено/принято. Жёлтый — потеряно 2 из 10, красный — 3 и больше. */}
                             {(() => {
@@ -179,7 +172,7 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
       )}
 
       <div className="mt-3 flex items-center justify-between font-mono text-[10.5px] text-dim">
-        <span>макс {st.max != null ? `${st.max} мс` : '—'}</span>
+        <span>{st.offline === 0 ? 'все устройства в сети' : `есть офлайн: ${st.offline}`}</span>
         {a.lastPoll > 0 && <TimeAgo ts={a.lastPoll} />}
       </div>
     </div>
