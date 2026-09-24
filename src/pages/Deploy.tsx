@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Rocket, Server, Monitor, Activity, Zap, Loader2, CheckCircle2, XCircle, Wand2 } from 'lucide-react';
 import { Panel, CopyBlock, Field, Toggle } from '../components/ui';
 import { useCurrentUser, usePluto, useToasts } from '../lib/store';
+import { syncAll } from '../lib/api';
 import { isIp, isTarget } from '../lib/util';
 
 /** Панель автоустановки relay-агента по SSH (доступна админу в серверном режиме). */
@@ -276,6 +277,8 @@ export default function Deploy() {
           </table>
         </div>
       </Panel>
+
+      <ProvisionAgentPanel />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Panel title="1 · Сервер (Ubuntu + Docker)" icon={<Server className="h-4 w-4" />}>
