@@ -27,6 +27,8 @@ export const DEFAULT_SETTINGS = {
     },
   },
   showcase: { port: 8081 },
+  // glances — устаревшее имя интервала телеметрии (исторически источник был Glances);
+  // приводится к netdata в loadDb(), см. миграцию ниже
 };
 
 const DEFAULT_DB = () => ({
@@ -102,7 +104,14 @@ export function loadDb() {
   db = { ...DEFAULT_DB(), ...(data || {}) };
   db.settings = {
     ...DEFAULT_SETTINGS, ...(db.settings || {}),
-    intervals: { ...DEFAULT_SETTINGS.intervals, ...((db.settings || {}).intervals || {}) },
+    intervals: (() => {
+      const iv = { ...DEFAULT_SETTINGS.intervals, ...((db.settings || {}).intervals || {}) };
+      // Миграция: исторически интервал телеметрии назывался glances (см. веб-консоль)
+      if ((db.settings || {}).intervals?.glances != null && ((db.settings || {}).intervals?.netdata == null)) {
+        iv.netdata = Number(db.settings.intervals.glances) || DEFAULT_SETTINGS.intervals.netdata;
+      }
+      return iv;
+    })(),
     notifications: (() => {
       const nn = (db.settings || {}).notifications || {};
       const defOn = DEFAULT_SETTINGS.notifications.on;
