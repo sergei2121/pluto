@@ -58,8 +58,9 @@ export interface RelayPingResult {
   ip: string;
   alive: boolean;
   latency: number | null; // мс, медиана серии, измеренная НА агенте (его локальная сеть)
-  /** Полный RTT от ядра: локальный замер агента + реальный сетевой путь до него. */
+  /** RTT устройства (медиана серии ICMP на агенте), измеренная НА агенте. */
   pathMs?: number | null;
+  hubRttMs?: number | null; // RTT ядро→ПК хаба (отдельная метрика, в RTT целей не входит)
   minMs?: number | null;   // минимальный RTT в серии
   avgMs?: number | null;   // среднее по серии
   maxMs?: number | null;   // максимальный RTT в серии
