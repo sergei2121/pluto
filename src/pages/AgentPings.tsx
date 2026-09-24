@@ -31,7 +31,7 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
             <Crosshair className="h-4 w-4 shrink-0 text-mint" />
             <span className="truncate">{a.name}</span>
           </div>
-          <div className="font-mono text-[11px] text-dim">{a.ip} · пинг до ПК {a.latency != null ? `${a.latency} мс` : '—'}</div>
+          <div className="font-mono text-[11px] text-dim">{a.ip} · пинг до ПК {fmtMs(a.latency)}</div>
         </div>
         <div className="flex items-center gap-1">
           <button onClick={onFav} title="На главную (избранное)" className={cls('rounded-md p-1.5 transition-all hover:bg-raised', a.pingsFavorite ? 'text-warn' : 'text-dim/40 hover:text-dim')}>
@@ -131,7 +131,7 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
                             </span>
                           </div>
                           <div className="flex flex-col items-end gap-0.5">
-                            <span className={cls('font-mono text-[11.5px] font-semibold', r.alive ? 'text-ok' : 'text-crit')}>{r.alive && r.latency != null ? `${r.latency} мс` : (r.alive ? '—' : 'нет ответа')}</span>
+                            <span className={cls('font-mono text-[11.5px] font-semibold', r.alive ? 'text-ok' : 'text-crit')}>{r.alive && r.latency != null ? fmtMs(r.latency) : (r.alive ? '—' : 'нет ответа')}</span>
                             {r.offlineSince != null && r.offlineSince > 0 && (
                               <span className="font-mono text-[9px] text-dim">офлайн с: {formatLastSuccess(r.offlineSince)}</span>
                             )}

@@ -269,7 +269,7 @@ function AgentCard({ a, onEdit, onOpen }: { a: Agent; onEdit: (a: Agent) => void
       <div className="mt-3 grid grid-cols-3 gap-2 text-center">
         <div className="rounded-lg border border-line/60 bg-raised/40 py-2"><div className={cls('font-mono text-[15px] font-bold', off ? 'text-dim' : 'text-vio')}>{off || g?.cpu == null ? '—' : `${Math.round(g.cpu)}%`}</div><div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">загр. CPU</div></div>
         <div className="rounded-lg border border-line/60 bg-raised/40 py-2"><div className={cls('font-mono text-[15px] font-bold', off ? 'text-dim' : g?.cput != null && g.cput > 75 ? 'text-crit' : 'text-warn')}>{off || g?.cput == null ? '—' : `${Math.round(g.cput)}°`}</div><div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">t° CPU</div></div>
-        <div className="rounded-lg border border-line/60 bg-raised/40 py-2"><div className={cls('font-mono text-[15px] font-bold', off ? 'text-dim' : 'text-blu')}>{a.latency != null ? a.latency : '—'}</div><div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">пинг, мс</div></div>
+        <div className="rounded-lg border border-line/60 bg-raised/40 py-2"><div className={cls('font-mono text-[15px] font-bold', off ? 'text-dim' : 'text-blu')}>{fmtMs(a.latency)}</div><div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">пинг, мс</div></div>
         <div className="rounded-lg border border-line/60 bg-raised/40 py-2"><div className={cls('font-mono text-[15px] font-bold', off ? 'text-dim' : 'text-mint')}>{off || g?.ram == null ? '—' : `${Math.round(g.ram)}%`}</div><div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">загр. RAM</div></div>
         <div className="rounded-lg border border-line/60 bg-raised/40 py-2"><div className={cls('font-mono text-[13px] font-bold leading-[19px]', off ? 'text-dim' : 'text-ok')}>{off || !g ? '—' : `↓${fmtNet(g.rx)} ↑${fmtNet(g.tx)}`}</div><div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">сеть</div></div>
         <div className="rounded-lg border border-line/60 bg-raised/40 py-2"><div className={cls('font-mono text-[15px] font-bold', off ? 'text-dim' : 'text-[#d98bb0]')}>{off || g?.ssdt == null ? '—' : `${Math.round(g.ssdt)}°`}</div><div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">t° SSD</div></div>
@@ -396,7 +396,7 @@ function AgentDrawer({ id, onClose, onEdit }: { id: string; onClose: () => void;
                       {results.map((r) => (
                         <div key={r.ip} className="flex items-center justify-between rounded border border-line/40 bg-raised/30 px-2.5 py-1">
                           <span className="flex items-center gap-2 font-mono text-[11.5px] text-mut"><StatusDot status={r.alive ? 'up' : 'down'} pulse={false} />{r.ip}</span>
-                          <span className={cls('font-mono text-[11.5px]', r.alive ? 'text-ok' : 'text-crit')}>{r.alive && r.latency != null ? `${r.latency} мс` : (r.alive ? '—' : 'нет ответа')}</span>
+                          <span className={cls('font-mono text-[11.5px]', r.alive ? 'text-ok' : 'text-crit')}>{r.alive && r.latency != null ? fmtMs(r.latency) : (r.alive ? '—' : 'нет ответа')}</span>
                         </div>
                       ))}
                     </div>
