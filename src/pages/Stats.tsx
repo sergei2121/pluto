@@ -4,7 +4,7 @@ import { BarChart3, Waves, Activity, Download, Cpu, HardDrive, Thermometer, Wifi
 import { Panel, EmptyState, TimeAgo, Sparkbar } from '../components/ui';
 import { store, useCurrentUser, usePluto, visibleAgents } from '../lib/store';
 import { cls, fmtNet, LINE_COLORS } from '../lib/util';
-import type { Agent, GlancesPoint, StatsRange, StatsView } from '../lib/types';
+import type { Agent, GlancesPoint, StatsRange } from '../lib/types';
 
 const RANGES: { v: StatsRange; label: string; ms: number }[] = [
   { v: '5m', label: '5 мин', ms: 5 * 60_000 },
@@ -149,12 +149,13 @@ function BarsChart({ points, metric, color, gradient, range }: { points: Glances
   );
 }
 
-export default function Stats({ mode }: { mode: StatsView }) {
+export default function Stats({ mode }: { mode: 'bars' | 'ws' }) {
   const user = useCurrentUser();
   const all = usePluto((s) => visibleAgents(s, user));
   // в каждую вкладку попадают только агенты, назначенные именно в неё
+  // '' (агент без вкладки) считается «bars» — историческое значение по умолчанию
   const agents = useMemo(
-    () => all.filter((a) => a.statsView === mode).sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' })),
+    () => all.filter((a) => (a.statsView || 'bars') === mode).sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' })),
     [all, mode],
   );
   const [agentId, setAgentId] = useState<string | null>(null);
@@ -391,7 +392,7 @@ export default function Stats({ mode }: { mode: StatsView }) {
               </div>
             }>
             {points.length ? (
-              mode === 'bars' || !mode
+              showAllAgents
                 ? <BarsChart points={points} metric={metric} color={selectedMetric.color} gradient={selectedMetric.gradient} range={range} />
                 : <WaveChart points={points} metric={metric} color={selectedMetric.color} gradient={selectedMetric.gradient} range={range} />
             ) : (

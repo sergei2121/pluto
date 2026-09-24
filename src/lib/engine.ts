@@ -364,7 +364,8 @@ export async function requestPushPermission(): Promise<boolean> {
 }
 
 // Вспомогательная функция для конвертации VAPID ключа
-function urlBase64ToUint8Array(base64String: string): Uint8Array {
+// BufferSource — чтобы результат был совместим с applicationServerKey в pushManager.subscribe
+function urlBase64ToUint8Array(base64String: string): BufferSource {
   if (!base64String) {
     return new Uint8Array();
   }
