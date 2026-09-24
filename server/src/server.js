@@ -11,6 +11,7 @@ import {
 import { loginRateLimiter } from './middleware/rateLimiter.js';
 import telemetryCollectors from './telemetry/collectors.js';
 import deviceChecks from './checks/deviceChecks.js';
+import { relayPing } from './lib/relay.js';
 import { initPingHistory, recordPingState, seedPingHistoryFromAgents, savePingEvents, rollupPingDaily, queryPingHistory } from './db/pingHistory.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -218,37 +219,14 @@ async function applyResult(d, res) {
   await saveDb();
 }
 
-// ─── Relay-пинги (устройства внутри VLAN/NAT) ──────────────────────────────
+// ─── Relay-пинги ─────────────────────────────────────────────────────────────
+// Реализация вынесена в lib/relay.js: серия ICMP-пакетов на стороне агента
+// (min/avg/max/медиана/jitter/потери) + измерение реального сетевого пути
+// ядро→relay. Итоговый RTT устройства = локальный RTT (с агентом) + путь до
+// агента — поле pathMs; «сырой» замер агента остаётся в latency/minMs/maxMs.
 
-async function relayPing(agent, targets) {
-  if (!agent.relayUrl) return [];
-  const base = String(agent.relayUrl).replace(/\/+$/, '');
-  const url = base + '/ping?targets=' + encodeURIComponent(targets.join(','));
-  const now = Date.now();
-  try {
-    const txt = await fetchText(url, 15000);
-    const arr = JSON.parse(txt);
-    if (Array.isArray(arr)) {
-      return arr.map((r) => {
-        const alive = !!r.alive;
-        // При успешном пинге обновляем lastSuccess, при ошибке — ставим null (будет сохранено из предыдущих результатов в caller)
-        const result = { 
-          ip: r.ip, 
-          alive, 
-          latency: r.latencyMs != null ? r.latencyMs : (r.latency != null ? r.latency : null),
-          offlineSince: !alive ? now : undefined,
-          offlineDuration30d: 0,
-          lastSuccess: null
-        };
-        if (alive) {
-          result.lastSuccess = now;
-        }
-        return result;
-      });
-    }
-  } catch { /* relay недоступен */ }
-  // При ошибке relay возвращаем пустой массив — предыдущие результаты будут использованы в caller
-  return [];
+async function relayPingWrapped(agent, targets) {
+  return relayPing(agent, targets, checkPing);
 }
 
 // ─── Телеметрия (Netdata / Pluto Agent) ─────────────────────────────────────
@@ -388,12 +366,19 @@ async function notify(kind, title, body) {
 // ─── Витрина (публичная, без входа) ────────────────────────────────────────
 
 function pingAgg(targets) {
-  let total = 0, online = 0, sum = 0, cnt = 0, max = null;
+  let total = 0, online = 0, sum = 0, cnt = 0, max = null, jit = null;
   for (const t of targets || []) for (const r of t.results || []) {
     total++;
-    if (r.alive) { online++; if (r.latency != null) { sum += r.latency; cnt++; if (max == null || r.latency > max) max = r.latency; } }
+    if (r.alive) {
+      online++;
+      // для агрегатов берём pathMs (RTT от ядра: локальный замер + путь до агента),
+      // если он известен — иначе сырой замер агента
+      const eff = r.pathMs != null ? r.pathMs : r.latency;
+      if (eff != null) { sum += eff; cnt++; if (max == null || eff > max) max = eff; }
+      if (r.jitterMs != null && (jit == null || r.jitterMs > jit)) jit = r.jitterMs;
+    }
   }
-  return { total, online, offline: total - online, avg: cnt ? Math.round(sum / cnt) : null, max };
+  return { total, online, offline: total - online, avg: cnt ? Math.round(sum / cnt) : null, max, jitter: jit };
 }
 
 function showcaseDevices() {
@@ -404,7 +389,15 @@ function showcaseDevices() {
 function showcaseAgents() {
   return db.agents.filter((a) => a.pingsShowcase).map((a) => {
     const st = pingAgg(a.targets);
-    return { name: a.name, ip: a.ip, online: !!a.online, latency: a.latency ?? null, ...st };
+    const devices = [];
+    for (const t of a.targets || []) for (const r of t.results || []) {
+      devices.push({
+        ip: r.ip, alive: !!r.alive,
+        latency: r.pathMs != null ? r.pathMs : (r.latency ?? null),
+        localMs: r.latency ?? null, jitterMs: r.jitterMs ?? null, lossPct: r.lossPct ?? null,
+      });
+    }
+    return { name: a.name, ip: a.ip, online: !!a.online, latency: a.latency ?? null, devices, ...st };
   });
 }
 
@@ -443,6 +436,9 @@ h1{font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;letter-
 .chip{font:600 11px 'JetBrains Mono',monospace;padding:3px 9px;border-radius:7px;border:1px solid #242b4a;background:rgba(11,14,26,.6);color:#aeb6d8}
 .chip .ok{color:#55c795}.chip .warn{color:#dfa65e}.chip .bad{color:#e07a80}.chip .info{color:#5fc6d8}
 .empty{color:#8b93b8;text-align:center;padding:48px 0;font-size:13.5px}
+.devs{display:flex;flex-wrap:wrap;gap:6px;margin:-2px 0 10px;padding:0 16px 12px}
+.dev{font:600 10.5px 'JetBrains Mono',monospace;color:#55c795;background:rgba(85,199,149,.08);border:1px solid rgba(85,199,149,.25);border-radius:6px;padding:2px 7px}
+.dev.off{color:#e07a80;background:rgba(224,122,128,.08);border-color:rgba(224,122,128,.3);text-decoration:line-through}
 .upd{font:11px 'JetBrains Mono',monospace;color:#8b93b8;text-align:right;margin-top:20px}
 @media(max-width:560px){.addr{display:none}}
 </style></head><body><div class="wrap">
@@ -478,7 +474,8 @@ async function tick(){
           (x.offline?'<span class="chip"><b class="bad">'+x.offline+'</b> офлайн</span>':'')+
           '<span class="chip">ср <b class="info">'+(x.avg==null?'—':x.avg+' мс')+'</b></span>'+
           '<span class="chip">макс <b class="warn">'+(x.max==null?'—':x.max+' мс')+'</b></span>'+
-          '</span></div>';}).join('');
+          (x.jitter!=null?'<span class="chip">джиттер <b class="warn">'+x.jitter+' мс</b></span>':'')+
+          '</span></div>'+(x.devices&&x.devices.length?'<div class="devs">'+x.devices.map(dd=>'<span class="dev'+(dd.alive?'':' off')+'" title="'+esc(dd.ip)+(dd.localMs!=null?' · на агенте '+dd.localMs+' мс':'')+(dd.lossPct?' · потери '+dd.lossPct+'%':'')+'">'+esc(dd.ip)+' '+(dd.latency==null?(dd.alive?'—':'×'):dd.latency+' мс')+'</span>').join('')+'</div>':'')+';}).join('');
       }
       el.innerHTML=html;
     }
@@ -580,7 +577,7 @@ async function pollAgent(agent) {
       const rangeStr = typeof tgt === 'string' ? tgt : (tgt.range || '');
       const targetName = typeof tgt === 'object' && tgt.name ? tgt.name : '';
       const ips = expandTargets(rangeStr);
-      const results = await relayPing(agent, ips);
+      const results = await relayPingWrapped(agent, ips);
       if (results.length) anyOk = true;
       // Ищем предыдущие результаты по range или имени цели
       const prev = (agent.targets || []).find((t) => t.range === rangeStr || t.target === rangeStr || t.name === targetName);
