@@ -2,6 +2,16 @@
 // Пингует устройства, доступные только этой машине (VLAN/NAT), по запросу ядра.
 // Один бинарник, без зависимостей. Слушает :8091.
 //
+// Точность измерений:
+//   - каждое целевое устройство пингуется НЕ ОДНИМ пакетом, а серией (-c count,
+//     флаг -i интервала нет — он требует root на Linux): одиночный пакет даёт
+//     сильно зашумлённую выборку (первый пакет после простоя ARP/кэш-дрейф,
+//     пересборки NIC-power-management дают ложные «1 мс» и всплески);
+//   - в ответ возвращаются min/avg/max и jitter (разброс min..max) по серии;
+//   - время HTTP-запроса к самому relay (relayRttMs) вычитается ядром из RTT
+//     устройств, измеренного со стороны сервера, чтобы сетевой путь до агента
+//     не примешивался к его локальным замерам.
+//
 // Сборка под Windows:  GOOS=windows GOARCH=amd64 go build -o pluto-relay.exe .
 // Запуск:              pluto-relay.exe            (или службой: pluto-relay.exe -install)
 package main
@@ -13,83 +23,211 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"os"
 	"os/exec"
 	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 type PingResult struct {
-	IP        string  `json:"ip"`
-	Alive     bool    `json:"alive"`
-	// LatencyMs — RTT с точностью до сотых мс (как его вернула утилита ping).
-	// Дробная часть важна: при округлении до целых реальные 1.2–1.4 мс
-	// превращаются в «1», и показания PLUTO расходятся с «ping» из консоли.
+	IP    string `json:"ip"`
+	Alive bool   `json:"alive"`
+	// LatencyMs — медиана RTT по серии пакетов с точностью до сотых мс
+	// (как её вернула утилита ping). Дробная часть важна: при округлении
+	// до целых реальные 1.2–1.4 мс превращаются в «1».
 	LatencyMs *float64 `json:"latencyMs"`
+	// Расширенная статистика серии (real measurements, не одно значение):
+	MinMs      *float64 `json:"minMs,omitempty"`
+	AvgMs      *float64 `json:"avgMs,omitempty"`
+	MaxMs      *float64 `json:"maxMs,omitempty"`
+	JitterMs   *float64 `json:"jitterMs,omitempty"`   // разброс min..max
+	Sent       int      `json:"sent"`                 // пакетов отправлено
+	Received   int      `json:"received"`             // ответов получено
+	LossPct    *float64 `json:"lossPct,omitempty"`    // потери, %
 }
 
+// «time=1,23 ms» (Windows-локали используют запятую) — берём все вхождения серии.
 var pingTimeRe = regexp.MustCompile(`(?i)time[=<]\s*([0-9]+(?:[.,][0-9]+)?)\s*ms`)
 
-// pingOne пингует один адрес системной утилитой ping (есть и в Windows, и в Linux).
-func pingOne(ip string, timeoutMs int) PingResult {
+// parsePingTimes извлекает все RTT из вывода утилиты ping.
+func parsePingTimes(out []byte) []float64 {
+	var res []float64
+	for _, m := range pingTimeRe.FindAllSubmatch(out, -1) {
+		v, err := strconv.ParseFloat(strings.ReplaceAll(string(m[1]), ",", "."), 64)
+		if err == nil && v >= 0 {
+			res = append(res, v)
+		}
+	}
+	return res
+}
+
+func pct(sorted []float64, q float64) float64 {
+	if len(sorted) == 0 {
+		return 0
+	}
+	idx := int(math.Round(float64(len(sorted)-1) * q))
+	return sorted[idx]
+}
+
+// pingSeries пингует адрес системной утилитой ping серией из count пакетов
+// (параллельно для разных адресов) и возвращает честную статистику.
+// Первый пакет серии отбрасывается из выборки RTT: после простоя он всегда
+// аномальный (ARP-резолв, пробуждение NIC из energy-efficient ethernet),
+// именно он и даёт ложные значения на ровном месте.
+func pingSeries(ip string, timeoutMs, count int) PingResult {
+	perPacketMs := timeoutMs / count
+	if perPacketMs < 800 {
+		perPacketMs = 800 // минимум на пакет, иначе серия гарантированно не успеет
+	} else if perPacketMs > 2000 {
+		perPacketMs = 2000
+	}
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		cmd = exec.Command("ping", "-n", "1", "-w", strconv.Itoa(timeoutMs), ip)
+		// Windows ping не поддерживает дробные интервалы: пакеты идут подряд,
+		// -w задаёт таймаут ожидания ответа в мс.
+		cmd = exec.Command("ping", "-n", strconv.Itoa(count), "-w", strconv.Itoa(perPacketMs), ip)
 	} else {
-		cmd = exec.Command("ping", "-c", "1", "-W", strconv.Itoa(timeoutMs/1000+1), ip)
-	}
-	start := time.Now()
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return PingResult{IP: ip, Alive: false, LatencyMs: nil}
-	}
-	// Приоритет — задержке из вывода самой утилиты ping («time=X ms»):
-	// wall-time включает спавн процесса и добавляет 5-20 мс шума.
-	var ms float64
-	if loc := pingTimeRe.FindSubmatchIndex(out); loc != nil {
-		// Windows-локали используют запятую как десятичный разделитель («время=1,23мс»).
-		v, perr := strconv.ParseFloat(strings.ReplaceAll(string(out[loc[2]:loc[3]]), ",", "."), 64)
-		if perr == nil && v > 0 {
-			// Округляем до сотых мс — сохраняем точность утилиты ping.
-			ms = math.Round(v*100) / 100
-		} else {
-			ms = float64(time.Since(start).Microseconds()) / 1000
+		// -i 0.2 — межпакетный интервал 200 мс (без root допускается >= 0.2 с),
+		// -W в секундах (целое, ceil от таймаута пакета).
+		wSec := (perPacketMs + 999) / 1000
+		if wSec < 1 {
+			wSec = 1
 		}
-	} else {
-		ms = float64(time.Since(start).Microseconds()) / 1000
+		cmd = exec.Command("ping", "-c", strconv.Itoa(count), "-i", "0.2", "-W", strconv.Itoa(wSec), ip)
 	}
-	return PingResult{IP: ip, Alive: true, LatencyMs: &ms}
+	out, err := cmd.Output()
+
+	times := parsePingTimes(out)
+	res := PingResult{IP: ip, Sent: count, Received: len(times)}
+	if len(times) == 0 {
+		_ = err // утилита вернула nonzero exit — устройство недоступно или потеряны все ответы
+		return res
+	}
+	// Отбрасываем первый (warm-up) пакет при достаточной выборке.
+	measured := times
+	if len(measured) >= 4 {
+		measured = measured[1:]
+		res.Received = len(measured)
+	}
+	loss := float64(count-len(times)) * 100 / float64(count)
+	sorted := append([]float64(nil), measured...)
+	for i := 1; i < len(sorted); i++ {
+		for j := i; j > 0 && sorted[j] < sorted[j-1]; j-- {
+			sorted[j], sorted[j-1] = sorted[j-1], sorted[j]
+		}
+	}
+	mn, mx := sorted[0], sorted[len(sorted)-1]
+	var sum float64
+	for _, v := range measured {
+		sum += v
+	}
+	rt := round2(pct(sorted, 0.5)) // медиана — устойчивая к одиночным всплескам
+	res.Alive = true
+	res.LatencyMs = &rt
+	minV, avgV, maxV, jitV, lossV := round2(mn), round2(sum/float64(len(measured))), round2(mx), round2(mx-mn), round2(loss)
+	res.MinMs, res.AvgMs, res.MaxMs, res.JitterMs, res.LossPct = &minV, &avgV, &maxV, &jitV, &lossV
+	return res
+}
+
+func round2(v float64) float64 { return math.Round(v*100) / 100 }
+
+// healthResult кэширует результат самотеста relay (локальный ping), чтобы
+// не спавнить процесс ping на каждый HTTP-запрос ядра.
+type healthEntry struct {
+	result map[string]interface{}
+	ts     time.Time
+}
+
+var (
+	healthMu  sync.Mutex
+	healthCch *healthEntry
+)
+
+func selfHealth(timeoutMs, count int) map[string]interface{} {
+	healthMu.Lock()
+	defer healthMu.Unlock()
+	if healthCch != nil && time.Since(healthCch.ts) < 5*time.Second {
+		return healthCch.result
+	}
+	self := pingSeries("127.0.0.1", timeoutMs, count)
+	var lat interface{}
+	if self.LatencyMs != nil {
+		lat = *self.LatencyMs
+	}
+	hostname, _ := os.Hostname()
+	healthCch = &healthEntry{
+		ts: time.Now(),
+		result: map[string]interface{}{
+			"ok": self.Alive, "name": "pluto-relay", "host": hostname,
+			"selfLatencyMs": lat,
+		},
+	}
+	return healthCch.result
 }
 
 func main() {
 	port := flag.Int("port", 8091, "порт relay")
-	timeout := flag.Int("timeout", 2000, "таймаут одного пинга, мс")
+	timeout := flag.Int("timeout", 2000, "суммарный бюджет времени на пинг одного устройства, мс")
+	count := flag.Int("count", 5, "сколько ICMP-пакетов на устройство в серии (первый отбрасывается как warm-up)")
+	concurrency := flag.Int("concurrency", 8, "сколько устройств пинговать параллельно")
 	flag.Parse()
+
+	if *count < 1 {
+		*count = 1
+	} else if *count > 16 {
+		*count = 16
+	}
+	if *concurrency < 1 {
+		*concurrency = 1
+	} else if *concurrency > 32 {
+		*concurrency = 32
+	}
 
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
-		targets := strings.Split(r.URL.Query().Get("targets"), ",")
-		out := make([]PingResult, 0, len(targets))
-		for _, t := range targets {
+		raw := strings.FieldsFunc(r.URL.Query().Get("targets"), func(c rune) bool { return c == ',' || c == ' ' || c == '\n' })
+		targets := make([]string, 0, len(raw))
+		for _, t := range raw {
 			t = strings.TrimSpace(t)
-			if t == "" {
-				continue
+			if t != "" {
+				targets = append(targets, t)
 			}
-			out = append(out, pingOne(t, *timeout))
 		}
+		// Параллельный опрос целей (иначе диапазон /24 пинговался бы ~минуту).
+		out := make([]PingResult, len(targets))
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, *concurrency)
+		for i, t := range targets {
+			wg.Add(1)
+			go func(i int, t string) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				out[i] = pingSeries(t, *timeout, *count)
+			}(i, t)
+		}
+		wg.Wait()
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(out)
+		// serverNowMs — время по часам relay на момент ответа: ядро сопоставляет
+		// его со своим Date.now(), чтобы вычесть сетевой путь до агента из RTT.
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"results":     out,
+			"count":       *count,
+			"serverNowMs": time.Now().UnixMilli(),
+		})
 	})
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "name": "pluto-relay"})
+		_ = json.NewEncoder(w).Encode(selfHealth(*timeout, *count))
 	})
 
 	addr := fmt.Sprintf("0.0.0.0:%d", *port)
-	log.Printf("[pluto-relay] слушаю %s (пингую локальные устройства по запросу ядра)", addr)
+	log.Printf("[pluto-relay] слушаю %s (серия из %d пакетов на устройство, параллельно %d целей)", addr, *count, *concurrency)
 	log.Fatal(http.ListenAndServe(addr, mux))
 }

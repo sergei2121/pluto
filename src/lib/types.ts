@@ -53,11 +53,20 @@ export interface Device {
   createdAt: number;
 }
 
-/** Результат пинга одного IP через relay-агент. */
+/** Результат пинга одного IP через relay-агент (серия ICMP-пакетов на агенте). */
 export interface RelayPingResult {
   ip: string;
   alive: boolean;
-  latency: number | null; // мс
+  latency: number | null; // мс, медиана серии, измеренная НА агенте (его локальная сеть)
+  /** Полный RTT от ядра: локальный замер агента + реальный сетевой путь до него. */
+  pathMs?: number | null;
+  minMs?: number | null;   // минимальный RTT в серии
+  avgMs?: number | null;   // среднее по серии
+  maxMs?: number | null;   // максимальный RTT в серии
+  jitterMs?: number | null; // разброс min..max — показатель стабильности канала
+  lossPct?: number | null;  // потери пакетов в серии, %
+  sent?: number | null;     // пакетов отправлено
+  received?: number | null; // ответов получено
   lastSuccess?: number | null; // timestamp последнего успешного пинга
   offlineSince?: number | null; // timestamp ухода в офлайн (для статистики 30 дней)
   offlineDuration30d?: number; // суммарное время в офлайне за 30 дней (мс)

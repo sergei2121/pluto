@@ -183,7 +183,7 @@ export function embedHash(pass: string): string {
 }
 
 /** Агрегированная ping-статистика агента по всем его целям. */
-export function pingStats(targets: { results?: { alive: boolean; latency: number | null }[] }[]): {
+export function pingStats(targets: { results?: { alive: boolean; latency: number | null; pathMs?: number | null }[] }[]): {
   total: number; online: number; offline: number; avg: number | null; max: number | null;
 } {
   let total = 0, online = 0, sum = 0, cnt = 0, max: number | null = null;
@@ -193,9 +193,11 @@ export function pingStats(targets: { results?: { alive: boolean; latency: number
       total++;
       if (r.alive) {
         online++;
-        if (r.latency != null) {
-          sum += r.latency; cnt++;
-          if (max == null || r.latency > max) max = r.latency;
+        // считаем полный RTT от ядра (замер агента + путь до него), если известен
+        const eff = r.pathMs != null ? r.pathMs : r.latency;
+        if (eff != null) {
+          sum += eff; cnt++;
+          if (max == null || eff > max) max = eff;
         }
       }
     }

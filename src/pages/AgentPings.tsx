@@ -123,15 +123,30 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
                       
                       return (
                         <div key={r.ip} className="grid grid-cols-[1fr_auto] items-center gap-2 rounded border border-line/40 bg-panel/50 px-2.5 py-1.5 transition-colors hover:bg-raised/60">
-                          <div className="flex min-w-0 items-center gap-2">
+                          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
                             {r.alive ? <Wifi className="h-3.5 w-3.5 shrink-0 text-ok" /> : <WifiOff className="h-3.5 w-3.5 shrink-0 text-crit" />}
                             <span className="font-mono text-[11.5px] text-mut">{r.ip}</span>
+                            {/* Статистика серии пакетов: разброс min..max, джиттер, потери */}
+                            {r.alive && r.minMs != null && r.maxMs != null && (
+                              <span className="font-mono text-[9px] text-dim" title={`Серия ICMP на агенте: min ${fmtMs(r.minMs)}, max ${fmtMs(r.maxMs)}, джиттер — разброс между ними`}>
+                                min {fmtMs(r.minMs)} · max {fmtMs(r.maxMs)}
+                              </span>
+                            )}
+                            {r.alive && r.jitterMs != null && (
+                              <span className={cls('font-mono text-[9px]', r.jitterMs > 5 ? 'text-warn' : 'text-dim')} title="Джиттер: разброс RTT в серии (max−min)">±{fmtMs(r.jitterMs)}</span>
+                            )}
+                            {r.alive && r.lossPct != null && r.lossPct > 0 && (
+                              <span className="font-mono text-[9px] text-crit" title={`Потери: ${r.received ?? 0}/${r.sent ?? '?'} пакетов серии`}>потери {r.lossPct}%</span>
+                            )}
                             <span className="hidden font-mono text-[9px] md:inline" style={{ fontWeight: 600 }}>
                               последний успех: <span className={lastSuccessStr === '—' ? 'text-crit' : 'text-dim'}>{lastSuccessStr}</span>
                             </span>
                           </div>
                           <div className="flex flex-col items-end gap-0.5">
-                            <span className={cls('font-mono text-[11.5px] font-semibold', r.alive ? 'text-ok' : 'text-crit')}>{r.alive && r.latency != null ? fmtMs(r.latency) : (r.alive ? '—' : 'нет ответа')}</span>
+                            <span className={cls('font-mono text-[11.5px] font-semibold', r.alive ? 'text-ok' : 'text-crit')}
+                              title={r.pathMs != null && r.latency != null ? `RTT от ядра: локальный замер агента ${fmtMs(r.latency)} + путь до хаба ${fmtMs(Math.round((r.pathMs - r.latency) * 100) / 100)}` : undefined}>
+                              {r.alive && r.pathMs != null ? fmtMs(r.pathMs) : r.alive && r.latency != null ? fmtMs(r.latency) : (r.alive ? '—' : 'нет ответа')}
+                            </span>
                             {r.offlineSince != null && r.offlineSince > 0 && (
                               <span className="font-mono text-[9px] text-dim">офлайн с: {formatLastSuccess(r.offlineSince)}</span>
                             )}
