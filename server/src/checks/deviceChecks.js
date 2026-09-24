@@ -31,8 +31,11 @@ export function checkPing(address, timeoutMs = 3000) {
         checkLogger.info('Ping неудачен', { address, error: err.message });
         return resolve({ ok: false, latency: null });
       }
-      const m = /time[=<]\s*([\d.]+)\s*ms/i.exec(stdout || '');
-      const latency = m ? Math.max(1, Math.round(parseFloat(m[1]))) : Math.max(1, Date.now() - started);
+      const m = /time[=<]\s*([\d.,]+)\s*ms/i.exec(stdout || '');
+      // Сохраняем дробные миллисекунды (округление до сотых): реальные 1.2–1.4 мс
+      // не должны превращаться в «1», а 4.6 — в «5» заранее, иначе показания
+      // расходятся с выводом «ping» из консоли.
+      const latency = m ? Math.round(parseFloat(m[1].replace(',', '.')) * 100) / 100 : Math.max(1, Date.now() - started);
       checkLogger.info('Ping успешен', { address, latency });
       resolve({ ok: true, latency });
     });

@@ -73,7 +73,8 @@ export function fmtDate(ts: number): string {
 export function fmtMs(n: number | null | undefined): string {
   if (n == null) return '—';
   if (n >= 1000) return `${(n / 1000).toFixed(2)} с`;
-  return `${Math.round(n)} мс`;
+  // Дробные значения показываем с точностью до десятых (1.4 мс), целые — как есть.
+  return Number.isInteger(n) ? `${n} мс` : `${n.toFixed(1)} мс`;
 }
 
 export function fmtUp(ms: number): string {

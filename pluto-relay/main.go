@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"os/exec"
 	"regexp"
@@ -21,8 +22,11 @@ import (
 )
 
 type PingResult struct {
-	IP        string   `json:"ip"`
-	Alive     bool     `json:"alive"`
+	IP        string  `json:"ip"`
+	Alive     bool    `json:"alive"`
+	// LatencyMs — RTT с точностью до сотых мс (как его вернула утилита ping).
+	// Дробная часть важна: при округлении до целых реальные 1.2–1.4 мс
+	// превращаются в «1», и показания PLUTO расходятся с «ping» из консоли.
 	LatencyMs *float64 `json:"latencyMs"`
 }
 
@@ -45,14 +49,16 @@ func pingOne(ip string, timeoutMs int) PingResult {
 	// wall-time включает спавн процесса и добавляет 5-20 мс шума.
 	var ms float64
 	if loc := pingTimeRe.FindSubmatchIndex(out); loc != nil {
-		v, perr := strconv.ParseFloat(string(out[loc[2]:loc[3]]), 64)
+		// Windows-локали используют запятую как десятичный разделитель («время=1,23мс»).
+		v, perr := strconv.ParseFloat(strings.ReplaceAll(string(out[loc[2]:loc[3]]), ",", "."), 64)
 		if perr == nil && v > 0 {
-			ms = v
+			// Округляем до сотых мс — сохраняем точность утилиты ping.
+			ms = math.Round(v*100) / 100
 		} else {
-			ms = float64(time.Since(start).Milliseconds())
+			ms = float64(time.Since(start).Microseconds()) / 1000
 		}
 	} else {
-		ms = float64(time.Since(start).Milliseconds())
+		ms = float64(time.Since(start).Microseconds()) / 1000
 	}
 	return PingResult{IP: ip, Alive: true, LatencyMs: &ms}
 }
