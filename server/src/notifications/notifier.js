@@ -8,7 +8,7 @@ import http from 'node:http';
  * Логгирует ошибки с указанием уровня важности
  */
 
-const logger = {
+export const logger = {
   error: (msg, context = {}) => {
     console.error(`[pluto][notifications][ERROR] ${msg}`, JSON.stringify(context));
   },
@@ -23,7 +23,7 @@ const logger = {
 /**
  * Отправка уведомления в Telegram
  */
-async function sendTelegram(notification, type, title, message) {
+export async function sendTelegram(notification, type, title, message) {
   const cfg = notification.telegram;
   if (!cfg?.enabled || !cfg.botToken || !cfg.chatId) {
     logger.warn('Telegram не настроен', { enabled: cfg?.enabled });

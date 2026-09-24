@@ -10,6 +10,7 @@ import {
 } from './lib.js';
 import { loginRateLimiter } from './middleware/rateLimiter.js';
 import telemetryCollectors from './telemetry/collectors.js';
+import deviceChecks from './checks/deviceChecks.js';
 import { initPingHistory, recordPingState, seedPingHistoryFromAgents, savePingEvents, rollupPingDaily, queryPingHistory } from './db/pingHistory.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -157,37 +158,13 @@ const publicUser = (u) => ({
 });
 
 // ─── Проверки устройств ─────────────────────────────────────────────────────
+// Реализация проверок вынесена в модуль checks/deviceChecks.js — здесь только
+// тонкие обёртки, подставляющие локальные fetchText/настройки и запись результата.
 
-function checkPing(address, timeoutMs = 3000) {
-  return new Promise((resolve) => {
-    const to = setTimeout(() => resolve({ ok: false, latency: null }), timeoutMs + 500);
-    const started = Date.now();
-    execFile('ping', ['-c', '1', '-W', String(Math.max(1, Math.ceil(timeoutMs / 1000))), address], (err) => {
-      clearTimeout(to);
-      if (err) return resolve({ ok: false, latency: null });
-      resolve({ ok: true, latency: Date.now() - started });
-    });
-  });
-}
-
-async function checkHttp(d, timeoutMs) {
-  const base = /^https?:\/\//i.test(d.address) ? d.address : `http://${d.address}${d.port ? ':' + d.port : ''}`;
-  const url = base + (d.path || '');
-  const started = Date.now();
-  try {
-    const html = await fetchText(url, timeoutMs);
-    return { ok: html != null, latency: Date.now() - started };
-  } catch { return { ok: false, latency: null }; }
-}
+const checkPing = deviceChecks.checkPing;
 
 async function runDeviceCheck(d) {
-  const timeoutMs = db.settings.timeoutMs || 3000;
-  let res;
-  if (d.type === 'ping') res = await checkPing(d.address, timeoutMs);
-  else if (d.type === 'http' || d.type === 'api') res = await checkHttp(d, timeoutMs);
-  else if (d.type === 'rtsp') res = await checkHttp({ ...d, path: '' }, timeoutMs);
-  else if (d.type === 'sip') res = { ok: false, latency: null };
-  else res = { ok: false, latency: null };
+  const res = await deviceChecks.runDeviceCheck(d, fetchText, db.settings);
   await applyResult(d, res);
 }
 
@@ -274,22 +251,23 @@ async function relayPing(agent, targets) {
   return [];
 }
 
-// ─── Netdata (телеметрия) ───────────────────────────────────────────────────
+// ─── Телеметрия (Netdata / Pluto Agent) ─────────────────────────────────────
+// Сбор метрик вынесен в модуль telemetry/collectors.js — здесь только обёртки,
+// подставляющие HTTP-клиенты (fetchText / fetchJson).
 
-/**
- * Собирает метрики из Netdata API v2.
- * Использует функцию collectNetdata из telemetry/collectors.js
- */
+/** Собирает метрики из Netdata API v2. */
 async function collectNetdata(url) {
   return await telemetryCollectors.collectNetdata(url, fetchText);
 }
 
-/**
- * Собирает метрики от Pluto Agent.
- * Использует функцию collectFromAgent из telemetry/collectors.js
- */
+/** Собирает метрики от Pluto Agent (/api/metrics). */
 async function collectFromAgent(url) {
   return await telemetryCollectors.collectFromAgent(url, fetchJson);
+}
+
+/** JSON-клиент: GET по URL с таймаутом, ответ парсится как JSON. */
+function fetchJson(rawUrl, timeoutMs = 7000) {
+  return fetchText(rawUrl, timeoutMs).then((txt) => JSON.parse(txt));
 }
 
 function parseUptime(s) {
@@ -312,17 +290,21 @@ async function collectTelemetry(agent) {
   throw new Error('Нет доступного источника телеметрии (укажите Netdata URL или Pluto Agent URL)');
 }
 
+/** Точка истории телеметрии (сокращённый формат, единый для Netdata и Pluto Agent). */
 function netdataPoint(g, t) {
   return { 
     t, 
-    cpu: g.cpu, 
-    ram: g.ram, 
-    rx: g.netRx, 
-    tx: g.netTx, 
-    cput: g.cpuTemp, 
+    cpu: g.cpu ?? null, 
+    gpu: g.gpu ?? g.gpuUtil ?? null,
+    ram: g.ram ?? null, 
+    rx: g.netRx ?? g.rx ?? null, 
+    tx: g.netTx ?? g.tx ?? null, 
+    cput: g.cput ?? g.cpuTemp ?? null, 
+    ssdt: g.ssdt ?? g.ssdTemp ?? null,
     swap: g.swap ?? null,
     diskRead: g.diskRead ?? null,
     diskWrite: g.diskWrite ?? null,
+    diskUsed: g.mainFsUsed ?? null,
   };
 }
 
@@ -352,62 +334,15 @@ async function notify(kind, title, body) {
   if (kind === 'pingDown' && pg.pingDown === false) return;
   if (kind === 'pingRecover' && pg.pingRecover === false) return;
 
-  // Telegram уведомления
+  // Telegram — отправка через модуль notifications/notifier.js (без дублирования кода)
   if (n.telegram.enabled && n.telegram.botToken && n.telegram.chatId) {
-    const text = `*${title}*\n\n${body}`;
-    const url = `https://api.telegram.org/bot${n.telegram.botToken}/sendMessage`;
-    
     try {
-      const https = await import('node:https');
-      const data = JSON.stringify({
-        chat_id: n.telegram.chatId,
-        text,
-        parse_mode: 'Markdown',
-      });
-      
-      await new Promise((resolve, reject) => {
-        const req = https.request(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Content-Length': data.length,
-          },
-          timeout: 5000,
-        }, (res) => {
-          let responseBody = '';
-          res.on('data', (chunk) => (responseBody += chunk));
-          res.on('end', () => {
-            if (res.statusCode === 200) {
-              notificationLogger.info('Telegram уведомление отправлено', { kind, title });
-              resolve();
-            } else {
-              notificationLogger.error(`Telegram API вернул ошибку ${res.statusCode}`, { 
-                kind, title, statusCode: res.statusCode, body: responseBody.slice(0, 200) 
-              });
-              resolve(); // Не прерываем выполнение при ошибке Telegram
-            }
-          });
-        });
-        
-        req.on('error', (e) => {
-          notificationLogger.error('Ошибка отправки Telegram уведомления', { 
-            kind, title, error: e.message, code: e.code 
-          });
-          resolve();
-        });
-        
-        req.on('timeout', () => {
-          req.destroy();
-          notificationLogger.error('Таймаут отправки Telegram уведомления', { kind, title });
-          resolve();
-        });
-        
-        req.write(data);
-        req.end();
-      });
+      const notifier = await import('./notifications/notifier.js');
+      const sent = await notifier.sendTelegram(n, kind, title, body);
+      if (sent) notificationLogger.info('Telegram уведомление отправлено', { kind, title });
     } catch (e) {
-      notificationLogger.error('Критическая ошибка при отправке Telegram', { 
-        kind, title, error: e.message 
+      notificationLogger.error('Критическая ошибка при отправке Telegram', {
+        kind, title, error: e.message
       });
     }
   }
@@ -1178,7 +1113,7 @@ const server = http.createServer(async (req, res) => {
     if (m && method === 'GET') {
       const a = db.agents.find((x) => x.id === m[1]);
       if (!a) return json(res, 404, { error: 'агент не найден' });
-      if (!isAdmin && !user.scope.includes('agent')) return json(res, 403, { error: 'нет доступа' });
+      if (!isAdmin && !(user.menuScope || []).includes('agents')) return json(res, 403, { error: 'нет доступа' });
       const ranges = { '5m': 3e5, '30m': 18e5, '3h': 108e5, '24h': 864e5, '7d': 6048e5, '30d': 2592e6 };
       const rq = url.searchParams.get('range');
       const range = ranges[rq] ? rq : '3h';
