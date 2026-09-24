@@ -325,11 +325,16 @@ export default function PingHistoryPage() {
                   <div key={agentName}>
                     {/* Заголовок хаба — клик раскрывает/сворачивает список диапазонов и IP */}
                     <button onClick={() => toggleHub(agentName)}
-                      className={cls('flex w-full items-center gap-1.5 rounded-lg border px-2 py-1.5 text-left transition-colors',
+                      className={cls('flex w-full items-center gap-1 rounded-lg border px-1.5 py-2.5 text-left transition-colors',
                         open ? 'border-vio/30 bg-vio/5' : 'border-line/60 bg-raised/30 hover:text-ink')}>
-                      {open
-                        ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-vio" />
-                        : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-dim" />}
+                      {/* Хитбокс стрелки свернуть/развернуть — увеличенная зона клика */}
+                      <span role="button" aria-label={open ? 'Свернуть' : 'Развернуть'} title={open ? 'Свернуть' : 'Развернуть'}
+                        onClick={(e) => { e.stopPropagation(); toggleHub(agentName); }}
+                        className="-my-1 -ml-0.5 flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-dim transition-colors hover:bg-vio/15 hover:text-vio">
+                        {open
+                          ? <ChevronDown className="h-4 w-4" />
+                          : <ChevronRight className="h-4 w-4" />}
+                      </span>
                       <Server className="h-3 w-3 shrink-0 text-dim" />
                       <span className={cls('min-w-0 flex-1 truncate font-mono text-[10px] font-bold uppercase tracking-wider', open ? 'text-vio' : 'text-dim')}>
                         {agentName}
@@ -349,11 +354,16 @@ export default function PingHistoryPage() {
                             <div key={rKey}>
                               {/* Заголовок диапазона (цели) — клик раскрывает список IP */}
                               <button onClick={() => toggleRange(rKey)}
-                                className={cls('flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left transition-colors hover:bg-raised/50',
+                                className={cls('flex w-full items-center gap-1 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-raised/50',
                                   rOpen ? 'text-ink' : 'text-mut')}>
-                                {rOpen
-                                  ? <ChevronDown className="h-3 w-3 shrink-0 text-mut" />
-                                  : <ChevronRight className="h-3 w-3 shrink-0 text-dim" />}
+                                {/* Хитбокс стрелки свернуть/развернуть — увеличенная зона клика */}
+                                <span role="button" aria-label={rOpen ? 'Свернуть' : 'Развернуть'} title={rOpen ? 'Свернуть' : 'Развернуть'}
+                                  onClick={(e) => { e.stopPropagation(); toggleRange(rKey); }}
+                                  className="-my-0.5 -ml-0.5 flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md transition-colors hover:bg-vio/15 hover:text-vio">
+                                  {rOpen
+                                    ? <ChevronDown className="h-4 w-4 text-mut" />
+                                    : <ChevronRight className="h-4 w-4 text-dim" />}
+                                </span>
                                 <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-mut">{rangeKey}</span>
                                 {rTarget && rTarget !== rangeKey && <span className="hidden max-w-[80px] truncate text-[9px] text-dim lg:inline">{rTarget}</span>}
                                 <span className="shrink-0 font-mono text-[9px] text-dim">{rOnline}/{rlist.length}</span>
@@ -516,14 +526,19 @@ export default function PingHistoryPage() {
                   {dayHubs.map(({ dateStr, hubs }) => {
                     const dayTotal = hubs.reduce((n, h) => n + h.evs.length, 0);
                     // по умолчанию раскрыт только первый (самый свежий) день; при поиске — все дни с совпадениями
-                    const dayOpen = searchActive || openDays.has(dateStr) || (!openDays.size && dateStr === dayHubs[0]?.[0]);
+                    const dayOpen = searchActive || openDays.has(dateStr) || (!openDays.size && dateStr === dayHubs[0]?.dateStr);
                     return (
                       <div key={dateStr}>
                         <button onClick={() => toggleDay(dateStr)}
-                          className="mb-1 flex w-full items-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-wider text-dim transition-colors hover:text-ink">
-                          {dayOpen
-                            ? <ChevronDown className="h-3 w-3 shrink-0" />
-                            : <ChevronRight className="h-3 w-3 shrink-0" />}
+                          className="mb-1 flex w-full items-center gap-1 rounded-md py-1.5 pl-1 text-left font-mono text-[10px] font-bold uppercase tracking-wider text-dim transition-colors hover:text-ink">
+                          {/* Хитбокс стрелки свернуть/развернуть — увеличенная зона клика */}
+                          <span role="button" aria-label={dayOpen ? 'Свернуть' : 'Развернуть'} title={dayOpen ? 'Свернуть' : 'Развернуть'}
+                            onClick={(e) => { e.stopPropagation(); toggleDay(dateStr); }}
+                            className="-my-1 flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md transition-colors hover:bg-vio/15 hover:text-vio">
+                            {dayOpen
+                              ? <ChevronDown className="h-4 w-4" />
+                              : <ChevronRight className="h-4 w-4" />}
+                          </span>
                           {fmtDate(dateStr)}
                           <span className="font-normal normal-case text-dim/70">· {dayTotal} событ.</span>
                         </button>
@@ -536,11 +551,16 @@ export default function PingHistoryPage() {
                                 <div key={hdKey}>
                                   {/* Заголовок хаба в ленте — клик раскрывает события этого хаба */}
                                   <button onClick={() => toggleHubDay(hdKey)}
-                                    className={cls('flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left transition-colors hover:bg-raised/50',
+                                    className={cls('flex w-full items-center gap-1 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-raised/50',
                                       hdOpen ? 'text-vio' : 'text-dim')}>
-                                    {hdOpen
-                                      ? <ChevronDown className="h-3 w-3 shrink-0" />
-                                      : <ChevronRight className="h-3 w-3 shrink-0" />}
+                                    {/* Хитбокс стрелки свернуть/развернуть — увеличенная зона клика */}
+                                    <span role="button" aria-label={hdOpen ? 'Свернуть' : 'Развернуть'} title={hdOpen ? 'Свернуть' : 'Развернуть'}
+                                      onClick={(e) => { e.stopPropagation(); toggleHubDay(hdKey); }}
+                                      className="-my-0.5 -ml-0.5 flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md transition-colors hover:bg-vio/15 hover:text-vio">
+                                      {hdOpen
+                                        ? <ChevronDown className="h-4 w-4" />
+                                        : <ChevronRight className="h-4 w-4" />}
+                                    </span>
                                     <Server className="h-3 w-3 shrink-0" />
                                     <span className="min-w-0 flex-1 truncate font-mono text-[10px] font-bold uppercase tracking-wider">{agentName}</span>
                                     {downs > 0 && <span className="shrink-0 rounded bg-crit/15 px-1.5 py-0.5 font-mono text-[9px] font-bold text-crit">↓{downs}</span>}
