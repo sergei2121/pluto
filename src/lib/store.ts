@@ -209,6 +209,13 @@ export const store = {
 
   async updateDevice(id: string, patch: Partial<Device>): Promise<void> {
     if (getState().apiMode === 'server') {
+      // В серверном режиме через этот метод проходят только пользовательские
+      // изменения конфигурации. Поля, которые пишет планировщик/эмуляция
+      // (результаты проверок), запрещены — их источник — только ядро PLUTO Core.
+      const EMU_FIELDS = ['status', 'latency', 'fails', 'history', 'checking', 'approx', 'lastCheck', 'lastChange', 'lastSuccess', 'baseline', 'offlineSince', 'offlineDuration30d'];
+      if (Object.keys(patch).some((k) => EMU_FIELDS.includes(k))) {
+        if (!allowLocalMutation('updateDevice(результаты проверки)')) return;
+      }
       const { api } = await import('./api');
       await api.updateDevice(id, patch);
       await syncAll();
@@ -270,6 +277,11 @@ export const store = {
 
   async updateAgent(id: string, patch: Partial<Agent>): Promise<void> {
     if (getState().apiMode === 'server') {
+      // Аналогично устройствам: результаты опроса/телеметрии пишет только ядро.
+      const EMU_FIELDS = ['online', 'latency', 'onlineSince', 'lastSeen', 'lastPoll', 'lastGlances', 'latHist', 'glances', 'glancesLatest', 'glancesError', 'targets'];
+      if (Object.keys(patch).some((k) => EMU_FIELDS.includes(k))) {
+        if (!allowLocalMutation('updateAgent(результаты опроса)')) return;
+      }
       const { api } = await import('./api');
       await api.updateAgent(id, patch);
       await syncAll();
@@ -432,6 +444,23 @@ export const store = {
 };
 
 function get() { return store; }
+
+// ─── Защита от записи фейковых (эмуляционных) данных в стор ─────────────────
+// Возвращает true, если мутация разрешена. В серверном режиме (apiMode==='server')
+// любые прямые записи в devices/agents запрещены: состояние может обновляться
+// только через applyServerState()/syncAll() из REST-ядра. Это исключает ситуацию,
+// когда значения пингов «рисуются» браузерной эмуляцией поверх реальных данных.
+let emuWarned = false;
+export function allowLocalMutation(op: string): boolean {
+  if (state.apiMode === 'server') {
+    if (!emuWarned) {
+      emuWarned = true;
+      console.warn('[PLUTO] Заблокирована запись эмуляции в стор (серверный режим):', op);
+    }
+    return false;
+  }
+  return true;
+}
 
 // ─── Селекторы видимости по ролям ────────────────────────────────────────────
 
