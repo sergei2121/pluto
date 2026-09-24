@@ -160,7 +160,7 @@ curl -s http://localhost:8080/api/health`;
 
 // ─── Новый relay-агент: состав и полный цикл (сборка → запуск → регистрация) ─
 const AGENT_COMPONENTS = [
-  { part: 'pluto-relay/main.go', role: 'Исходник агента: ICMP-серии (-count 5, первый пакет — warm-up), min/avg/max/jitter/потери, HTTP API на :8091' },
+  { part: 'pluto-relay/main.go', role: 'Исходник агента: ICMP-серии (-count 10, первый пакет — warm-up), min/avg/max/jitter/потери, HTTP API на :8091' },
   { part: 'pluto-relay/go.mod', role: 'Только стандартная библиотека Go: зависимостей нет, бинарник автономный' },
   { part: 'Go ≥ 1.21', role: 'Нужен лишь на сборочной машине; на целевом ПК рантайм Go не требуется' },
   { part: 'Порт TCP :8091', role: 'Входящие правила файрвола для подсети ядра PLUTO — иначе проверки хаба уйдут в down' },
@@ -211,7 +211,7 @@ sudo systemctl enable --now pluto-relay`;
 const AGENT_FLAGS = `# Параметры запуска агента (все необязательные, значения по умолчанию):
 pluto-relay -port 8091        # порт HTTP API
             -timeout 2000     # бюджет времени на одно устройство, мс
-            -count 5          # ICMP-пакетов в серии (1-й — warm-up, отбрасывается)
+            -count 10         # ICMP-пакетов в серии (1-й — warm-up, отбрасывается)
             -concurrency 8    # сколько устройств пинговать параллельно`;
 
 const AGENT_REGISTER = `# Регистрация в PLUTO (браузер, консоль):
