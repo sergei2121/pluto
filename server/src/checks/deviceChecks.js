@@ -22,14 +22,17 @@ export function checkPing(address, timeoutMs = 3000) {
       resolve({ ok: false, latency: null });
     }, timeoutMs + 500);
     
+    // Wall-time включает спавн процесса ping и доставку завершения (+5…20 мс),
+    // поэтому при успехе приоритет — задержке из вывода самой утилиты («time=X ms»).
     const started = Date.now();
-    execFile('ping', ['-c', '1', '-W', String(Math.max(1, Math.ceil(timeoutMs / 1000))), address], (err) => {
+    execFile('ping', ['-c', '1', '-W', String(Math.max(1, Math.ceil(timeoutMs / 1000))), address], (err, stdout) => {
       clearTimeout(to);
       if (err) {
         checkLogger.info('Ping неудачен', { address, error: err.message });
         return resolve({ ok: false, latency: null });
       }
-      const latency = Date.now() - started;
+      const m = /time[=<]\s*([\d.]+)\s*ms/i.exec(stdout || '');
+      const latency = m ? Math.max(1, Math.round(parseFloat(m[1]))) : Math.max(1, Date.now() - started);
       checkLogger.info('Ping успешен', { address, latency });
       resolve({ ok: true, latency });
     });

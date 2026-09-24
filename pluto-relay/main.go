@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -25,6 +26,8 @@ type PingResult struct {
 	LatencyMs *float64 `json:"latencyMs"`
 }
 
+var pingTimeRe = regexp.MustCompile(`(?i)time[=<]\s*([0-9]+(?:[.,][0-9]+)?)\s*ms`)
+
 // pingOne пингует один адрес системной утилитой ping (есть и в Windows, и в Linux).
 func pingOne(ip string, timeoutMs int) PingResult {
 	var cmd *exec.Cmd
@@ -34,10 +37,22 @@ func pingOne(ip string, timeoutMs int) PingResult {
 		cmd = exec.Command("ping", "-c", "1", "-W", strconv.Itoa(timeoutMs/1000+1), ip)
 	}
 	start := time.Now()
-	err := cmd.Run()
-	ms := float64(time.Since(start).Milliseconds())
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return PingResult{IP: ip, Alive: false, LatencyMs: nil}
+	}
+	// Приоритет — задержке из вывода самой утилиты ping («time=X ms»):
+	// wall-time включает спавн процесса и добавляет 5-20 мс шума.
+	var ms float64
+	if loc := pingTimeRe.FindSubmatchIndex(out); loc != nil {
+		v, perr := strconv.ParseFloat(string(out[loc[2]:loc[3]]), 64)
+		if perr == nil && v > 0 {
+			ms = v
+		} else {
+			ms = float64(time.Since(start).Milliseconds())
+		}
+	} else {
+		ms = float64(time.Since(start).Milliseconds())
 	}
 	return PingResult{IP: ip, Alive: true, LatencyMs: &ms}
 }
