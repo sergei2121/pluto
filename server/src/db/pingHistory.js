@@ -124,8 +124,10 @@ export async function rollupPingDaily(db) {
   const current = new Map(); // key -> {up, agentId, agentName, range, target, ip}
   for (const a of db.agents || []) {
     for (const t of a.targets || []) {
+      // ключ строится так же, как в recordPingState / seed (range = t.range || ''),
+      // иначе current не совпадёт с ключами событий и агрегаты потеряются
       for (const r of t.results || []) {
-        const key = pingKey(a.id, t.range || t.target, r.ip);
+        const key = pingKey(a.id, t.range || '', r.ip);
         current.set(key, {
           up: !!r.alive, agentId: a.id, agentName: a.name,
           range: t.range || '', target: t.name || t.target || '', ip: r.ip,

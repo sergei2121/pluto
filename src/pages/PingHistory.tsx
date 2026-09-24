@@ -1,6 +1,6 @@
 // ─── PLUTO: история пингов — месячный журнал онлайн/офлайн устройств ────────
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { History, Wifi, WifiOff, RefreshCw, Search, CalendarDays, ArrowDownCircle, ArrowUpCircle, Download, ChevronDown, ChevronRight } from 'lucide-react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { History, Wifi, WifiOff, RefreshCw, Search, CalendarDays, ArrowDownCircle, ArrowUpCircle, Download, ChevronDown, ChevronRight, Server } from 'lucide-react';
 import { Panel, EmptyState, Seg } from '../components/ui';
 import { api } from '../lib/api';
 import { cls } from '../lib/util';
@@ -89,6 +89,15 @@ export default function PingHistoryPage() {
       return next;
     });
   };
+  // раскрытые диапазоны (цели) внутри хабов — ключ «хаб|диапазон»
+  const [openRanges, setOpenRanges] = useState<Set<string>>(new Set());
+  const toggleRange = (key: string) => {
+    setOpenRanges((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -120,26 +129,41 @@ export default function PingHistoryPage() {
     return () => window.clearInterval(t);
   }, [load]);
 
-  // список устройств с группировкой по агентам (хабам)
+  // список устройств с группировкой по агентам (хабам) и диапазонам внутри хабов
   const grouped = useMemo(() => {
-    const byAgent = new Map<string, PingHistoryDevice[]>();
+    const byAgent = new Map<string, Map<string, PingHistoryDevice[]>>();
     for (const d of devices) {
-      if (!byAgent.has(d.agentName)) byAgent.set(d.agentName, []);
-      byAgent.get(d.agentName)!.push(d);
+      if (!byAgent.has(d.agentName)) byAgent.set(d.agentName, new Map());
+      const ranges = byAgent.get(d.agentName)!;
+      const rk = d.range || d.target;
+      if (!ranges.has(rk)) ranges.set(rk, []);
+      ranges.get(rk)!.push(d);
     }
-    return [...byAgent.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    return [...byAgent.entries()]
+      .map(([agentName, ranges]) => ({
+        agentName,
+        list: [...ranges.values()].flat(),
+        ranges: [...ranges.entries()].sort((a, b) => a[0].localeCompare(b[0])),
+      }))
+      .sort((a, b) => a.agentName.localeCompare(b.agentName));
   }, [devices]);
 
   // при поиске автоматически раскрываем хабы, в которых есть совпадения;
   // по умолчанию все хабы свёрнуты, раскрыт только выбранный вручную хаб или хаб выбранного устройства
   const searchActive = !!q.trim();
+  const needle = q.trim().toLowerCase();
+  const devMatches = (d: PingHistoryDevice) =>
+    d.ip.toLowerCase().includes(needle) || d.target.toLowerCase().includes(needle);
   const hubOpen = (name: string, list: PingHistoryDevice[]) => {
-    if (searchActive) {
-      const n = q.trim().toLowerCase();
-      return list.some((d) => d.ip.toLowerCase().includes(n) || d.target.toLowerCase().includes(n));
-    }
+    if (searchActive) return list.some(devMatches);
     if (sel && list.some((d) => devKey(d) === sel)) return true;
     return openHubs.has(name);
+  };
+  // диапазон внутри хабa: при поиске раскрываем только совпавшие;selected-устройство тоже раскрывает свой диапазон
+  const rangeOpen = (hubName: string, rangeKey: string, list: PingHistoryDevice[]) => {
+    if (searchActive) return list.some(devMatches);
+    if (sel && list.some((d) => devKey(d) === sel)) return true;
+    return openRanges.has(`${hubName}|${rangeKey}`);
   };
 
   const filteredEvents = useMemo(() => {
@@ -158,6 +182,37 @@ export default function PingHistoryPage() {
     }
     return [...map.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
   }, [filteredEvents]);
+
+  // лента событий: внутри дня группируем по хабам, хабы сворачиваются по клику
+  const dayHubs = useMemo(() => {
+    return eventsByDay.map(([dateStr, list]) => {
+      const byHub = new Map<string, PingHistoryEvent[]>();
+      for (const e of list) {
+        if (!byHub.has(e.agentName)) byHub.set(e.agentName, []);
+        byHub.get(e.agentName)!.push(e);
+      }
+      const hubs = [...byHub.entries()]
+        .map(([agentName, evs]) => ({ agentName, evs, downs: evs.filter((e) => !e.up).length }))
+        .sort((a, b) => a.agentName.localeCompare(b.agentName));
+      return { dateStr, hubs };
+    });
+  }, [eventsByDay]);
+  const [openDays, setOpenDays] = useState<Set<string>>(new Set());
+  const toggleDay = (d: string) => {
+    setOpenDays((prev) => {
+      const next = new Set(prev);
+      if (next.has(d)) next.delete(d); else next.add(d);
+      return next;
+    });
+  };
+  const [openHubDays, setOpenHubDays] = useState<Set<string>>(new Set());
+  const toggleHubDay = (key: string) => {
+    setOpenHubDays((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
 
   // суточная доступность по устройствам (тепловая сетка дней)
   const dailyByKey = useMemo(() => {
@@ -262,20 +317,20 @@ export default function PingHistoryPage() {
               <span className="ml-2 font-mono text-[10px] text-dim">{devices.length}</span>
             </button>
             <div className="max-h-[420px] space-y-2 overflow-y-auto scroll-thin pr-1">
-              {grouped.map(([agentName, list]) => {
-                const visible = list.filter((d) => !q.trim() || d.ip.toLowerCase().includes(q.trim().toLowerCase()) || d.target.toLowerCase().includes(q.trim().toLowerCase()));
-                if (searchActive && visible.length === 0) return null;
+              {grouped.map(({ agentName, list, ranges }) => {
+                if (searchActive && !list.some(devMatches)) return null;
                 const open = hubOpen(agentName, list);
                 const onlineCount = list.filter((d) => d.alive).length;
                 return (
                   <div key={agentName}>
-                    {/* Заголовок хаба — клик раскрывает/сворачивает список IP */}
+                    {/* Заголовок хаба — клик раскрывает/сворачивает список диапазонов и IP */}
                     <button onClick={() => toggleHub(agentName)}
                       className={cls('flex w-full items-center gap-1.5 rounded-lg border px-2 py-1.5 text-left transition-colors',
                         open ? 'border-vio/30 bg-vio/5' : 'border-line/60 bg-raised/30 hover:text-ink')}>
                       {open
                         ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-vio" />
                         : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-dim" />}
+                      <Server className="h-3 w-3 shrink-0 text-dim" />
                       <span className={cls('min-w-0 flex-1 truncate font-mono text-[10px] font-bold uppercase tracking-wider', open ? 'text-vio' : 'text-dim')}>
                         {agentName}
                       </span>
@@ -283,20 +338,47 @@ export default function PingHistoryPage() {
                     </button>
                     {open && (
                       <div className="mt-1 space-y-1 border-l border-line/50 pl-2">
-                        {visible.map((d) => (
-                          <button key={devKey(d)} onClick={() => setSel(devKey(d) === sel ? '' : devKey(d))}
-                            className={cls('flex w-full items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left transition-colors',
-                              sel === devKey(d) ? 'border-vio/50 bg-vio/10' : 'border-transparent hover:bg-raised/50')}>
-                            <span className="min-w-0">
-                              <span className="block truncate font-mono text-[11.5px] text-ink">{d.ip}</span>
-                              <span className="block truncate text-[9.5px] text-dim">{d.target}</span>
-                            </span>
-                            {d.alive
-                              ? <Wifi className="h-3.5 w-3.5 shrink-0 text-ok" />
-                              : <WifiOff className="h-3.5 w-3.5 shrink-0 text-crit" />}
-                          </button>
-                        ))}
-                        {visible.length === 0 && <p className="px-2 py-1 text-[10.5px] text-dim">Ничего не найдено.</p>}
+                        {ranges.map(([rangeKey, rlist]) => {
+                          const visible = rlist.filter((d) => !searchActive || devMatches(d));
+                          if (searchActive && visible.length === 0) return null;
+                          const rOpen = rangeOpen(agentName, rangeKey, rlist);
+                          const rOnline = rlist.filter((d) => d.alive).length;
+                          const rTarget = rlist[0]?.target || '';
+                          const rKey = `${agentName}|${rangeKey}`;
+                          return (
+                            <div key={rKey}>
+                              {/* Заголовок диапазона (цели) — клик раскрывает список IP */}
+                              <button onClick={() => toggleRange(rKey)}
+                                className={cls('flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left transition-colors hover:bg-raised/50',
+                                  rOpen ? 'text-ink' : 'text-mut')}>
+                                {rOpen
+                                  ? <ChevronDown className="h-3 w-3 shrink-0 text-mut" />
+                                  : <ChevronRight className="h-3 w-3 shrink-0 text-dim" />}
+                                <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-mut">{rangeKey}</span>
+                                {rTarget && rTarget !== rangeKey && <span className="hidden max-w-[80px] truncate text-[9px] text-dim lg:inline">{rTarget}</span>}
+                                <span className="shrink-0 font-mono text-[9px] text-dim">{rOnline}/{rlist.length}</span>
+                              </button>
+                              {rOpen && (
+                                <div className="ml-3 mt-0.5 space-y-1 border-l border-line/40 pl-2">
+                                  {visible.map((d) => (
+                                    <button key={devKey(d)} onClick={() => setSel(devKey(d) === sel ? '' : devKey(d))}
+                                      className={cls('flex w-full items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left transition-colors',
+                                        sel === devKey(d) ? 'border-vio/50 bg-vio/10' : 'border-transparent hover:bg-raised/50')}>
+                                      <span className="min-w-0">
+                                        <span className="block truncate font-mono text-[11.5px] text-ink">{d.ip}</span>
+                                        <span className="block truncate text-[9.5px] text-dim">{d.target}</span>
+                                      </span>
+                                      {d.alive
+                                        ? <Wifi className="h-3.5 w-3.5 shrink-0 text-ok" />
+                                        : <WifiOff className="h-3.5 w-3.5 shrink-0 text-crit" />}
+                                    </button>
+                                  ))}
+                                  {visible.length === 0 && <p className="px-2 py-1 text-[10.5px] text-dim">Ничего не найдено.</p>}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -332,33 +414,48 @@ export default function PingHistoryPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {devices
-                        .filter((d) => !selDev || devKey(d) === devKey(selDev))
-                        .filter((d) => !q.trim() || d.ip.toLowerCase().includes(q.trim().toLowerCase()) || d.target.toLowerCase().includes(q.trim().toLowerCase()))
-                        .slice(0, 60)
-                        .map((d) => {
-                          const byDate = dailyByKey.get(devKey(d));
-                          return (
-                            <tr key={devKey(d)}>
-                              <td className="sticky left-0 whitespace-nowrap bg-panel/95 px-2 py-1 font-mono text-[10.5px] text-ink">
-                                {d.ip}<span className="ml-1 text-[9px] text-dim">{d.target}</span>
+                      {grouped.map(({ agentName, list }) => {
+                        const rows = list
+                          .filter((d) => !selDev || devKey(d) === devKey(selDev))
+                          .filter((d) => !searchActive || devMatches(d))
+                          .slice(0, 60);
+                        if (rows.length === 0) return null;
+                        return (
+                          <Fragment key={agentName}>
+                            {/* Строка-заголовок хаба */}
+                            <tr>
+                              <td colSpan={monthDates.length + 1} className="sticky left-0 px-2 pt-2 pb-0.5">
+                                <span className="inline-flex items-center gap-1 font-mono text-[9.5px] font-bold uppercase tracking-wider text-vio/80">
+                                  <Server className="h-3 w-3" />{agentName}
+                                </span>
                               </td>
-                              {monthDates.map((dt) => {
-                                const rec = byDate?.get(dt);
-                                const pct = rec?.uptimePct ?? null;
-                                return (
-                                  <td key={dt} className="px-0.5 py-0.5">
-                                    <div
-                                      title={`${fmtDate(dt)} · ${pct != null ? pct + '%' : 'нет данных'}${rec ? ` · отключений: ${rec.downCount}` : ''}`}
-                                      className={cls('h-4 w-full min-w-[10px] rounded-[3px]',
-                                        pct == null ? 'bg-line/40' : pct >= 99.5 ? 'bg-ok/70' : pct >= 97 ? 'bg-warn/70' : pct > 0 ? 'bg-crit/70' : 'bg-crit')}
-                                    />
-                                  </td>
-                                );
-                              })}
                             </tr>
-                          );
-                        })}
+                            {rows.map((d) => {
+                              const byDate = dailyByKey.get(devKey(d));
+                              return (
+                                <tr key={devKey(d)}>
+                                  <td className="sticky left-0 whitespace-nowrap bg-panel/95 px-2 py-1 pl-5 font-mono text-[10.5px] text-ink">
+                                    {d.ip}<span className="ml-1 text-[9px] text-dim">{d.target}</span>
+                                  </td>
+                                  {monthDates.map((dt) => {
+                                    const rec = byDate?.get(dt);
+                                    const pct = rec?.uptimePct ?? null;
+                                    return (
+                                      <td key={dt} className="px-0.5 py-0.5">
+                                        <div
+                                          title={`${fmtDate(dt)} · ${pct != null ? pct + '%' : 'нет данных'}${rec ? ` · отключений: ${rec.downCount}` : ''}`}
+                                          className={cls('h-4 w-full min-w-[10px] rounded-[3px]',
+                                            pct == null ? 'bg-line/40' : pct >= 99.5 ? 'bg-ok/70' : pct >= 97 ? 'bg-warn/70' : pct > 0 ? 'bg-crit/70' : 'bg-crit')}
+                                        />
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                              );
+                            })}
+                          </Fragment>
+                        );
+                      })}
                     </tbody>
                   </table>
                 )}
@@ -416,29 +513,67 @@ export default function PingHistoryPage() {
                   text={`За последние ${days} дней изменений состояния не зафиксировано — все устройства стабильны.`} />
               ) : (
                 <div className="max-h-[400px] space-y-3 overflow-y-auto scroll-thin pr-1">
-                  {eventsByDay.map(([dateStr, list]) => (
-                    <div key={dateStr}>
-                      <div className="mb-1 font-mono text-[10px] font-bold uppercase tracking-wider text-dim">{fmtDate(dateStr)}</div>
-                      <div className="space-y-1">
-                        {list.map((e) => (
-                          <div key={e.id} className="flex items-center gap-2.5 rounded-md border border-line/40 bg-raised/30 px-3 py-1.5">
-                            {e.up
-                              ? <ArrowUpCircle className="h-3.5 w-3.5 shrink-0 text-ok" />
-                              : <ArrowDownCircle className="h-3.5 w-3.5 shrink-0 text-crit" />}
-                            <span className="font-mono text-[11.5px] font-semibold text-ink">{e.ip}</span>
-                            <span className="truncate text-[10.5px] text-mut">{e.target}</span>
-                            <span className="hidden truncate text-[10px] text-dim sm:inline">{e.agentName}</span>
-                            <span className="ml-auto shrink-0 font-mono text-[10px] text-dim">
-                              {new Date(e.ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                            </span>
-                            <span className={cls('shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase', e.up ? 'bg-ok/15 text-ok' : 'bg-crit/15 text-crit')}>
-                              {e.up ? 'онлайн' : 'офлайн'}
-                            </span>
+                  {dayHubs.map(({ dateStr, hubs }) => {
+                    const dayTotal = hubs.reduce((n, h) => n + h.evs.length, 0);
+                    // по умолчанию раскрыт только первый (самый свежий) день; при поиске — все дни с совпадениями
+                    const dayOpen = searchActive || openDays.has(dateStr) || (!openDays.size && dateStr === dayHubs[0]?.[0]);
+                    return (
+                      <div key={dateStr}>
+                        <button onClick={() => toggleDay(dateStr)}
+                          className="mb-1 flex w-full items-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-wider text-dim transition-colors hover:text-ink">
+                          {dayOpen
+                            ? <ChevronDown className="h-3 w-3 shrink-0" />
+                            : <ChevronRight className="h-3 w-3 shrink-0" />}
+                          {fmtDate(dateStr)}
+                          <span className="font-normal normal-case text-dim/70">· {dayTotal} событ.</span>
+                        </button>
+                        {dayOpen && (
+                          <div className="space-y-1.5 border-l border-line/50 pl-2">
+                            {hubs.map(({ agentName, evs, downs }) => {
+                              const hdKey = `${dateStr}|${agentName}`;
+                              const hdOpen = searchActive || sel !== '' || openHubDays.has(hdKey);
+                              return (
+                                <div key={hdKey}>
+                                  {/* Заголовок хаба в ленте — клик раскрывает события этого хаба */}
+                                  <button onClick={() => toggleHubDay(hdKey)}
+                                    className={cls('flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left transition-colors hover:bg-raised/50',
+                                      hdOpen ? 'text-vio' : 'text-dim')}>
+                                    {hdOpen
+                                      ? <ChevronDown className="h-3 w-3 shrink-0" />
+                                      : <ChevronRight className="h-3 w-3 shrink-0" />}
+                                    <Server className="h-3 w-3 shrink-0" />
+                                    <span className="min-w-0 flex-1 truncate font-mono text-[10px] font-bold uppercase tracking-wider">{agentName}</span>
+                                    {downs > 0 && <span className="shrink-0 rounded bg-crit/15 px-1.5 py-0.5 font-mono text-[9px] font-bold text-crit">↓{downs}</span>}
+                                    <span className="shrink-0 font-mono text-[9px] text-dim">{evs.length}</span>
+                                  </button>
+                                  {hdOpen && (
+                                    <div className="ml-4 mt-0.5 space-y-1 border-l border-line/40 pl-2">
+                                      {evs.map((e) => (
+                                        <div key={e.id} className="flex items-center gap-2.5 rounded-md border border-line/40 bg-raised/30 px-3 py-1.5">
+                                          {e.up
+                                            ? <ArrowUpCircle className="h-3.5 w-3.5 shrink-0 text-ok" />
+                                            : <ArrowDownCircle className="h-3.5 w-3.5 shrink-0 text-crit" />}
+                                          <span className="font-mono text-[11.5px] font-semibold text-ink">{e.ip}</span>
+                                          <span className="truncate text-[10.5px] text-mut">{e.target}</span>
+                                          <span className="hidden truncate text-[10px] text-dim sm:inline">{e.agentName}</span>
+                                          <span className="ml-auto shrink-0 font-mono text-[10px] text-dim">
+                                            {new Date(e.ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                          </span>
+                                          <span className={cls('shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase', e.up ? 'bg-ok/15 text-ok' : 'bg-crit/15 text-crit')}>
+                                            {e.up ? 'онлайн' : 'офлайн'}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
-                        ))}
+                        )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
