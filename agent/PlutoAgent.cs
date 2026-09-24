@@ -509,7 +509,7 @@ class Worker
             AgentLog.Write("подключено к " + _o.Server);
 
             string hello = "{\"type\":\"hello\",\"hostname\":\"" + Json.Esc(Environment.MachineName) +
-                            "\",\"os\":\"Windows\",\"version\":\"1.8.8-cs\"}";            await Send(ws, hello);
+                            "\",\"os\":\"Windows\",\"version\":\"1.8.9-cs\"}";            await Send(ws, hello);
 
             // Приём сообщений — наблюдаемая Task. Любая ошибка внутри НЕ убивает
             // процесс (была async void → молчаливое падение), а только логируется.
@@ -684,7 +684,7 @@ class PlutoService : ServiceBase
 
     protected override void OnStart(string[] args)
     {
-        AgentLog.Write("служба запускается (PID " + Process.GetCurrentProcess().Id + ", версия 1.8.1-cs)");
+        AgentLog.Write("служба запускается (PID " + Process.GetCurrentProcess().Id + ", версия 1.8.9-cs)");
         var o = Options.Load(RealCommandLine.Args());
         AgentLog.Write("режим: сервер " + o.Server + ", токен " + (string.IsNullOrEmpty(o.Token) ? "ОТСУТСТВУЕТ" : "загружен"));
         if (string.IsNullOrEmpty(o.Token))
@@ -755,7 +755,7 @@ static class Program
                 Console.WriteLine("укажите токен: pluto-agent.exe -token ТОКЕН  (или создайте C:\\ProgramData\\pluto\\agent.conf)");
                 return;
             }
-            Console.WriteLine("[pluto-agent] версия 1.8.1-cs · консольный режим (Ctrl+C — выход)");
+            Console.WriteLine("[pluto-agent] версия 1.8.9-cs · консольный режим (Ctrl+C — выход)");
             new Worker(o).Run();
         }
         else

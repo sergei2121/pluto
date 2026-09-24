@@ -1,5 +1,5 @@
+# Compiled/Binary files
+*.exe
+
 # Build artifacts
 dist/
-
-# Compiled binaries (Go)
-pluto-relay/pluto-relay
