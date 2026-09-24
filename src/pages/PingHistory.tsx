@@ -1,6 +1,6 @@
 // ─── PLUTO: история пингов — месячный журнал онлайн/офлайн устройств ────────
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { History, Wifi, WifiOff, RefreshCw, Search, CalendarDays, ArrowDownCircle, ArrowUpCircle, Download } from 'lucide-react';
+import { History, Wifi, WifiOff, RefreshCw, Search, CalendarDays, ArrowDownCircle, ArrowUpCircle, Download, ChevronDown, ChevronRight } from 'lucide-react';
 import { Panel, EmptyState, Seg } from '../components/ui';
 import { api } from '../lib/api';
 import { cls } from '../lib/util';
@@ -80,6 +80,15 @@ export default function PingHistoryPage() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [lastLoad, setLastLoad] = useState<number>(0);
+  // раскрытые хабы в списке устройств (по умолчанию — все свёрнуты)
+  const [openHubs, setOpenHubs] = useState<Set<string>>(new Set());
+  const toggleHub = (name: string) => {
+    setOpenHubs((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      return next;
+    });
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -111,7 +120,7 @@ export default function PingHistoryPage() {
     return () => window.clearInterval(t);
   }, [load]);
 
-  // список устройств с группировкой по агентам
+  // список устройств с группировкой по агентам (хабам)
   const grouped = useMemo(() => {
     const byAgent = new Map<string, PingHistoryDevice[]>();
     for (const d of devices) {
@@ -120,6 +129,18 @@ export default function PingHistoryPage() {
     }
     return [...byAgent.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [devices]);
+
+  // при поиске автоматически раскрываем хабы, в которых есть совпадения;
+  // по умолчанию все хабы свёрнуты, раскрыт только выбранный вручную хаб или хаб выбранного устройства
+  const searchActive = !!q.trim();
+  const hubOpen = (name: string, list: PingHistoryDevice[]) => {
+    if (searchActive) {
+      const n = q.trim().toLowerCase();
+      return list.some((d) => d.ip.toLowerCase().includes(n) || d.target.toLowerCase().includes(n));
+    }
+    if (sel && list.some((d) => devKey(d) === sel)) return true;
+    return openHubs.has(name);
+  };
 
   const filteredEvents = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -240,29 +261,47 @@ export default function PingHistoryPage() {
               Все устройства
               <span className="ml-2 font-mono text-[10px] text-dim">{devices.length}</span>
             </button>
-            <div className="max-h-[420px] space-y-3 overflow-y-auto scroll-thin pr-1">
-              {grouped.map(([agentName, list]) => (
-                <div key={agentName}>
-                  <div className="mb-1 px-1 font-mono text-[9.5px] font-bold uppercase tracking-wider text-dim">{agentName}</div>
-                  <div className="space-y-1">
-                    {list
-                      .filter((d) => !q.trim() || d.ip.toLowerCase().includes(q.trim().toLowerCase()) || d.target.toLowerCase().includes(q.trim().toLowerCase()))
-                      .map((d) => (
-                        <button key={devKey(d)} onClick={() => setSel(devKey(d) === sel ? '' : devKey(d))}
-                          className={cls('flex w-full items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left transition-colors',
-                            sel === devKey(d) ? 'border-vio/50 bg-vio/10' : 'border-transparent hover:bg-raised/50')}>
-                          <span className="min-w-0">
-                            <span className="block truncate font-mono text-[11.5px] text-ink">{d.ip}</span>
-                            <span className="block truncate text-[9.5px] text-dim">{d.target}</span>
-                          </span>
-                          {d.alive
-                            ? <Wifi className="h-3.5 w-3.5 shrink-0 text-ok" />
-                            : <WifiOff className="h-3.5 w-3.5 shrink-0 text-crit" />}
-                        </button>
-                      ))}
+            <div className="max-h-[420px] space-y-2 overflow-y-auto scroll-thin pr-1">
+              {grouped.map(([agentName, list]) => {
+                const visible = list.filter((d) => !q.trim() || d.ip.toLowerCase().includes(q.trim().toLowerCase()) || d.target.toLowerCase().includes(q.trim().toLowerCase()));
+                if (searchActive && visible.length === 0) return null;
+                const open = hubOpen(agentName, list);
+                const onlineCount = list.filter((d) => d.alive).length;
+                return (
+                  <div key={agentName}>
+                    {/* Заголовок хаба — клик раскрывает/сворачивает список IP */}
+                    <button onClick={() => toggleHub(agentName)}
+                      className={cls('flex w-full items-center gap-1.5 rounded-lg border px-2 py-1.5 text-left transition-colors',
+                        open ? 'border-vio/30 bg-vio/5' : 'border-line/60 bg-raised/30 hover:text-ink')}>
+                      {open
+                        ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-vio" />
+                        : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-dim" />}
+                      <span className={cls('min-w-0 flex-1 truncate font-mono text-[10px] font-bold uppercase tracking-wider', open ? 'text-vio' : 'text-dim')}>
+                        {agentName}
+                      </span>
+                      <span className="shrink-0 font-mono text-[9.5px] text-dim">{onlineCount}/{list.length}</span>
+                    </button>
+                    {open && (
+                      <div className="mt-1 space-y-1 border-l border-line/50 pl-2">
+                        {visible.map((d) => (
+                          <button key={devKey(d)} onClick={() => setSel(devKey(d) === sel ? '' : devKey(d))}
+                            className={cls('flex w-full items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left transition-colors',
+                              sel === devKey(d) ? 'border-vio/50 bg-vio/10' : 'border-transparent hover:bg-raised/50')}>
+                            <span className="min-w-0">
+                              <span className="block truncate font-mono text-[11.5px] text-ink">{d.ip}</span>
+                              <span className="block truncate text-[9.5px] text-dim">{d.target}</span>
+                            </span>
+                            {d.alive
+                              ? <Wifi className="h-3.5 w-3.5 shrink-0 text-ok" />
+                              : <WifiOff className="h-3.5 w-3.5 shrink-0 text-crit" />}
+                          </button>
+                        ))}
+                        {visible.length === 0 && <p className="px-2 py-1 text-[10.5px] text-dim">Ничего не найдено.</p>}
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
               {devices.length === 0 && <p className="px-1 text-[11px] text-dim">Нет пингуемых устройств. Добавьте цели в «Хабы → Изменить».</p>}
             </div>
           </div>
