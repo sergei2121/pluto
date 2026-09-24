@@ -12,6 +12,7 @@ import { loginRateLimiter } from './middleware/rateLimiter.js';
 import telemetryCollectors from './telemetry/collectors.js';
 import deviceChecks from './checks/deviceChecks.js';
 import { relayPing } from './lib/relay.js';
+import { provisionAgent, AGENT_PORT_DEFAULT } from './lib/provision.js';
 import { initPingHistory, recordPingState, seedPingHistoryFromAgents, savePingEvents, rollupPingDaily, queryPingHistory } from './db/pingHistory.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1128,6 +1129,35 @@ const server = http.createServer(async (req, res) => {
         pts = out;
       }
       return json(res, 200, { range, retentionDays: 30, points: pts });
+    }
+    // ── автоустановка relay-агента по SSH («Развёртывание → Создать агента автоматически») ──
+    if (p === '/api/provision/agent' && method === 'POST' && isAdmin) {
+      const b = await readBody(req);
+      const name = String(b.name || '').trim();
+      const ip = String(b.host || b.ip || '').trim();
+      const port = Number(b.port) || AGENT_PORT_DEFAULT;
+      // 1) ставим агента на машину (пароль/ключ живут только в памяти запроса)
+      const r = await provisionAgent({
+        host: ip, login: b.login, password: b.password, privateKey: b.privateKey,
+        port, sshPort: b.sshPort, pingTargets: b.pingTargets, withSudo: b.withSudo !== false,
+      });
+      if (!r.ok) return json(res, 200, { ...r, agent: null });
+      // 2) регистрируем хаб в базе ядра и сразу назначаем ему цели пинга
+      const a = {
+        id: uid(), name: name || ('ПК ' + ip), ip,
+        relayUrl: String(b.relayMode || '') === 'relay' ? r.agentUrl : '',
+        agentUrl: String(b.relayMode || '') === 'relay' ? undefined : r.agentUrl,
+        netdataUrl: undefined,
+        pingTargets: Array.isArray(b.pingTargets) ? b.pingTargets.map(t => typeof t === 'string' ? { name: '', range: t } : t) : [],
+        tags: [], targets: [], favorite: false, pingsFavorite: false, pingsShowcase: false, statsView: '',
+        online: !!r.online, latency: null, onlineSince: r.online ? Date.now() : 0, lastSeen: r.online ? Date.now() : 0,
+        lastPoll: 0, lastNetdata: 0, latHist: [], netdata: [], netdataLatest: null, netdataError: null, createdAt: Date.now(),
+      };
+      db.agents.push(a);
+      await pushEvent('ok', 'agent', `Автоустановлен агент «${a.name}» (${ip}:${port}) — ${r.online ? 'отвечает' : 'запущен, ждёт проверок'}`);
+      await saveDb();
+      queue.push(() => pollAgent(a)); runNext();
+      return json(res, 200, { ...r, agent: { id: a.id, name: a.name, ip: a.ip, agentUrl: a.agentUrl || a.relayUrl } });
     }
     m = p.match(/^\/api\/agents\/([^/]+)\/test-netdata$/);
     if (m && method === 'GET') {

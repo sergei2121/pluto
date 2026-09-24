@@ -133,6 +133,15 @@ export const api = {
 
   // инвентаризация агента
   collectInventory: (id: string) => req<Agent>('POST', `/api/agents/${id}/inventory`),
+
+  // автоустановка relay-агента по SSH из раздела «Развёртывание»
+  provisionAgent: (b: {
+    name?: string; host: string; login: string; password?: string; privateKey?: string;
+    port?: number; sshPort?: number; pingTargets?: string[]; withSudo?: boolean; relayMode?: 'relay' | 'agent';
+  }) => req<{
+    ok: boolean; agentUrl: string; online?: boolean; steps: string[]; log: string; error?: string;
+    agent?: { id: string; name: string; ip: string; agentUrl: string } | null;
+  }>('POST', '/api/provision/agent', b),
 };
 
 /** Полная синхронизация состояния с ядром. */

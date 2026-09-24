@@ -1,6 +1,142 @@
 // ─── PLUTO: развёртывание и документация ────────────────────────────────────
-import { Rocket, Server, Monitor, Activity } from 'lucide-react';
-import { Panel, CopyBlock } from '../components/ui';
+import { useState } from 'react';
+import { Rocket, Server, Monitor, Activity, Zap, Loader2, CheckCircle2, XCircle, Wand2 } from 'lucide-react';
+import { Panel, CopyBlock, Field, Toggle } from '../components/ui';
+import { useCurrentUser, usePluto, useToasts } from '../lib/store';
+import { isIp, isTarget } from '../lib/util';
+
+/** Панель автоустановки relay-агента по SSH (доступна админу в серверном режиме). */
+function ProvisionAgentPanel() {
+  const user = useCurrentUser();
+  const apiMode = usePluto((st) => st.apiMode);
+  const [host, setHost] = useState('');
+  const [name, setName] = useState('');
+  const [login, setLogin] = useState('');
+  const [password, setPassword] = useState('');
+  const [privateKey, setPrivateKey] = useState('');
+  const [useKey, setUseKey] = useState(false);
+  const [port, setPort] = useState('8091');
+  const [sshPort, setSshPort] = useState('22');
+  const [withSudo, setWithSudo] = useState(true);
+  const [relayMode, setRelayMode] = useState<'agent' | 'relay'>('agent');
+  const [targets, setTargets] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [steps, setSteps] = useState<string[]>([]);
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+
+  if (!user || user.role !== 'admin' || apiMode !== 'server') return null;
+
+  const run = async () => {
+    setResult(null); setSteps([]);
+    const h = host.trim();
+    if (!h) { setResult({ ok: false, text: 'Укажите IP или hostname целевой Linux-машины' }); return; }
+    if (!isIp(h) && !/^[A-Za-z0-9.-]+$/.test(h)) { setResult({ ok: false, text: 'Некорректный адрес машины' }); return; }
+    if (!login.trim()) { setResult({ ok: false, text: 'Укажите логин SSH' }); return; }
+    if (useKey && !privateKey.trim()) { setResult({ ok: false, text: 'Вставьте закрытый SSH-ключ или переключитесь на пароль' }); return; }
+    if (!useKey && !password) { setResult({ ok: false, text: 'Введите пароль SSH или используйте ключ' }); return; }
+    const tgts = targets.split(/[\n,;]+/).map((t) => t.trim()).filter(Boolean);
+    const badT = tgts.find((t) => !isTarget(t));
+    if (badT) { setResult({ ok: false, text: `Некорректная цель пинга: «${badT}». Форматы: 10.0.0.5, 10.0.0.1-20, 10.0.0.0/24` }); return; }
+    setBusy(true);
+    setSteps(['Отправляю задание на сервер… установка идёт по SSH и может занять 1–3 минуты (сборка Go).']);
+    try {
+      const { api } = await import('../lib/api');
+      const r = await api.provisionAgent({
+        name: name.trim() || undefined,
+        host: h, login: login.trim(),
+        password: useKey ? undefined : password,
+        privateKey: useKey ? privateKey.trim() : undefined,
+        port: Number(port) || 8091, sshPort: Number(sshPort) || 22,
+        pingTargets: tgts, withSudo, relayMode,
+      });
+      setSteps(r.steps || []);
+      if (r.ok) {
+        setResult({ ok: true, text: r.online
+          ? `Агент установлен и отвечает: ${r.agentUrl}. Хаб «${r.agent?.name ?? ''}» добавлен в «Хабы».`
+          : `Агент установлен (${r.agentUrl}), но /health пока не отвечает — проверьте файрвол. Хаб добавлен в «Хабы».` });
+        await syncAll();
+        useToasts.push('ok', `Автоустановлен агент «${r.agent?.name ?? h}»`);
+        setHost(''); setName(''); setPassword(''); setPrivateKey(''); setTargets('');
+      } else {
+        setResult({ ok: false, text: r.error || 'Не удалось установить агента' });
+        useToasts.push('crit', `Автоустановка агента не удалась: ${(r.error || '').slice(0, 80)}`);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Ошибка запроса';
+      setResult({ ok: false, text: /404|not found/i.test(msg)
+        ? 'Ядро не поддерживает автоустановку (нет /api/provision/agent). Обновите PLUTO Core.'
+        : msg });
+    } finally { setBusy(false); setPassword(''); }
+  };
+
+  return (
+    <Panel title="2а · Создать агента автоматически (SSH)" icon={<Wand2 className="h-4 w-4" />}>
+      <p className="mb-3 text-[12px] leading-relaxed text-dim">
+        Ядро само скопирует исходники pluto-relay на Linux-машину по SSH, соберёт бинарник (при отсутствии
+        установит Go), зарегистрирует службу systemd с автозапуском и добавит хаб в раздел «Хабы» с нужными
+        целями пинга. Логин/пароль не сохраняются ни в базе, ни в логах. Для входа паролем на сервере должен
+        быть пакет <span className="font-mono text-[11px] text-vio">sshpass</span> (в Docker-образе уже есть);
+        для службы нужен бессудольный sudo (<span className="font-mono text-[11px] text-vio">visudo: user ALL=(ALL) NOPASSWD: ALL</span>).
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="IP / hostname машины"><input className="inp font-mono" value={host} onChange={(e) => setHost(e.target.value)} placeholder="192.168.1.10" disabled={busy} /></Field>
+        <Field label="Имя хаба (необязательно)"><input className="inp" value={name} onChange={(e) => setName(e.target.value)} placeholder="Офис — ПК бухгалтера" disabled={busy} /></Field>
+        <Field label="Логин SSH"><input className="inp font-mono" value={login} onChange={(e) => setLogin(e.target.value)} placeholder="admin" disabled={busy} /></Field>
+        <div className="flex items-end gap-4 pb-1">
+          <label className="flex items-center gap-2 text-[12px] text-mut">
+            <Toggle checked={useKey} onChange={setUseKey} disabled={busy} /> вход по ключу
+          </label>
+          <label className="flex items-center gap-2 text-[12px] text-mut">
+            <Toggle checked={withSudo} onChange={setWithSudo} disabled={busy} /> службой systemd
+          </label>
+        </div>
+        {!useKey ? (
+          <Field label="Пароль SSH" hint="Используется один раз и не сохраняется"><input className="inp font-mono" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" autoComplete="off" disabled={busy} /></Field>
+        ) : (
+          <Field label="Закрытый SSH-ключ (PEM)" hint="Приватный ключ читается один раз для подключения и не сохраняется"><textarea className="inp font-mono min-h-[88px]" value={privateKey} onChange={(e) => setPrivateKey(e.target.value)} placeholder={'-----BEGIN OPENSSH PRIVATE KEY-----'} autoComplete="off" disabled={busy} /></Field>
+        )}
+        <Field label="Порт агента"><input className="inp font-mono" value={port} onChange={(e) => setPort(e.target.value)} placeholder="8091" disabled={busy} /></Field>
+        <Field label="Порт SSH"><input className="inp font-mono" value={sshPort} onChange={(e) => setSshPort(e.target.value)} placeholder="22" disabled={busy} /></Field>
+        <Field label="Назначение адреса" className="sm:col-span-2" hint="«Relay-пинги» — ядро будет поручать агенту ICMP-проверки целей ниже. «Телеметрия» — опрашивать его API как источник метрик ПК.">
+          <div className="flex flex-wrap gap-2">
+            {[{ v: 'relay', l: 'Relay-пинги + цели ниже' }, { v: 'agent', l: 'Телеметрия (Agent URL)' }].map((o) => (
+              <button key={o.v} type="button" disabled={busy} onClick={() => setRelayMode(o.v as 'agent' | 'relay')}
+                className={`rounded-lg border px-3 py-2 text-[12px] font-semibold transition-all ${relayMode === o.v ? 'border-vio/60 bg-vio/15 text-vio' : 'border-line bg-raised/50 text-dim hover:text-mut'}`}>
+                {o.l}
+              </button>
+            ))}
+          </div>
+        </Field>
+        {relayMode === 'relay' && (
+          <Field label="Цели для пинга (через строку)" className="sm:col-span-2" hint="Устройства локальной сети этой машины: 10.0.0.5, 10.0.0.1-20, 10.0.0.0/24">
+            <textarea className="inp font-mono min-h-[70px]" value={targets} onChange={(e) => setTargets(e.target.value)} placeholder={'192.168.1.1\n192.168.1.20-60'} disabled={busy} />
+          </Field>
+        )}
+      </div>
+      <div className="mt-4 flex items-center gap-3">
+        <button type="button" onClick={run} disabled={busy} className="btn-acc">
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+          {busy ? 'Устанавливаю…' : 'Создать агента автоматически'}
+        </button>
+        {result && (
+          <span className={`inline-flex items-center gap-1.5 text-[12.5px] ${result.ok ? 'text-ok' : 'text-crit'}`}>
+            {result.ok ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <XCircle className="h-4 w-4 shrink-0" />}
+            {result.text}
+          </span>
+        )}
+      </div>
+      {steps.length > 0 && (
+        <ol className="mt-3 space-y-1 rounded-lg border border-line/60 bg-raised/40 p-3">
+          {steps.map((s, i) => (
+            <li key={i} className="font-mono text-[11.5px] leading-snug text-mut">
+              <span className="mr-2 text-dim">{i + 1}.</span>{s}
+            </li>
+          ))}
+        </ol>
+      )}
+    </Panel>
+  );
+}
 
 const SERVER_INSTALL = `# Docker (если ещё нет)
 sudo apt update && sudo apt install -y ca-certificates curl gnupg
