@@ -10,8 +10,9 @@ RUN npm ci && npm run build
 
 # Этап 2: ядро мониторинга (зависимостей нет — только встроенные модули Node)
 FROM node:20-alpine
-# iputils — бинарь ping для ICMP-проверок
-RUN apk add --no-cache iputils iproute2 tzdata
+# iputils — бинарь ping для ICMP-проверок; openssh-client + sshpass — автоустановка
+# relay-агентов по SSH («Развёртывание → Создать агента автоматически»); curl — проверка /health
+RUN apk add --no-cache iputils iproute2 tzdata openssh-client sshpass curl bash
 WORKDIR /app
 ENV NODE_ENV=production \
     DATA_DIR=/data \
@@ -19,6 +20,7 @@ ENV NODE_ENV=production \
 
 COPY server/package.json ./package.json
 COPY server/src ./src
+COPY pluto-relay/main.go pluto-relay/go.mod ./pluto-relay/
 COPY --from=web /app/dist ./web
 
 VOLUME /data
