@@ -19,6 +19,11 @@
 // Запуск:              pluto-relay.exe            (или службой: pluto-relay.exe -install)
 package main
 
+// buildStamp — метка сборки: по /health на хабе видно, какая версия relay
+// реально запущена. Старые бинарники (до серии из 10 пакетов) давали
+// «одинаковые пинги» на весь диапазон IP.
+const buildStamp = "pluto-relay v2.3 (series-10, per-ip rtt)"
+
 import (
 	"encoding/json"
 	"flag"
@@ -148,6 +153,39 @@ type healthEntry struct {
 	ts     time.Time
 }
 
+// hubStats — агрегат последнего запроса /ping: сколько целей отвечали и
+// сколько РАЗЛИЧНЫХ RTT получено. Одинаковый RTT у нескольких живых целей
+// диапазона в реальной сети практически невозможен — это признак старого
+// бинарника relay или прокси, который не пингует цели по-настоящему.
+type hubStats struct {
+	total        int
+	alive        int
+	distinctRtts int
+	at           time.Time
+}
+
+var (
+	hubMu  sync.Mutex
+	hubRec *hubStats
+)
+
+func noteHubResults(res []PingResult) {
+	var total, alive int
+	seen := map[float64]bool{}
+	for _, r := range res {
+		total++
+		if r.Alive {
+			alive++
+			if r.LatencyMs != nil {
+				seen[*r.LatencyMs] = true
+			}
+		}
+	}
+	hubMu.Lock()
+	hubRec = &hubStats{total: total, alive: alive, distinctRtts: len(seen), at: time.Now()}
+	hubMu.Unlock()
+}
+
 var (
 	healthMu  sync.Mutex
 	healthCch *healthEntry
@@ -164,11 +202,21 @@ func selfHealth(timeoutMs, count int) map[string]interface{} {
 	if self.LatencyMs != nil {
 		lat = *self.LatencyMs
 	}
+	hubMu.Lock()
+	var hs map[string]interface{}
+	if hubRec != nil && time.Since(hubRec.at) < 5*time.Minute {
+		hs = map[string]interface{}{
+			"total": hubRec.total, "alive": hubRec.alive,
+			"distinctRtts": hubRec.distinctRtts,
+		}
+	}
+	hubMu.Unlock()
 	hostname, _ := os.Hostname()
 	healthCch = &healthEntry{
 		ts: time.Now(),
 		result: map[string]interface{}{
 			"ok": self.Alive, "name": "pluto-relay", "host": hostname,
+			"build": buildStamp, "hubStats": hs,
 			"selfLatencyMs": lat,
 		},
 	}
@@ -205,6 +253,10 @@ func main() {
 			}
 		}
 		// Параллельный опрос целей (иначе диапазон /24 пинговался бы ~минуту).
+		// Каждое устройство пингуется НЕЗАВИСИМОЙ серией ICMP — у каждого IP свой
+		// RTT. Групповых/общих замеров на диапазон в relay нет и быть не может:
+		// если все цели диапазона показывают один отсчёт, их пингует НЕ эта
+		// версия бинарника (проверьте buildStamp в ответе /health на :8091).
 		out := make([]PingResult, len(targets))
 		var wg sync.WaitGroup
 		sem := make(chan struct{}, *concurrency)
@@ -218,6 +270,7 @@ func main() {
 			}(i, t)
 		}
 		wg.Wait()
+		noteHubResults(out)
 		w.Header().Set("Content-Type", "application/json")
 		// serverNowMs — время по часам relay на момент ответа: ядро сопоставляет
 		// его со своим Date.now(), чтобы вычесть сетевой путь до агента из RTT.
