@@ -54,12 +54,26 @@ export function readBody(req) {
 // Позволяет пинговать выборочные IP подсети, не раздувая список целей.
 const SUBNET_HOSTS_RE = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}):(\d{1,3}(?:\s*,\s*\d{1,3})*)$/;
 
-/** Проверяет корректность строки цели пинга (IP / диапазон / подсеть / подсеть:хосты). */
+// Один элемент списка цели: одиночный IP или диапазон вида x.y.z.a-b
+const TARGET_ITEM_IP_RE = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+const TARGET_ITEM_RANGE_RE = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}-\d{1,3}$/;
+
+// Список адресов/диапазонов через запятую: «10.0.0.5, 10.0.0.77, 10.0.0.90-95».
+// Не путать с записью «подсеть:хосты» (там после двоеточия идут только хосты).
+function splitTargetList(t) {
+  if (!t.includes(',') || t.includes('/')) return null;
+  const parts = t.split(',').map((p) => p.trim()).filter(Boolean);
+  return parts.length > 1 ? parts : null;
+}
+
+/** Проверяет корректность строки цели пинга (IP / диапазон / подсеть / подсеть:хосты / список через запятую). */
 export function isTarget(s) {
   const t = String(s ?? '').trim();
   if (/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(t)) return true;
   if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}-\d{1,3}$/.test(t)) return true;
   if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}$/.test(t)) return true;
+  const list = splitTargetList(t);
+  if (list) return list.every((p) => TARGET_ITEM_IP_RE.test(p) || TARGET_ITEM_RANGE_RE.test(p));
   const sh = SUBNET_HOSTS_RE.exec(t);
   if (sh && +sh[1].split('/')[1] >= 24) {
     return sh[2].split(',').every((h) => +h.trim() >= 1 && +h.trim() <= 254);
@@ -70,11 +84,22 @@ export function isTarget(s) {
 /**
  * Разворачивает строку цели в список IP (не более 256).
  * Поддерживаемые форматы: одиночный IP, диапазон x.y.z.a-b, подсеть x.y.z.0/24,
- * подсеть с конкретными хостами через запятую x.y.z.0/24:5,77,100.
+ * подсеть с конкретными хостами через запятую x.y.z.0/24:5,77,100,
+ * список адресов/диапазонов через запятую x.y.z.5, x.y.z.77, x.y.z.90-95.
  */
 export function expandTargets(target) {
   const t = String(target).trim();
   if (/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(t)) return [t];
+  // Список адресов/диапазонов через запятую: разворачиваем каждый элемент отдельно
+  const list = splitTargetList(t);
+  if (list) {
+    const out = [];
+    for (const p of list) {
+      for (const ip of expandTargets(p)) if (!out.includes(ip)) out.push(ip);
+      if (out.length >= 256) break;
+    }
+    return out.slice(0, 256);
+  }
   const subnetHosts = SUBNET_HOSTS_RE.exec(t);
   if (subnetHosts && +subnetHosts[1].split('/')[1] >= 24) {
     const base = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.)/.exec(subnetHosts[1])[1];
