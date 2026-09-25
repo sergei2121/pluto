@@ -12,6 +12,19 @@ export function pingKey(agentId, range, ip) {
   return `${agentId}|${range || ''}|${ip}`;
 }
 
+/**
+ * Имя хаба для истории: никогда не пустая строка. Если у агента имя не задано
+ * (или прилетело undefined/null из /api/state), подставляем IP — иначе в
+ * «Активности хабов» и «Истории пингов» записи остаются без названия
+ * (на русском и английском интерфейсах пусто).
+ */
+export function hubNameOf(agent) {
+  if (!agent) return '';
+  const n = String(agent.name ?? '').trim();
+  if (n) return n;
+  return String(agent.ip ?? '').trim() || agent.id || '—';
+}
+
 /** ISO-дата (YYYY-MM-DD) по таймстампу, локальная временная зона сервера. */
 function dayOf(ts) {
   const d = new Date(ts);
