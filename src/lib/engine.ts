@@ -287,6 +287,17 @@ function emulateRelayPings(targets: RelayTargetResult[], now: number, agentId: s
 // Раскрытие диапазона IP в список отдельных IP
 function expandIpRange(range: string): string[] {
   if (!range) return [];
+  // Подсеть с конкретными хостами через запятую: «10.0.0.0/24:5,77,100» → только эти IP
+  const subnetHosts = range.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}):(\d{1,3}(?:\s*,\s*\d{1,3})*)$/);
+  if (subnetHosts && +subnetHosts[1].split('/')[1] >= 24) {
+    const base = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.)/.exec(subnetHosts[1])![1];
+    const result: string[] = [];
+    for (const h of subnetHosts[2].split(',')) {
+      const n = +h.trim();
+      if (n >= 1 && n <= 254 && !result.includes(base + n)) result.push(base + n);
+    }
+    return result;
+  }
   // Проверка на диапазон вида "192.168.1.10-192.168.1.20"
   const rangeMatch = range.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3})\.(\d+)-(\d+)$/);
   if (rangeMatch) {

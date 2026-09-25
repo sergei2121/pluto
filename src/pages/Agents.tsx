@@ -80,7 +80,7 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
       .filter((t) => t.range.trim())
       .map((t) => ({ name: t.name.trim(), range: t.range.trim() }));
     const bad = targets.find((t) => !isTarget(t.range));
-    if (bad) return setErr(`Некорректная цель: «${bad.range}». Форматы: 10.0.0.5, 10.0.0.1-20, 10.0.0.0/24`);
+    if (bad) return setErr(`Некорректная цель: «${bad.range}». Форматы: 10.0.0.5, 10.0.0.1-20, 10.0.0.0/24, 10.0.0.0/24:5,77,100`);
     // Телеметрия (glancesUrl/netdataUrl/telemetryUrl/telemetrySource) намеренно не отправляется —
     // она перенесена в раздел «Мониторинг» и настраивается там.
     const body = {
@@ -130,7 +130,7 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
                 />
                 <input
                   className="inp flex-[2] font-mono text-[11px]"
-                  placeholder="Диапазон IP (10.0.0.5, 10.0.0.1-20, 10.0.0.0/24)"
+                  placeholder="IP / диапазон / подсеть / подсеть:хосты (10.0.0.5, 10.0.0.1-20, 10.0.0.0/24, 10.0.0.0/24:5,77,100)"
                   value={t.range}
                   onChange={(e) => updateTarget(t.id, 'range', e.target.value)}
                 />
@@ -144,7 +144,7 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
               </div>
             ))}
           </div>
-          <p className="mt-1 text-[11px] text-dim">Каждая строка — отдельная группа целей. Имя опционально, диапазон обязателен.</p>
+          <p className="mt-1 text-[11px] text-dim">Каждая строка — отдельная группа целей. Имя опционально, диапазон обязателен. Если нужны не все IP подсети, укажите их списком после двоеточия: <span className="font-mono">10.0.0.0/24:5,77,100</span>.</p>
         </div>
 
         <StatsViewPicker value={statsView} onChange={setStatsView} />
