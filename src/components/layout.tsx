@@ -1,8 +1,8 @@
 // ─── PLUTO: каркас интерфейса ────────────────────────────────────────────────
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  LayoutDashboard, Server, Monitor, Crosshair, BarChart3, Waves, LayoutGrid, Settings as SettingsIcon,
-  Radio, LogOut, Search, X, AlertTriangle, Bell, Check, Orbit, FileBarChart, History, Activity,
+  LayoutDashboard, Server, BarChart3, Waves, LayoutGrid, Settings as SettingsIcon,
+  Radio, LogOut, Search, X, AlertTriangle, Bell, Check, Orbit, FileBarChart, HeartPulse,
 } from 'lucide-react';
 import { cls, fmtClock, CONSOLE_VERSION } from '../lib/util';
 import { store, useCurrentUser, usePluto, useToastList, useToasts, visibleAgents, visibleDevices } from '../lib/store';
@@ -50,10 +50,10 @@ export function ToastHost() {
 const NAV: { route: Route; label: string; icon: ReactNode; adminOnly?: boolean }[] = [
   { route: 'dashboard', label: 'Главная', icon: <LayoutDashboard className="h-[17px] w-[17px]" /> },
   { route: 'devices', label: 'Устройства', icon: <Server className="h-[17px] w-[17px]" /> },
-  { route: 'agents', label: 'Хабы', icon: <Monitor className="h-[17px] w-[17px]" /> },
-  { route: 'monitoring', label: 'Мониторинг', icon: <Activity className="h-[17px] w-[17px]" /> },
-  { route: 'agent-pings', label: 'Активность хабов', icon: <Crosshair className="h-[17px] w-[17px]" /> },
-  { route: 'ping-history', label: 'История активности', icon: <History className="h-[17px] w-[17px]" /> },
+  { route: 'agents', label: 'Хабы', icon: <HeartPulse className="pulse-blu h-[17px] w-[17px]" /> },
+  { route: 'agent-pings', label: 'Активность хабов', icon: <HeartPulse className="pulse-blu h-[17px] w-[17px]" /> },
+  { route: 'ping-history', label: 'История активности', icon: <HeartPulse className="pulse-blu h-[17px] w-[17px]" /> },
+  { route: 'monitoring', label: 'Мониторинг', icon: <HeartPulse className="pulse-crit h-[17px] w-[17px]" /> },
   { route: 'stats-bars', label: 'Статистика Bars', icon: <BarChart3 className="h-[17px] w-[17px]" /> },
   { route: 'stats-ws', label: 'Статистика WS', icon: <Waves className="h-[17px] w-[17px]" /> },
   { route: 'settings', label: 'Настройки системы', icon: <SettingsIcon className="h-[17px] w-[17px]" />, adminOnly: true },
