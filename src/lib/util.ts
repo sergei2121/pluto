@@ -118,6 +118,25 @@ function splitTargetList(t: string): string[] | null {
   return parts.length > 1 ? parts : null;
 }
 
+/**
+ * Отображаемое имя цели пинга: кастомное имя группы, иначе диапазон/IP.
+ * Для списков адресов через запятую («10.0.0.5, 10.0.0.77, …») без имени
+ * возвращаем не весь список IP, а свёрнутый вид: «N адресов» или «первый и т.д.».
+ */
+export function targetDisplayName(t: { name?: string; target?: string; range?: string }): string {
+  const name = (t.name || '').trim();
+  if (name) return name;
+  const raw = (t.range || t.target || '').trim();
+  if (!raw) return 'Без имени';
+  // Список через запятую: splitTargetList не срабатывает для записей с подсетями
+  // («10.0.0.0/24, 10.1.0.0/24»), поэтому режем по запятой напрямую.
+  const parts = raw.split(',').map((p) => p.trim()).filter(Boolean);
+  if (parts.length > 1) {
+    return parts.length === 2 ? `${parts[0]}, ${parts[1]}` : `${parts[0]} и ещё ${parts.length - 1}`;
+  }
+  return raw;
+}
+
 export function isTarget(s: string): boolean {
   if (isIp(s)) return true;
   if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}-\d{1,3}$/.test(s)) return true;

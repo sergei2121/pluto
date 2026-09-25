@@ -3,7 +3,7 @@ import { memo, useMemo, useState } from 'react';
 import { Crosshair, Star, Eye, RefreshCw, Search, Wifi, WifiOff, Activity, LayoutGrid, ChevronDown, ChevronUp } from 'lucide-react';
 import { Panel, EmptyState, TimeAgo } from '../components/ui';
 import { store, useCurrentUser, usePluto, useToasts, agentsWithPings } from '../lib/store';
-import { cls, pingStats } from '../lib/util';
+import { cls, pingStats, targetDisplayName } from '../lib/util';
 import type { Agent } from '../lib/types';
 
 const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
@@ -65,7 +65,10 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
         <div className={cls('space-y-2', dense && 'mt-2 space-y-1.5')}>
           {allTargets.map((target) => {
             const targetStats = pingStats([target]);
-            const displayName = target.name || target.target || target.range || 'Без имени';
+            // Имя цели: кастомное имя группы; если имени нет — свёрнутый вид диапазона/списка,
+            // а не полный перечень IP через запятую (иначе заголовок не читается)
+            const displayName = targetDisplayName(target);
+            const fullRange = (target.range || target.target || '').trim();
             const hasResults = Array.isArray(target.results) && target.results.length > 0;
             const targetKey = target.target || displayName;
             const isExpanded = expandedTargets[targetKey] ?? false; // По умолчанию закрыто
@@ -82,8 +85,8 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
                       {isExpanded ? <ChevronUp className="h-4 w-4 text-mut" /> : <ChevronDown className="h-4 w-4 text-mut" />}
                     </div>
                     <LayoutGrid className={cls('shrink-0 text-mut', dense ? 'h-3 w-3' : 'h-3.5 w-3.5')} />
-                    <span className={cls('truncate font-mono font-bold text-ink', dense ? 'text-[11px]' : 'text-[12px]')}>{displayName}</span>
-                    {!dense && target.range && <span className="shrink-0 font-mono text-[10px] text-dim">({target.range})</span>}
+                    <span className={cls('truncate font-mono font-bold text-ink', dense ? 'text-[11px]' : 'text-[12px]')} title={fullRange || undefined}>{displayName}</span>
+                    {!dense && target.range && !target.name && <span className="shrink-0 font-mono text-[10px] text-dim" title={fullRange}>({target.range.split(',').length > 1 ? `${target.range.split(',').length} адресов` : target.range})</span>}
                   </div>
                   <div className={cls('flex shrink-0 items-center gap-2 font-mono', dense ? 'text-[9.5px]' : 'text-[10.5px]')}>
                     <span className={cls(targetStats.offline > 0 ? 'text-crit' : 'text-ok')}>
