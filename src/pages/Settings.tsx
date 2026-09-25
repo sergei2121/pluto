@@ -280,6 +280,7 @@ const MENU_GRANTS: { route: Route; label: string }[] = [
   { route: 'dashboard', label: 'Главная' },
   { route: 'devices', label: 'Устройства' },
   { route: 'agents', label: 'Хабы' },
+  { route: 'monitoring', label: 'Мониторинг' },
   { route: 'agent-pings', label: 'Активность хабов' },
   { route: 'ping-history', label: 'История активности' },
   { route: 'network-map', label: 'Карта сети' },

@@ -2,7 +2,7 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   LayoutDashboard, Server, Monitor, Crosshair, BarChart3, Waves, LayoutGrid, Settings as SettingsIcon,
-  Radio, LogOut, Search, X, AlertTriangle, Bell, Check, Orbit, FileBarChart, History,
+  Radio, LogOut, Search, X, AlertTriangle, Bell, Check, Orbit, FileBarChart, History, Activity,
 } from 'lucide-react';
 import { cls, fmtClock, CONSOLE_VERSION } from '../lib/util';
 import { store, useCurrentUser, usePluto, useToastList, useToasts, visibleAgents, visibleDevices } from '../lib/store';
@@ -51,6 +51,7 @@ const NAV: { route: Route; label: string; icon: ReactNode; adminOnly?: boolean }
   { route: 'dashboard', label: 'Главная', icon: <LayoutDashboard className="h-[17px] w-[17px]" /> },
   { route: 'devices', label: 'Устройства', icon: <Server className="h-[17px] w-[17px]" /> },
   { route: 'agents', label: 'Хабы', icon: <Monitor className="h-[17px] w-[17px]" /> },
+  { route: 'monitoring', label: 'Мониторинг', icon: <Activity className="h-[17px] w-[17px]" /> },
   { route: 'agent-pings', label: 'Активность хабов', icon: <Crosshair className="h-[17px] w-[17px]" /> },
   { route: 'ping-history', label: 'История активности', icon: <History className="h-[17px] w-[17px]" /> },
   { route: 'stats-bars', label: 'Статистика Bars', icon: <BarChart3 className="h-[17px] w-[17px]" /> },
@@ -130,6 +131,7 @@ const TITLES: Record<Route, string> = {
   dashboard: 'Обзор инфраструктуры',
   devices: 'Устройства',
   agents: 'Хабы и локальные сети',
+  monitoring: 'Мониторинг · телеметрия хабов',
   'agent-pings': 'Активность хабов · локальные устройства',
   'ping-history': 'История активности · месяц онлайн/офлайн',
   'network-map': 'Карта сети',

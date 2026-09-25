@@ -473,7 +473,8 @@ export function visibleDevices(s: PlutoState, user: User | null): Device[] {
 export function visibleAgents(s: PlutoState, user: User | null): Agent[] {
   if (!user) return [];
   if (user.role === 'admin') return s.agents;
-  return user.menuScope.includes('agents') ? s.agents : [];
+  // «Мониторинг» тоже показывает хабы — доступ к списку даётся любым из этих пунктов меню
+  return user.menuScope.includes('agents') || user.menuScope.includes('monitoring') ? s.agents : [];
 }
 
 /** Агенты с активными ping-целями (для страницы "Пинги агентов"). */
