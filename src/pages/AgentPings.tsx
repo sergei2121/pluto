@@ -22,42 +22,47 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
   const toggleTarget = (key: string) => {
     setExpandedTargets(prev => ({ ...prev, [key]: !prev[key] }));
   };
-  
+
+  // Сколько целей раскрыто — влияет на плотность карточки (компактный режим при 2+)
+  const expandedCount = allTargets.reduce((acc, t) => acc + ((expandedTargets[t.target || t.name || t.range || 'Без имени'] ?? false) ? 1 : 0), 0);
+  const dense = expandedCount >= 2;
+
   return (
-    <div className="rise rounded-xl border border-line bg-panel/90 p-4 transition-all duration-200 hover:border-mint/35 hover:shadow-[0_14px_40px_-16px_rgba(0,0,0,.8)]">
+    <div className={cls('rise rounded-xl border border-line bg-panel/90 transition-all duration-200 hover:border-mint/35 hover:shadow-[0_14px_40px_-16px_rgba(0,0,0,.8)]', dense ? 'p-3' : 'p-4')}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="flex items-center gap-1.5 text-[14px] font-semibold text-ink">
-            <Crosshair className="h-4 w-4 shrink-0 text-mint" />
+          <div className={cls('flex items-center gap-1.5 font-semibold text-ink', dense ? 'text-[13px]' : 'text-[14px]')}>
+            <Crosshair className={cls('shrink-0 text-mint', dense ? 'h-3.5 w-3.5' : 'h-4 w-4')} />
             <span className="truncate">{a.name}</span>
           </div>
-          <div className="font-mono text-[11px] text-dim">
+          <div className={cls('font-mono text-dim', dense ? 'text-[10px]' : 'text-[11px]')}>
             {a.ip} · <span className={a.online ? 'text-ok' : 'text-crit'}>{a.online ? 'хаб онлайн' : 'хаб офлайн'}</span>
           </div>
         </div>
-        <div className="flex items-center gap-1">
-          <button onClick={onFav} title="На главную (избранное)" className={cls('rounded-md p-1.5 transition-all hover:bg-raised', a.pingsFavorite ? 'text-warn' : 'text-dim/40 hover:text-dim')}>
-            <Star className={cls('h-4 w-4', a.pingsFavorite && 'fill-warn')} strokeWidth={1.5} />
+        <div className="flex shrink-0 items-center gap-0.5">
+          <button onClick={onFav} title="На главную (избранное)" className={cls('rounded-md p-1 transition-all hover:bg-raised', a.pingsFavorite ? 'text-warn' : 'text-dim/40 hover:text-dim')}>
+            <Star className={cls(dense ? 'h-3.5 w-3.5' : 'h-4 w-4', a.pingsFavorite && 'fill-warn')} strokeWidth={1.5} />
           </button>
-          <button onClick={onShowcase} title="На публичную витрину" className={cls('rounded-md p-1.5 transition-all hover:bg-raised', a.pingsShowcase ? 'text-mint' : 'text-dim/40 hover:text-dim')}>
-            <Eye className={cls('h-4 w-4', a.pingsShowcase && 'fill-mint/40')} strokeWidth={1.5} />
+          <button onClick={onShowcase} title="На публичную витрину" className={cls('rounded-md p-1 transition-all hover:bg-raised', a.pingsShowcase ? 'text-mint' : 'text-dim/40 hover:text-dim')}>
+            <Eye className={cls(dense ? 'h-3.5 w-3.5' : 'h-4 w-4', a.pingsShowcase && 'fill-mint/40')} strokeWidth={1.5} />
           </button>
-          <button onClick={onPoll} title="Опросить сейчас" className="rounded-md p-1.5 text-dim transition-colors hover:bg-raised hover:text-vio">
-            <RefreshCw className="h-4 w-4" />
+          <button onClick={onPoll} title="Опросить сейчас" className="rounded-md p-1 text-dim transition-colors hover:bg-raised hover:text-vio">
+            <RefreshCw className={cls(dense ? 'h-3.5 w-3.5' : 'h-4 w-4')} />
           </button>
         </div>
       </div>
 
-      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-        <div className="rounded-lg border border-line/60 bg-raised/40 py-2"><div className="font-mono text-[17px] font-bold text-ink">{st.total}</div><div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">всего</div></div>
-        <div className="rounded-lg border border-line/60 bg-raised/40 py-2"><div className="font-mono text-[17px] font-bold text-ok">{st.online}</div><div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">онлайн</div></div>
-        <div className="rounded-lg border border-line/60 bg-raised/40 py-2"><div className={cls('font-mono text-[17px] font-bold', st.offline ? 'text-crit' : 'text-dim')}>{st.offline}</div><div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">офлайн</div></div>
+      {/* Сводка статистики: компактная строка вместо трёх плиток — экономит ширину без потери данных */}
+      <div className={cls('flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-line/60 bg-raised/40 font-mono', dense ? 'mt-2 px-2.5 py-1 text-[11px]' : 'mt-3 px-3 py-1.5 text-[12.5px]')}>
+        <span className="flex items-baseline gap-1"><b className="text-[14px] text-ink tabular-nums">{st.total}</b><span className={cls('font-bold uppercase tracking-wider text-dim', dense ? 'text-[8px]' : 'text-[8.5px]')}>всего</span></span>
+        <span className="flex items-baseline gap-1"><b className="text-[14px] text-ok tabular-nums">{st.online}</b><span className={cls('font-bold uppercase tracking-wider text-dim', dense ? 'text-[8px]' : 'text-[8.5px]')}>онлайн</span></span>
+        <span className="flex items-baseline gap-1"><b className={cls('text-[14px] tabular-nums', st.offline ? 'text-crit' : 'text-dim')}>{st.offline}</b><span className={cls('font-bold uppercase tracking-wider text-dim', dense ? 'text-[8px]' : 'text-[8.5px]')}>офлайн</span></span>
       </div>
 
       {allTargets.length === 0 ? (
         <p className="mt-3 text-[12px] text-dim">Цели не заданы. Добавьте IP/диапазоны в «Хабы → Изменить».</p>
       ) : (
-        <div className="mt-3 space-y-2">
+        <div className={cls('space-y-2', dense && 'mt-2 space-y-1.5')}>
           {allTargets.map((target) => {
             const targetStats = pingStats([target]);
             const displayName = target.name || target.target || target.range || 'Без имени';
@@ -70,27 +75,27 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
                 {/* Заголовок подгруппы - всегда виден, кликабельный */}
                 <button 
                   onClick={() => toggleTarget(targetKey)}
-                  className="flex w-full items-center justify-between border-b border-line/30 bg-raised/50 px-3 py-2.5 transition-colors hover:bg-raised/70"
+                  className={cls('flex w-full items-center justify-between border-b border-line/30 bg-raised/50 px-3 transition-colors hover:bg-raised/70', dense ? 'py-1.5' : 'py-2.5')}
                 >
-                  <div className="flex items-center gap-2">
-                    <div className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-raised/70">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-raised/70">
                       {isExpanded ? <ChevronUp className="h-4 w-4 text-mut" /> : <ChevronDown className="h-4 w-4 text-mut" />}
                     </div>
-                    <LayoutGrid className="h-3.5 w-3.5 text-mut" />
-                    <span className="font-mono text-[12px] font-bold text-ink">{displayName}</span>
-                    {target.range && <span className="font-mono text-[10px] text-dim">({target.range})</span>}
+                    <LayoutGrid className={cls('shrink-0 text-mut', dense ? 'h-3 w-3' : 'h-3.5 w-3.5')} />
+                    <span className={cls('truncate font-mono font-bold text-ink', dense ? 'text-[11px]' : 'text-[12px]')}>{displayName}</span>
+                    {!dense && target.range && <span className="shrink-0 font-mono text-[10px] text-dim">({target.range})</span>}
                   </div>
-                  <div className="flex items-center gap-2 font-mono text-[10.5px]">
+                  <div className={cls('flex shrink-0 items-center gap-2 font-mono', dense ? 'text-[9.5px]' : 'text-[10.5px]')}>
                     <span className={cls(targetStats.offline > 0 ? 'text-crit' : 'text-ok')}>
                       {targetStats.online}/{targetStats.total}
                     </span>
-                    <span className="text-[9px] text-dim">{hasResults ? target.results!.length : 0} устр.</span>
+                    <span className="text-dim">{hasResults ? target.results!.length : 0} устр.</span>
                   </div>
                 </button>
                 
                 {/* Список устройств в подгруппе - раскрывающийся */}
                 {isExpanded && hasResults ? (
-                  <div className="max-h-48 space-y-1 overflow-y-auto scroll-thin p-2">
+                  <div className={cls('space-y-1 overflow-y-auto scroll-thin p-2', dense ? 'max-h-56' : 'max-h-48')}>
                     {(target.results || []).map((r) => {
                       // Форматирование времени в офлайне за 30 дней
                       const formatOfflineDuration = (ms?: number | null) => {
@@ -123,21 +128,21 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
                       const lastSuccessStr = formatLastSuccess(r.lastSuccess);
                       
                       return (
-                        <div key={r.ip} className="grid grid-cols-[1fr_auto] items-center gap-2 rounded border border-line/40 bg-panel/50 px-2.5 py-1.5 transition-colors hover:bg-raised/60">
+                        <div key={r.ip} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded border border-line/40 bg-panel/50 px-2.5 transition-colors hover:bg-raised/60" style={{ padding: dense ? '3px 8px' : '6px 10px' }}>
                           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
                             {r.alive ? <Wifi className="h-3.5 w-3.5 shrink-0 text-ok" /> : <WifiOff className="h-3.5 w-3.5 shrink-0 text-crit" />}
-                            <span className="font-mono text-[11.5px] text-mut">{r.ip}</span>
+                            <span className={cls('font-mono text-mut', dense ? 'text-[10.5px]' : 'text-[11.5px]')}>{r.ip}</span>
                             {/* Потери серии пакетов — только статусные метрики, задержки в «Хабах» не показываем */}
                             {r.alive && r.lossPct != null && r.lossPct > 0 && (
                               <span className="font-mono text-[9px] text-crit" title={`Потери: ${r.received ?? 0}/${r.sent ?? '?'} пакетов серии`}>потери {r.lossPct}%</span>
                             )}
-                            <span className="hidden font-mono text-[9px] md:inline" style={{ fontWeight: 600 }}>
+                            <span className="w-full font-mono text-[9px] md:w-auto md:inline" style={{ fontWeight: 600 }}>
                               последний успех: <span className={lastSuccessStr === '—' ? 'text-crit' : 'text-dim'}>{lastSuccessStr}</span>
                             </span>
                           </div>
-                          <div className="flex flex-col items-end gap-0.5">
+                          <div className="flex shrink-0 flex-col items-end gap-0.5">
                             {/* Статус устройства вместо задержки (RTTrelay даёт одинаковый для всех IP) */}
-                            <span className={cls('font-mono text-[11.5px] font-semibold', r.alive ? 'text-ok' : 'text-crit')}>
+                            <span className={cls('font-mono font-semibold', dense ? 'text-[10.5px]' : 'text-[11.5px]', r.alive ? 'text-ok' : 'text-crit')}>
                               {r.alive ? 'онлайн' : 'офлайн'}
                             </span>
                             {/* Счётчик серии ICMP: отправлено/принято. Жёлтый — потеряно 2 из 10, красный — 3 и больше. */}
@@ -226,7 +231,7 @@ export default function AgentPings() {
             text="Добавьте агенту цели для пинга (IP, диапазон или подсеть) в «Хабы → Изменить» — результаты появятся здесь."
             action={<button onClick={() => store.nav('agents')} className="rounded-lg border border-vio/50 bg-vio/20 px-4 py-2 text-[13px] font-bold text-ink transition-all hover:bg-vio/30">К агентам</button>} />
         ) : (
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(clamp(280px,100%,560px),1fr))] lg:[grid-template-columns:repeat(auto-fill,minmax(400px,1fr))]">
             {list.map((a) => <AgentPingsCard key={a.id} a={a} />)}
           </div>
         )}
