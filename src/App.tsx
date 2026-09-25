@@ -7,6 +7,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Devices from './pages/Devices';
 import Agents from './pages/Agents';
+import Monitoring from './pages/Monitoring';
 import AgentPings from './pages/AgentPings';
 import PingHistory from './pages/PingHistory';
 import Stats from './pages/Stats';
@@ -77,6 +78,7 @@ export default function App() {
       {page === 'dashboard' && <Dashboard />}
       {page === 'devices' && <Devices key={`dev-${user.id}`} />}
       {page === 'agents' && <Agents key={`ag-${user.id}`} />}
+      {page === 'monitoring' && <Monitoring key={`mon-${user.id}`} />}
       {page === 'agent-pings' && <AgentPings key={`ap-${user.id}`} />}
       {page === 'ping-history' && <PingHistory key={`ph-${user.id}`} />}
       {page === 'stats-bars' && <Stats key="stats-bars" mode="bars" />}

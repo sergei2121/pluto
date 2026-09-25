@@ -3,7 +3,7 @@
 export type DeviceType = 'ping' | 'http' | 'api' | 'rtsp' | 'sip' | 'snmp' | 'ssl';
 export type DeviceStatus = 'up' | 'down' | 'degraded' | 'unknown';
 export type Route =
-  | 'dashboard' | 'devices' | 'agents' | 'agent-pings' | 'ping-history' 
+  | 'dashboard' | 'devices' | 'agents' | 'monitoring' | 'agent-pings' | 'ping-history' 
   | 'network-map'
   | 'stats-bars' | 'stats-ws' | 'sla' | 'settings' | 'deploy';
 export type Severity = 'ok' | 'warn' | 'crit' | 'info';
@@ -420,6 +420,7 @@ export const MENU_ITEMS: { route: Route; label: string; adminOnly?: boolean }[] 
   { route: 'dashboard', label: 'Главная' },
   { route: 'devices', label: 'Устройства' },
   { route: 'agents', label: 'Хабы' },
+  { route: 'monitoring', label: 'Мониторинг' },
   { route: 'agent-pings', label: 'Активность хабов' },
   { route: 'ping-history', label: 'История активности' },
   { route: 'network-map', label: 'Карта сети' },
