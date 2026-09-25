@@ -190,7 +190,13 @@ export const store = {
       events: st.events || [],
     };
     if (JSON.stringify(st.settings) !== JSON.stringify(state.settings)) patch.settings = st.settings;
-    if (st.users) patch.users = st.users;
+    // миграция: наблюдатели, созданные до появления вкладки «Мониторинг», получают её автоматически
+    if (st.users) patch.users = st.users.map((u) => {
+      if (u.role === 'admin') return u;
+      const ms = Array.isArray(u.menuScope) ? u.menuScope : [];
+      if (ms.includes('agents') && !ms.includes('monitoring')) return { ...u, menuScope: [...ms, 'monitoring'] };
+      return u;
+    });
     set(patch);
   },
 
