@@ -12,6 +12,7 @@ import { loginRateLimiter } from './middleware/rateLimiter.js';
 import telemetryCollectors from './telemetry/collectors.js';
 import deviceChecks from './checks/deviceChecks.js';
 import { relayPing } from './lib/relay.js';
+import { expandTargets } from './lib/http.js';
 import { provisionAgent, AGENT_PORT_DEFAULT } from './lib/provision.js';
 import { initPingHistory, recordPingState, seedPingHistoryFromAgents, savePingEvents, rollupPingDaily, queryPingHistory } from './db/pingHistory.js';
 
@@ -719,24 +720,8 @@ async function pollAgent(agent) {
   await saveDb();
 }
 
-function expandTargets(target) {
-  const t = String(target).trim();
-  if (/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(t)) return [t];
-  const range = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.)(\d{1,3})-(\d{1,3})$/.exec(t);
-  if (range) {
-    const out = [];
-    const a = +range[2], b = +range[3];
-    for (let i = Math.min(a, b); i <= Math.max(a, b) && out.length < 256; i++) out.push(range[1] + i);
-    return out;
-  }
-  const cidr = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.)\d{1,3}\/(\d{1,2})$/.exec(t);
-  if (cidr && +cidr[2] >= 24) {
-    const out = [];
-    for (let i = 1; i < 255; i++) out.push(cidr[1] + i);
-    return out;
-  }
-  return [];
-}
+// expandTargets / isTarget — единая реализация в lib/http.js (импортируется выше),
+// поддерживает IP, диапазон x.y.z.a-b, подсеть /24 и выборочные хосты «x.y.z.0/24:5,77,100».
 
 // ─── Зеркало (push снапшота на read-only копию) ────────────────────────────
 

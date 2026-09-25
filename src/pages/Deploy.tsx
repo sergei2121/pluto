@@ -37,7 +37,7 @@ function ProvisionAgentPanel() {
     if (!useKey && !password) { setResult({ ok: false, text: 'Введите пароль SSH или используйте ключ' }); return; }
     const tgts = targets.split(/[\n,;]+/).map((t) => t.trim()).filter(Boolean);
     const badT = tgts.find((t) => !isTarget(t));
-    if (badT) { setResult({ ok: false, text: `Некорректная цель пинга: «${badT}». Форматы: 10.0.0.5, 10.0.0.1-20, 10.0.0.0/24` }); return; }
+    if (badT) { setResult({ ok: false, text: `Некорректная цель пинга: «${badT}». Форматы: 10.0.0.5, 10.0.0.1-20, 10.0.0.0/24, 10.0.0.0/24:5,77,100` }); return; }
     setBusy(true);
     setSteps(['Отправляю задание на сервер… установка идёт по SSH и может занять 1–3 минуты (сборка Go).']);
     try {
@@ -109,8 +109,8 @@ function ProvisionAgentPanel() {
           </div>
         </Field>
         {relayMode === 'relay' && (
-          <Field label="Цели для пинга (через строку)" className="sm:col-span-2" hint="Устройства локальной сети этой машины: 10.0.0.5, 10.0.0.1-20, 10.0.0.0/24">
-            <textarea className="inp font-mono min-h-[70px]" value={targets} onChange={(e) => setTargets(e.target.value)} placeholder={'192.168.1.1\n192.168.1.20-60'} disabled={busy} />
+          <Field label="Цели для пинга (через строку)" className="sm:col-span-2" hint="Устройства локальной сети этой машины: 10.0.0.5, 10.0.0.1-20, 10.0.0.0/24, 10.0.0.0/24:5,77,100">
+            <textarea className="inp font-mono min-h-[70px]" value={targets} onChange={(e) => setTargets(e.target.value)} placeholder={'192.168.1.1\n192.168.1.20-60\n10.0.0.0/24:5,77,100'} disabled={busy} />
           </Field>
         )}
       </div>

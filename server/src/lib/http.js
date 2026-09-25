@@ -50,10 +50,41 @@ export function readBody(req) {
   });
 }
 
-/** Разворачивает строку «IP / диапазон x.y.z.a-b / подсеть /24» в список IP (не более 256). */
+// Подсеть с перечислением нужных хостов через запятую: «10.0.0.0/24:5,77,100».
+// Позволяет пинговать выборочные IP подсети, не раздувая список целей.
+const SUBNET_HOSTS_RE = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}):(\d{1,3}(?:\s*,\s*\d{1,3})*)$/;
+
+/** Проверяет корректность строки цели пинга (IP / диапазон / подсеть / подсеть:хосты). */
+export function isTarget(s) {
+  const t = String(s ?? '').trim();
+  if (/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(t)) return true;
+  if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}-\d{1,3}$/.test(t)) return true;
+  if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}$/.test(t)) return true;
+  const sh = SUBNET_HOSTS_RE.exec(t);
+  if (sh && +sh[1].split('/')[1] >= 24) {
+    return sh[2].split(',').every((h) => +h.trim() >= 1 && +h.trim() <= 254);
+  }
+  return false;
+}
+
+/**
+ * Разворачивает строку цели в список IP (не более 256).
+ * Поддерживаемые форматы: одиночный IP, диапазон x.y.z.a-b, подсеть x.y.z.0/24,
+ * подсеть с конкретными хостами через запятую x.y.z.0/24:5,77,100.
+ */
 export function expandTargets(target) {
   const t = String(target).trim();
   if (/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(t)) return [t];
+  const subnetHosts = SUBNET_HOSTS_RE.exec(t);
+  if (subnetHosts && +subnetHosts[1].split('/')[1] >= 24) {
+    const base = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.)/.exec(subnetHosts[1])[1];
+    const out = [];
+    for (const h of subnetHosts[2].split(',')) {
+      const n = +h.trim();
+      if (n >= 1 && n <= 254 && !out.includes(base + n)) out.push(base + n);
+    }
+    return out;
+  }
   const range = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.)(\d{1,3})-(\d{1,3})$/.exec(t);
   if (range) {
     const out = [];
