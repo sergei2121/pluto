@@ -106,10 +106,24 @@ export function isIp(s: string): boolean {
 // Подсеть с перечислением нужных хостов через запятую: «10.0.0.0/24:5,77,100»
 const SUBNET_HOSTS_RE = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}):(\d{1,3}(?:\s*,\s*\d{1,3})*)$/;
 
+// Один элемент списка цели: одиночный IP или диапазон вида x.y.z.a-b
+const TARGET_ITEM_IP_RE = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+const TARGET_ITEM_RANGE_RE = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}-\d{1,3}$/;
+
+// Список адресов/диапазонов через запятую: «10.0.0.5, 10.0.0.77, 10.0.0.90-95».
+// Не путать с записью «подсеть:хосты» (там после двоеточия идут только хосты).
+function splitTargetList(t: string): string[] | null {
+  if (!t.includes(',') || t.includes('/')) return null;
+  const parts = t.split(',').map((p) => p.trim()).filter(Boolean);
+  return parts.length > 1 ? parts : null;
+}
+
 export function isTarget(s: string): boolean {
   if (isIp(s)) return true;
   if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}-\d{1,3}$/.test(s)) return true;
   if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}$/.test(s)) return true;
+  const list = splitTargetList(String(s ?? '').trim());
+  if (list) return list.every((p) => TARGET_ITEM_IP_RE.test(p) || TARGET_ITEM_RANGE_RE.test(p));
   const sh = SUBNET_HOSTS_RE.exec(s.trim());
   if (sh && /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}$/.test(sh[1]) && +sh[1].split('/')[1] >= 24) {
     return sh[2].split(',').every((h) => +h.trim() >= 1 && +h.trim() <= 254);
@@ -120,6 +134,16 @@ export function isTarget(s: string): boolean {
 export function expandTargets(target: string): string[] {
   const t = (typeof target === 'string' ? target : '').trim();
   if (isIp(t)) return [t];
+  // Список адресов/диапазонов через запятую: разворачиваем каждый элемент отдельно
+  const list = splitTargetList(t);
+  if (list) {
+    const out: string[] = [];
+    for (const p of list) {
+      for (const ip of expandTargets(p)) if (!out.includes(ip)) out.push(ip);
+      if (out.length >= 256) break;
+    }
+    return out.slice(0, 256);
+  }
   // Подсеть + конкретные хосты через запятую: пингуем только указанные IP,
   // а не всю подсеть (например «10.0.0.0/24:5,77,100» → .5, .77, .100).
   const subnetHosts = SUBNET_HOSTS_RE.exec(t);
