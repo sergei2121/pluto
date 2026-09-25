@@ -183,26 +183,21 @@ export function embedHash(pass: string): string {
 }
 
 /** Агрегированная ping-статистика агента по всем его целям. */
-export function pingStats(targets: { results?: { alive: boolean; latency: number | null; pathMs?: number | null }[] }[]): {
-  total: number; online: number; offline: number; avg: number | null; max: number | null;
+// Агрегированная статистика хаба по целям: ТОЛЬКО счётчики состояний.
+// Задержки (avg/max) из «Хабов» убраны намеренно: relay отдаёт одинаковый RTT
+// для всех IP диапазона, и метрика вводила в заблуждение.
+export function pingStats(targets: { results?: { alive: boolean }[] }[]): {
+  total: number; online: number; offline: number;
 } {
-  let total = 0, online = 0, sum = 0, cnt = 0, max: number | null = null;
+  let total = 0, online = 0;
   for (const t of targets) {
     const results = Array.isArray(t.results) ? t.results : [];
     for (const r of results) {
       total++;
-      if (r.alive) {
-        online++;
-        // считаем полный RTT от ядра (замер агента + путь до него), если известен
-        const eff = r.pathMs != null ? r.pathMs : r.latency;
-        if (eff != null) {
-          sum += eff; cnt++;
-          if (max == null || eff > max) max = eff;
-        }
-      }
+      if (r.alive) online++;
     }
   }
-  return { total, online, offline: total - online, avg: cnt ? Math.round(sum / cnt) : null, max };
+  return { total, online, offline: total - online };
 }
 
 export function pct(used: number, total: number): number {
