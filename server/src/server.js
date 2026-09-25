@@ -467,17 +467,14 @@ async function tick(){
           '<span class="lat">'+(x.latency==null?'—':x.latency+' мс')+'</span></div>';}).join('');
       }
       if(ags.length){
-        html+='<div class="sec">Пинги агентов <span class="cnt">'+ags.length+'</span></div>';
+        html+='<div class="sec">Статус агентов <span class="cnt">'+ags.length+'</span></div>';
         html+=ags.map(x=>{const cls=x.online?'up':'down';
           return '<div class="row"><span class="dot '+cls+'"></span><span class="name">'+esc(x.name)+'</span>'+
           '<span class="addr">'+esc(x.ip)+'</span><span class="stats">'+
           '<span class="chip">всего <b>'+x.total+'</b></span>'+
           '<span class="chip"><b class="'+(x.onlineCount?'ok':'bad')+'">'+x.onlineCount+'</b> онлайн</span>'+
           (x.offline?'<span class="chip"><b class="bad">'+x.offline+'</b> офлайн</span>':'')+
-          '<span class="chip">ср <b class="info">'+(x.avg==null?'—':x.avg+' мс')+'</b></span>'+
-          '<span class="chip">макс <b class="warn">'+(x.max==null?'—':x.max+' мс')+'</b></span>'+
-          (x.jitter!=null?'<span class="chip">джиттер <b class="warn">'+x.jitter+' мс</b></span>':'')+
-          '</span></div>'+(x.devices&&x.devices.length?'<div class="devs">'+x.devices.map(dd=>'<span class="dev'+(dd.alive?'':' off')+'" title="'+esc(dd.ip)+(dd.localMs!=null?' · на агенте '+dd.localMs+' мс':'')+(dd.lossPct?' · потери '+dd.lossPct+'%':'')+'">'+esc(dd.ip)+' '+(dd.latency==null?(dd.alive?'—':'×'):dd.latency+' мс')+'</span>').join('')+'</div>':'')+';}).join('');
+          '</span></div>'+(x.devices&&x.devices.length?'<div class="devs">'+x.devices.map(dd=>'<span class="dev'+(dd.alive?'':' off')+'" title="'+esc(dd.ip)+(dd.lossPct?' · потери '+dd.lossPct+'%':'')+'">'+esc(dd.ip)+' '+(dd.alive?'✓':'×')+'</span>').join('')+'</div>':'')+';}).join('');
       }
       el.innerHTML=html;
     }

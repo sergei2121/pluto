@@ -1,9 +1,9 @@
 // ─── PLUTO: пинги агентов (локальные устройства через relay) ────────────────
 import { memo, useMemo, useState } from 'react';
 import { Crosshair, Star, Eye, RefreshCw, Search, Wifi, WifiOff, Activity, LayoutGrid, ChevronDown, ChevronUp } from 'lucide-react';
-import { Panel, StatusDot, EmptyState, TimeAgo } from '../components/ui';
+import { Panel, EmptyState, TimeAgo } from '../components/ui';
 import { store, useCurrentUser, usePluto, useToasts, agentsWithPings } from '../lib/store';
-import { cls, fmtMs, pingStats } from '../lib/util';
+import { cls, pingStats } from '../lib/util';
 import type { Agent } from '../lib/types';
 
 const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
@@ -24,39 +24,43 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
   };
   
   return (
-    <div className="rise rounded-xl border border-line bg-panel/90 p-4 transition-all duration-200 hover:border-mint/35 hover:shadow-[0_14px_40px_-16px_rgba(0,0,0,.8)]">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex items-center gap-1.5 text-[14px] font-semibold text-ink">
-            <Crosshair className="h-4 w-4 shrink-0 text-mint" />
-            <span className="truncate">{a.name}</span>
-          </div>
-          <div className="font-mono text-[11px] text-dim">{a.ip} · пинг до ПК {fmtMs(a.latency)}</div>
+    <div className="rise rounded-xl border border-line bg-panel/90 p-3 transition-all duration-200 hover:border-mint/35 hover:shadow-[0_14px_40px_-16px_rgba(0,0,0,.8)]">
+      {/* Шапка карточки: имя + IP и статус хаба одной строкой, справа — счётчики и кнопки */}
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <Crosshair className="h-3.5 w-3.5 shrink-0 text-mint" />
+          <span className="truncate text-[13px] font-semibold text-ink">{a.name}</span>
+          <span className="shrink-0 font-mono text-[10px] text-dim">{a.ip}</span>
+          <span className={cls('shrink-0 rounded-full border px-1.5 py-px font-mono text-[9px] font-bold',
+            a.online ? 'border-ok/40 bg-ok/10 text-ok' : 'border-crit/40 bg-crit/10 text-crit')}>
+            {a.online ? 'хаб ✓' : 'хаб ×'}
+          </span>
         </div>
-        <div className="flex items-center gap-1">
-          <button onClick={onFav} title="На главную (избранное)" className={cls('rounded-md p-1.5 transition-all hover:bg-raised', a.pingsFavorite ? 'text-warn' : 'text-dim/40 hover:text-dim')}>
-            <Star className={cls('h-4 w-4', a.pingsFavorite && 'fill-warn')} strokeWidth={1.5} />
+        <div className="flex shrink-0 items-center gap-1">
+          {/* Компактные счётчики вместо трёх блоков: всего / онлайн / офлайн */}
+          <span className="mr-1 font-mono text-[10.5px] tabular-nums leading-none">
+            <span className="text-ink" title="Устройств всего">{st.total}</span>
+            <span className="text-dim"> / </span>
+            <span className="text-ok" title="Онлайн">{st.online}</span>
+            <span className="text-dim"> / </span>
+            <span className={cls(st.offline ? 'text-crit' : 'text-dim')} title="Офлайн">{st.offline}</span>
+          </span>
+          <button onClick={onFav} title="На главную (избранное)" className={cls('rounded-md p-1 transition-all hover:bg-raised', a.pingsFavorite ? 'text-warn' : 'text-dim/40 hover:text-dim')}>
+            <Star className={cls('h-3.5 w-3.5', a.pingsFavorite && 'fill-warn')} strokeWidth={1.5} />
           </button>
-          <button onClick={onShowcase} title="На публичную витрину" className={cls('rounded-md p-1.5 transition-all hover:bg-raised', a.pingsShowcase ? 'text-mint' : 'text-dim/40 hover:text-dim')}>
-            <Eye className={cls('h-4 w-4', a.pingsShowcase && 'fill-mint/40')} strokeWidth={1.5} />
+          <button onClick={onShowcase} title="На публичную витрину" className={cls('rounded-md p-1 transition-all hover:bg-raised', a.pingsShowcase ? 'text-mint' : 'text-dim/40 hover:text-dim')}>
+            <Eye className={cls('h-3.5 w-3.5', a.pingsShowcase && 'fill-mint/40')} strokeWidth={1.5} />
           </button>
-          <button onClick={onPoll} title="Опросить сейчас" className="rounded-md p-1.5 text-dim transition-colors hover:bg-raised hover:text-vio">
-            <RefreshCw className="h-4 w-4" />
+          <button onClick={onPoll} title="Опросить сейчас" className="rounded-md p-1 text-dim transition-colors hover:bg-raised hover:text-vio">
+            <RefreshCw className="h-3.5 w-3.5" />
           </button>
         </div>
-      </div>
-
-      <div className="mt-3 grid grid-cols-4 gap-2 text-center">
-        <div className="rounded-lg border border-line/60 bg-raised/40 py-2"><div className="font-mono text-[17px] font-bold text-ink">{st.total}</div><div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">всего</div></div>
-        <div className="rounded-lg border border-line/60 bg-raised/40 py-2"><div className="font-mono text-[17px] font-bold text-ok">{st.online}</div><div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">онлайн</div></div>
-        <div className="rounded-lg border border-line/60 bg-raised/40 py-2"><div className={cls('font-mono text-[17px] font-bold', st.offline ? 'text-crit' : 'text-dim')}>{st.offline}</div><div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">офлайн</div></div>
-        <div className="rounded-lg border border-line/60 bg-raised/40 py-2"><div className="font-mono text-[17px] font-bold text-blu">{st.avg != null ? st.avg : '—'}</div><div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">ср. мс</div></div>
       </div>
 
       {allTargets.length === 0 ? (
-        <p className="mt-3 text-[12px] text-dim">Цели не заданы. Добавьте IP/диапазоны в «Хабы → Изменить».</p>
+        <p className="mt-2 text-[12px] text-dim">Цели не заданы. Добавьте IP/диапазоны в «Хабы → Изменить».</p>
       ) : (
-        <div className="mt-3 space-y-2">
+        <div className="mt-2 space-y-1.5">
           {allTargets.map((target) => {
             const targetStats = pingStats([target]);
             const displayName = target.name || target.target || target.range || 'Без имени';
@@ -69,17 +73,15 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
                 {/* Заголовок подгруппы - всегда виден, кликабельный */}
                 <button 
                   onClick={() => toggleTarget(targetKey)}
-                  className="flex w-full items-center justify-between border-b border-line/30 bg-raised/50 px-3 py-2.5 transition-colors hover:bg-raised/70"
+                  className="flex w-full items-center justify-between border-b border-line/30 bg-raised/50 px-2.5 py-1.5 transition-colors hover:bg-raised/70"
                 >
-                  <div className="flex items-center gap-2">
-                    <div className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-raised/70">
-                      {isExpanded ? <ChevronUp className="h-4 w-4 text-mut" /> : <ChevronDown className="h-4 w-4 text-mut" />}
-                    </div>
-                    <LayoutGrid className="h-3.5 w-3.5 text-mut" />
-                    <span className="font-mono text-[12px] font-bold text-ink">{displayName}</span>
-                    {target.range && <span className="font-mono text-[10px] text-dim">({target.range})</span>}
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    {isExpanded ? <ChevronUp className="h-3.5 w-3.5 shrink-0 text-mut" /> : <ChevronDown className="h-3.5 w-3.5 shrink-0 text-mut" />}
+                    <LayoutGrid className="h-3 w-3 shrink-0 text-mut" />
+                    <span className="truncate font-mono text-[11px] font-bold text-ink">{displayName}</span>
+                    {target.range && <span className="shrink-0 font-mono text-[9px] text-dim">({target.range})</span>}
                   </div>
-                  <div className="flex items-center gap-2 font-mono text-[10.5px]">
+                  <div className="flex shrink-0 items-center gap-1.5 font-mono text-[10px]">
                     <span className={cls(targetStats.offline > 0 ? 'text-crit' : 'text-ok')}>
                       {targetStats.online}/{targetStats.total}
                     </span>
@@ -126,15 +128,7 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
                           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
                             {r.alive ? <Wifi className="h-3.5 w-3.5 shrink-0 text-ok" /> : <WifiOff className="h-3.5 w-3.5 shrink-0 text-crit" />}
                             <span className="font-mono text-[11.5px] text-mut">{r.ip}</span>
-                            {/* Статистика серии пакетов: разброс min..max, джиттер, потери */}
-                            {r.alive && r.minMs != null && r.maxMs != null && (
-                              <span className="font-mono text-[9px] text-dim" title={`Серия ICMP на агенте: min ${fmtMs(r.minMs)}, max ${fmtMs(r.maxMs)}, джиттер — разброс между ними`}>
-                                min {fmtMs(r.minMs)} · max {fmtMs(r.maxMs)}
-                              </span>
-                            )}
-                            {r.alive && r.jitterMs != null && (
-                              <span className={cls('font-mono text-[9px]', r.jitterMs > 5 ? 'text-warn' : 'text-dim')} title="Джиттер: разброс RTT в серии (max−min)">±{fmtMs(r.jitterMs)}</span>
-                            )}
+                            {/* Потери серии пакетов — только статусные метрики, задержки в «Хабах» не показываем */}
                             {r.alive && r.lossPct != null && r.lossPct > 0 && (
                               <span className="font-mono text-[9px] text-crit" title={`Потери: ${r.received ?? 0}/${r.sent ?? '?'} пакетов серии`}>потери {r.lossPct}%</span>
                             )}
@@ -143,9 +137,9 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
                             </span>
                           </div>
                           <div className="flex flex-col items-end gap-0.5">
-                            <span className={cls('font-mono text-[11.5px] font-semibold', r.alive ? 'text-ok' : 'text-crit')}
-                              title={`Замер серией ICMP на агенте (его локальная сеть). Путь ядро→хаб — отдельно: ${r.hubRttMs != null ? fmtMs(r.hubRttMs) : '—'} и к RTT устройств не прибавляется.`}>
-                              {r.alive && r.pathMs != null ? fmtMs(r.pathMs) : r.alive && r.latency != null ? fmtMs(r.latency) : (r.alive ? '—' : 'нет ответа')}
+                            {/* Статус устройства вместо задержки (RTTrelay даёт одинаковый для всех IP) */}
+                            <span className={cls('font-mono text-[11.5px] font-semibold', r.alive ? 'text-ok' : 'text-crit')}>
+                              {r.alive ? 'онлайн' : 'офлайн'}
                             </span>
                             {/* Счётчик серии ICMP: отправлено/принято. Жёлтый — потеряно 2 из 10, красный — 3 и больше. */}
                             {(() => {
@@ -178,8 +172,8 @@ const AgentPingsCard = memo(function AgentPingsCard({ a }: { a: Agent }) {
         </div>
       )}
 
-      <div className="mt-3 flex items-center justify-between font-mono text-[10.5px] text-dim">
-        <span>макс {st.max != null ? `${st.max} мс` : '—'}</span>
+      <div className="mt-2 flex items-center justify-between font-mono text-[10px] text-dim">
+        <span>{st.offline === 0 ? 'все устройства в сети' : `есть офлайн: ${st.offline}`}</span>
         {a.lastPoll > 0 && <TimeAgo ts={a.lastPoll} />}
       </div>
     </div>

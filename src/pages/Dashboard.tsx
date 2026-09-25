@@ -123,10 +123,6 @@ const FavAgentPingsCard = memo(function FavAgentPingsCard({ id }: { id: string }
         <div><div className="font-mono text-[15px] font-bold text-ok">{st.online}</div><div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">онлайн</div></div>
         <div><div className={cls('font-mono text-[15px] font-bold', st.offline ? 'text-crit' : 'text-dim')}>{st.offline}</div><div className="text-[8.5px] font-bold uppercase tracking-wider text-dim">офлайн</div></div>
       </div>
-      <div className="mt-2.5 flex items-center justify-between font-mono text-[10px] text-dim">
-        <span>ср {st.avg == null ? '—' : `${st.avg} мс`}</span>
-        <span>макс {st.max == null ? '—' : `${st.max} мс`}</span>
-      </div>
     </div>
   );
 });
