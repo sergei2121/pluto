@@ -157,6 +157,7 @@ const publicUser = (u) => ({
   deviceScope: Array.isArray(u.deviceScope) ? u.deviceScope : [],
   builtIn: !!u.builtIn,
   twoFA: { enabled: !!(u.twoFA && u.twoFA.enabled), secret: null }, // секрет не отдаём
+  theme: u.theme === 'light' ? 'light' : 'dark',
   createdAt: u.createdAt,
 });
 
@@ -925,6 +926,7 @@ const server = http.createServer(async (req, res) => {
         : { enabled: false, secret: null };
 
       const existing = b.id ? db.users.find((x) => x.id === b.id) : null;
+      const theme = b.theme === 'light' ? 'light' : 'dark';
       let saved;
       if (existing) {
         // Обновление: пароль меняем только если прислан непустой
@@ -933,6 +935,7 @@ const server = http.createServer(async (req, res) => {
         existing.menuScope = menuScope;
         existing.deviceScope = deviceScope;
         existing.twoFA = twoFA;
+        existing.theme = theme;
         if (b.password && String(b.password).length > 0) existing.passHash = hashPass(String(b.password));
         saved = existing;
         await pushEvent('info', 'system', `Пользователь «${name}» обновлён (админ: ${user.login})`);
@@ -943,6 +946,7 @@ const server = http.createServer(async (req, res) => {
           role: b.role === 'admin' ? 'admin' : 'viewer',
           menuScope, deviceScope,
           builtIn: false, twoFA,
+          theme,
           passHash: hashPass(String(b.password)),
           createdAt: Date.now(),
         };

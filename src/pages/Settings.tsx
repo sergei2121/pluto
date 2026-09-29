@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { Send, Tag as TagIcon, Bell, Users, Radio, Plus, Trash2, Monitor, Server, Check, Pencil, ShieldCheck, KeyRound, X, Eye, EyeOff, FileBarChart, Rocket, Cpu, Globe, Activity, Download, Terminal, ClipboardList, HardDrive, Thermometer, Video, Slack, MessageSquare } from 'lucide-react';
 import { Panel, Field, Toggle, EmptyState } from '../components/ui';
-import { getState, store, useCurrentUser, usePluto, useToasts } from '../lib/store';
+import { getState, store, useCurrentUser, usePluto, useToasts, applyTheme } from '../lib/store';
 import { sendTestNotification, requestPushPermission } from '../lib/engine';
 
 /** «Отправить тест»: в серверном режиме — реальная отправка ядром по каналам;
@@ -309,6 +309,7 @@ function UserEditor({ initial, onClose }: { initial: User | null; onClose: () =>
   const [login, setLogin] = useState(initial?.login ?? '');
   const [pass, setPass] = useState('');
   const [role, setRole] = useState<Role>(initial?.role ?? 'viewer');
+  const [theme, setTheme] = useState<'dark' | 'light'>(initial?.theme ?? 'dark');
   const [menuScope, setMenuScope] = useState<Route[]>(initial?.menuScope ?? ['dashboard']);
   const [deviceScope, setDeviceScope] = useState<DeviceType[]>(initial?.deviceScope ?? []);
   const [err, setErr] = useState<string | null>(null);
@@ -334,6 +335,7 @@ function UserEditor({ initial, onClose }: { initial: User | null; onClose: () =>
       deviceScope: role === 'admin' ? [] : deviceScope,
       builtIn: initial?.builtIn ?? false,
       twoFA: initial?.twoFA ?? { enabled: false, secret: null },
+      theme,
       createdAt: initial?.createdAt ?? Date.now(),
     };
     const res = await store.saveUser(u, pass.trim() || undefined);
@@ -362,6 +364,17 @@ function UserEditor({ initial, onClose }: { initial: User | null; onClose: () =>
                 className={cls('flex-1 rounded-lg border px-3 py-2 text-[12.5px] font-bold transition-all',
                   role === r ? 'border-vio/60 bg-vio/20 text-ink' : 'border-line bg-raised/40 text-dim hover:text-mut')}>
                 {r === 'admin' ? 'Администратор' : 'Наблюдатель'}
+              </button>
+            ))}
+          </div>
+        </Field>
+        <Field label="Тема интерфейса" hint="Назначается пользователю администратором и применяется автоматически" className="md:col-span-2">
+          <div className="flex gap-2">
+            {([['dark', '🌙 Тёмная'], ['light', '☀️ Светлая']] as const).map(([t, label]) => (
+              <button key={t} onClick={() => setTheme(t)}
+                className={cls('flex-1 rounded-lg border px-3 py-2 text-[12.5px] font-bold transition-all',
+                  theme === t ? 'border-vio/60 bg-vio/20 text-ink' : 'border-line bg-raised/40 text-dim hover:text-mut')}>
+                {label}
               </button>
             ))}
           </div>
@@ -458,11 +471,12 @@ function UsersTab() {
                       {u.builtIn && <span className="shrink-0 rounded border border-line px-1.5 py-0.5 text-[9px] font-bold uppercase text-dim">системный</span>}
                     </div>
                     <div className="font-mono text-[11px] text-dim">@{u.login} · создан {timeAgo(u.createdAt)}</div>
-                    {u.role === 'viewer' && (
-                      <div className="mt-0.5 text-[10.5px] text-dim">
-                        меню: {u.menuScope.length} · устройства: {u.deviceScope.length ? u.deviceScope.map((d) => DEVICE_TYPE_META[d].label).join(', ') : 'нет'}
-                      </div>
-                    )}
+                    <div className="mt-0.5 text-[10.5px] text-dim">
+                      тема: {(u.theme ?? 'dark') === 'light' ? '☀️ светлая' : '🌙 тёмная'}
+                      {u.role === 'viewer' && (
+                        <> · меню: {u.menuScope.length} · устройства: {u.deviceScope.length ? u.deviceScope.map((d) => DEVICE_TYPE_META[d].label).join(', ') : 'нет'}</>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -991,8 +1005,7 @@ export default function SettingsPage() {
   const toggleTheme = () => {
     const newTheme = theme === 'dark' ? 'light' : 'dark';
     setTheme(newTheme);
-    document.documentElement.setAttribute('data-theme', newTheme);
-    localStorage.setItem('pluto-theme', newTheme);
+    applyTheme(newTheme);
   };
 
   return (

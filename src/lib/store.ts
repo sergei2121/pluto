@@ -1,5 +1,5 @@
 // ─── PLUTO: хранилище состояния (pub/sub + useSyncExternalStore) ─────────────
-import { useRef, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import type {
   Agent, AlertRule, AuditEntry, BackupEntry, Device, EventItem, Route, Settings, Severity, StatsView, Tag, User, Webhook,
 } from './types';
@@ -58,8 +58,15 @@ function defaultSettings(): Settings {
   };
 }
 
+/** Единая точка применения темы интерфейса: атрибут + localStorage. */
+export function applyTheme(theme: 'dark' | 'light') {
+  if (typeof document === 'undefined') return;
+  document.documentElement.setAttribute('data-theme', theme);
+  try { localStorage.setItem('pluto-theme', theme); } catch { /* noop */ }
+}
+
 function seedAdmin(): User {
-  return { id: 'admin', login: 'admin', name: 'admin', role: 'admin', menuScope: [], deviceScope: [], builtIn: true, twoFA: { enabled: false, secret: null }, createdAt: Date.now() };
+  return { id: 'admin', login: 'admin', name: 'admin', role: 'admin', menuScope: [], deviceScope: [], builtIn: true, twoFA: { enabled: false, secret: null }, theme: 'dark', createdAt: Date.now() };
 }
 
 function mkEvent(sev: Severity, source: EventItem['source'], text: string): EventItem {
@@ -118,10 +125,15 @@ export function usePluto<T>(selector: (s: PlutoState) => T): T {
 }
 
 export function useCurrentUser(): User | null {
-  return usePluto((s) => {
+  const user = usePluto((s) => {
     const u = s.users.find((x) => x.id === s.session?.userId) || null;
     return u;
   });
+  // Тема назначена администратором — применяем её автоматически при входе/изменении
+  useEffect(() => {
+    if (user?.theme) applyTheme(user.theme);
+  }, [user?.theme]);
+  return user;
 }
 
 function toast(kind: Severity, text: string) { useToasts.push(kind, text); }
@@ -423,7 +435,15 @@ export const store = {
     if (getState().apiMode !== 'server') {
       return 'Серверное ядро недоступно';
     }
-    try { const { api } = await import('./api'); await api.saveUser(u, password); await syncAll(); toast('ok', 'Пользователь сохранён'); return null; }
+    try {
+      const { api } = await import('./api');
+      await api.saveUser(u, password);
+      await syncAll();
+      // Если админ меняет тему собственному аккаунту — применяем сразу
+      if (state.session?.userId === u.id && u.theme) applyTheme(u.theme);
+      toast('ok', 'Пользователь сохранён');
+      return null;
+    }
     catch (e) { return e instanceof Error ? e.message : 'Не удалось сохранить'; }
   },
   async removeUser(id: string): Promise<void> {

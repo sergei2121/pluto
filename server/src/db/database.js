@@ -138,6 +138,7 @@ export class Database {
       twoFA: u.twoFA && typeof u.twoFA === 'object'
         ? { enabled: !!u.twoFA.enabled, secret: u.twoFA.secret || null }
         : { enabled: false, secret: null },
+      theme: u.theme === 'light' || u.theme === 'dark' ? u.theme : 'dark',
       builtIn: !!u.builtIn,
     }));
   }
@@ -158,6 +159,7 @@ export class Database {
       menuScope: [],
       deviceScope: [],
       twoFA: { enabled: false, secret: null },
+      theme: 'dark',
       passHash: hashPass(process.env.ADMIN_PASSWORD || 'pluto'),
       builtIn: true,
       createdAt: Date.now(),
