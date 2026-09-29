@@ -285,7 +285,7 @@ const MENU_GRANTS: { route: Route; label: string }[] = [
   { route: 'ping-history', label: 'История активности' },
   { route: 'network-map', label: 'Карта сети' },
   { route: 'sla', label: 'SLA-отчёт' },
-  { route: 'stats-bars', label: 'Статистика Bars' },
+  { route: 'stats-bars', label: 'VideoSRV' },
   { route: 'stats-ws', label: 'Статистика WS' },
   { route: 'deploy', label: 'Развёртывание' },
 ];

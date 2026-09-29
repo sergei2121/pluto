@@ -1,4 +1,4 @@
-// ─── PLUTO: статистика Bars / WS (телеметрия Glances) ───────────────────────
+// ─── PLUTO: статистика VideoSRV / WS (телеметрия Glances) ───────────────────
 import { useMemo, useState } from 'react';
 import { BarChart3, Waves, Activity, Download, Cpu, HardDrive, Thermometer, Wifi, Zap, Server } from 'lucide-react';
 import { Panel, EmptyState, TimeAgo, Sparkbar } from '../components/ui';
@@ -152,11 +152,16 @@ function BarsChart({ points, metric, color, gradient, range }: { points: Glances
 export default function Stats({ mode }: { mode: 'bars' | 'ws' }) {
   const user = useCurrentUser();
   const all = usePluto((s) => visibleAgents(s, user));
+  const tags = usePluto((s) => s.tags);
   // в каждую вкладку попадают только агенты, назначенные именно в неё
-  // '' (агент без вкладки) считается «bars» — историческое значение по умолчанию
+  // VideoSRV (бывш. Bars): только устройства с тегом «VideoSRV»
+  const videoSrvTagId = useMemo(() => tags.find((t) => t.label.toLowerCase() === 'videosrv')?.id ?? null, [tags]);
   const agents = useMemo(
-    () => all.filter((a) => (a.statsView || 'bars') === mode).sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' })),
-    [all, mode],
+    () =>
+      all
+        .filter((a) => (mode === 'bars' ? videoSrvTagId != null && a.tags.includes(videoSrvTagId) : a.statsView === mode))
+        .sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' })),
+    [all, mode, videoSrvTagId],
   );
   const [agentId, setAgentId] = useState<string | null>(null);
   const [range, setRange] = useState<StatsRange>('3h');
@@ -174,7 +179,7 @@ export default function Stats({ mode }: { mode: 'bars' | 'ws' }) {
   const cur = agent?.glancesLatest;
   const selectedMetric = METRICS.find((m) => m.k === metric)!;
 
-  // Статистика HDD для агентов в режиме bars (диски >= 1TB)
+  // Статистика HDD для агентов в режиме VideoSRV (диски >= 1TB)
   const hddStats = useMemo(() => {
     if (mode !== 'bars') return null;
     const stats = agents.map((a) => {
@@ -206,7 +211,7 @@ export default function Stats({ mode }: { mode: 'bars' | 'ws' }) {
           {mode === 'bars' ? <BarChart3 className="h-6 w-6 text-vio" /> : <Waves className="h-6 w-6 text-cyan" />}
         </div>
         <div>
-          <div className="font-display text-[15px] font-bold text-ink">{mode === 'bars' ? 'Статистика Bars' : 'Статистика WS'}</div>
+          <div className="font-display text-[15px] font-bold text-ink">{mode === 'bars' ? 'VideoSRV' : 'Статистика WS'}</div>
           <div className="text-[11px] text-dim">Телеметрия Glances · хранение 30 дней · интерактивные графики</div>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2.5">
@@ -251,7 +256,7 @@ export default function Stats({ mode }: { mode: 'bars' | 'ws' }) {
       {!agents.length ? (
         <Panel title="Нет источника данных">
           <EmptyState icon={<Activity className="h-7 w-7" />} title="В этой вкладке пока нет агентов"
-            text={`Назначьте агента во вкладку «${mode === 'bars' ? 'Статистика Bars' : 'Статистика WS'}»: «Хабы → Изменить → Показывать в статистике».`}
+            text={`Назначьте агенту тег «VideoSRV» в «Хабы → Изменить», чтобы он появился во вкладке «${mode === 'bars' ? 'VideoSRV' : 'Статистика WS'}».`}
             action={<button onClick={() => store.nav('agents')} className="rounded-xl border border-vio/50 bg-gradient-to-r from-vio/20 to-vio/10 px-5 py-2.5 text-[13px] font-bold text-ink transition-all hover:from-vio/30 hover:to-vio/20">К агентам</button>} />
         </Panel>
       ) : showAllAgents ? (

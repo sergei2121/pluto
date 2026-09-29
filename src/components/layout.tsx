@@ -54,7 +54,7 @@ const NAV: { route: Route; label: string; icon: ReactNode; adminOnly?: boolean }
   { route: 'agent-pings', label: 'Активность хабов', icon: <HeartPulse className="pulse-blu h-[17px] w-[17px]" /> },
   { route: 'ping-history', label: 'История активности', icon: <HeartPulse className="pulse-blu h-[17px] w-[17px]" /> },
   { route: 'monitoring', label: 'Мониторинг', icon: <HeartPulse className="pulse-crit h-[17px] w-[17px]" /> },
-  { route: 'stats-bars', label: 'Статистика Bars', icon: <BarChart3 className="h-[17px] w-[17px]" /> },
+  { route: 'stats-bars', label: 'VideoSRV', icon: <BarChart3 className="h-[17px] w-[17px]" /> },
   { route: 'stats-ws', label: 'Статистика WS', icon: <Waves className="h-[17px] w-[17px]" /> },
   { route: 'settings', label: 'Настройки системы', icon: <SettingsIcon className="h-[17px] w-[17px]" />, adminOnly: true },
 ];
@@ -135,7 +135,7 @@ const TITLES: Record<Route, string> = {
   'agent-pings': 'Активность хабов · локальные устройства',
   'ping-history': 'История активности · месяц онлайн/офлайн',
   'network-map': 'Карта сети',
-  'stats-bars': 'Статистика Bars · Glances',
+  'stats-bars': 'VideoSRV · Glances',
   'stats-ws': 'Статистика WS · Glances',
   sla: 'SLA-отчёт · доступность',
   settings: 'Настройки системы',

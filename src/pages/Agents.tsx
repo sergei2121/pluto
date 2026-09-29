@@ -8,28 +8,6 @@ import { store, useCurrentUser, usePluto, visibleAgents } from '../lib/store';
 import { cls, fmtMs, fmtUp, isIp, isTarget, expandTargets, uid } from '../lib/util';
 import type { Agent, StatsView } from '../lib/types';
 
-function StatsViewPicker({ value, onChange, compact }: { value: StatsView; onChange: (v: StatsView) => void; compact?: boolean }) {
-  const opts: { v: StatsView; icon: React.ReactNode; label: string; on: string }[] = [
-    { v: 'bars', icon: <BarChart3 className="h-4 w-4" />, label: 'Статистика Bars', on: 'text-vio border-vio/60 bg-vio/15' },
-    { v: 'ws', icon: <Waves className="h-4 w-4" />, label: 'Статистика WS', on: 'text-blu border-blu/60 bg-blu/15' },
-  ];
-  return (
-    <div className="space-y-2">
-      <span className="block text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Показывать в статистике</span>
-      <div className="flex gap-2">
-        {opts.map((o) => (
-          <button key={o.v} onClick={() => onChange(value === o.v ? '' : o.v)} title={o.label}
-            className={cls('flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[12px] font-semibold transition-all',
-              value === o.v ? o.on : 'border-line bg-raised/50 text-dim hover:text-mut')}>
-            {o.icon}{!compact && <span>{o.label}</span>}
-          </button>
-        ))}
-      </div>
-      <p className="text-[11px] text-dim/80">{value ? `Агент попадёт во вкладку «${value === 'bars' ? 'Статистика Bars' : 'Статистика WS'}». Повторный клик снимает выбор.` : 'Ни одна вкладка не выбрана — агент останется только в «Агентах».'}</p>
-    </div>
-  );
-}
-
 interface PingTargetEntry {
   id: string;
   name: string;
@@ -45,6 +23,14 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
   const [statsView, setStatsView] = useState<StatsView>('');
   const [selTags, setSelTags] = useState<string[]>([]);
   const [err, setErr] = useState('');
+
+  // тег «VideoSRV» — вкладка «VideoSRV» формируется по нему, а не по statsView
+  const videoSrvTagId = useMemo(() => tags.find((t) => t.label.toLowerCase() === 'videosrv')?.id ?? null, [tags]);
+  const isVideoSrv = videoSrvTagId != null && selTags.includes(videoSrvTagId);
+  const toggleVideoSrv = () => {
+    if (videoSrvTagId == null) return;
+    setSelTags((prev) => (prev.includes(videoSrvTagId) ? prev.filter((t) => t !== videoSrvTagId) : [...prev, videoSrvTagId]));
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -147,7 +133,30 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
           <p className="mt-1 text-[11px] text-dim">Каждая строка — отдельная группа целей. Имя опционально, диапазон обязателен. Можно перечислить адреса через запятую: <span className="font-mono">10.0.0.5,10.0.0.77</span>. Если нужны не все IP подсети, укажите их списком после двоеточия: <span className="font-mono">10.0.0.0/24:5,77,100</span>.</p>
         </div>
 
-        <StatsViewPicker value={statsView} onChange={setStatsView} />
+        <div className="space-y-2">
+          <span className="block text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Показывать в статистике</span>
+          <div className="flex gap-2">
+            <button onClick={toggleVideoSrv} title="VideoSRV" disabled={videoSrvTagId == null}
+              className={cls('flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[12px] font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-50',
+                isVideoSrv ? 'text-vio border-vio/60 bg-vio/15' : 'border-line bg-raised/50 text-dim hover:text-mut')}>
+              <BarChart3 className="h-4 w-4" /><span>VideoSRV</span>
+            </button>
+            {(['ws'] as StatsView[]).map((v) => (
+              <button key={v} onClick={() => setStatsView(statsView === v ? '' : v)} title="Статистика WS"
+                className={cls('flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[12px] font-semibold transition-all',
+                  statsView === v ? 'text-blu border-blu/60 bg-blu/15' : 'border-line bg-raised/50 text-dim hover:text-mut')}>
+                <Waves className="h-4 w-4" /><span>Статистика WS</span>
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-dim/80">
+            {videoSrvTagId == null
+              ? 'Тег «VideoSRV» не найден — создайте его в «Настройки → Теги», затем назначьте агенту.'
+              : isVideoSrv
+                ? 'Агент с тегом «VideoSRV» попадёт во вкладку «VideoSRV». Повторный клик снимает тег.'
+                : 'Во вкладке «VideoSRV» отображаются только устройства с тегом «VideoSRV».'}
+          </p>
+        </div>
 
         <div>
           <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Теги</span>
