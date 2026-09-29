@@ -25,11 +25,11 @@ export function stopEngine() {
   if (barsPollTimer != null) window.clearInterval(barsPollTimer); barsPollTimer = null;
 }
 
-// Принудительный опрос агентов с тегом "Bars" каждые 20 секунд
+// Принудительный опрос агентов с тегом "VideoSRV" каждые 20 секунд
 async function pollBarsAgents() {
   if (!emuGuard('pollBarsAgents')) return;
   const s = getState();
-  const barsAgents = s.agents.filter(a => a.tags.includes('Bars'));
+  const barsAgents = s.agents.filter(a => a.tags.includes('VideoSRV'));
   for (const a of barsAgents) {
     const now = Date.now();
     // Эмуляция опроса онлайн-статуса

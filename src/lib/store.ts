@@ -344,7 +344,7 @@ export const store = {
     const a = state.agents.find((x) => x.id === id);
     if (!a) return;
     void store.updateAgent(id, { statsView: view });
-    const label = view === 'bars' ? 'в «Статистика Bars»' : view === 'ws' ? 'в «Статистика WS»' : 'убран из статистики';
+    const label = view === 'bars' ? 'в «VideoSRV»' : view === 'ws' ? 'в «Статистика WS»' : 'убран из статистики';
     get().pushEvent('info', 'agent', `«${a.name}» ${label}`);
   },
 

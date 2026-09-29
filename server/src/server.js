@@ -532,10 +532,10 @@ setInterval(() => {
     }
   }
 
-  // Принудительный опрос агентов с тегом "Bars" каждые 20 секунд
+  // Принудительный опрос агентов с тегом "VideoSRV" каждые 20 секунд
   const barsInterval = 20 * 1000;
   for (const a of db.agents) {
-    if (a.tags && a.tags.includes('Bars')) {
+    if (a.tags && a.tags.includes('VideoSRV')) {
       if (now - (a.lastPoll || 0) >= barsInterval) {
         a.lastPoll = now;
         queue.push(() => pollAgent(a));
@@ -545,7 +545,7 @@ setInterval(() => {
 
   const aiv = Math.max(10, db.settings.intervals.agent || 30) * 1000;
   for (const a of db.agents) {
-    if (a.tags && a.tags.includes('Bars')) continue; // уже добавлен выше
+    if (a.tags && a.tags.includes('VideoSRV')) continue; // уже добавлен выше
     if (now - (a.lastPoll || 0) >= aiv) {
       a.lastPoll = now;
       queue.push(() => pollAgent(a));
@@ -682,8 +682,8 @@ async function pollAgent(agent) {
       agent.netdata = [...(agent.netdata || []), pt].slice(-4320); // 30 дней при 20 сек интервале
       agent.netdataError = null;
       
-      // Статистика количества дисков большой емкости (>= 1TB) для агентов с тегом "Bars"
-      const isBarsAgent = agent.tags && agent.tags.includes('Bars');
+      // Статистика количества дисков большой емкости (>= 1TB) для агентов с тегом "VideoSRV"
+      const isBarsAgent = agent.tags && agent.tags.includes('VideoSRV');
       let currentDiskCount = 0;
       
       if (g.disks && Array.isArray(g.disks)) {
@@ -700,7 +700,7 @@ async function pollAgent(agent) {
         
         currentDiskCount = largeDisks.length;
         
-        // Для агентов с тегом "Bars" проверяем уменьшение количества дисков
+        // Для агентов с тегом "VideoSRV" проверяем уменьшение количества дисков
         if (isBarsAgent) {
           const prevDiskCount = agent._lastDiskCount ?? null;
           

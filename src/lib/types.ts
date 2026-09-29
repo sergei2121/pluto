@@ -426,7 +426,7 @@ export const MENU_ITEMS: { route: Route; label: string; adminOnly?: boolean }[] 
   { route: 'agent-pings', label: 'Активность хабов' },
   { route: 'ping-history', label: 'История активности' },
   { route: 'network-map', label: 'Карта сети' },
-  { route: 'stats-bars', label: 'Статистика Bars' },
+  { route: 'stats-bars', label: 'VideoSRV' },
   { route: 'stats-ws', label: 'Статистика WS' },
   { route: 'sla', label: 'SLA-отчёт' },
   { route: 'settings', label: 'Настройки системы', adminOnly: true },
