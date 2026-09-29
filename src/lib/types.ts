@@ -359,6 +359,8 @@ export interface User {
   deviceScope: DeviceType[];
   builtIn: boolean;
   twoFA: TwoFAState;
+  /** Тема интерфейса пользователя (выбирается администратором в настройках). */
+  theme: 'dark' | 'light';
   createdAt: number;
 }
 
