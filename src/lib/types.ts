@@ -472,17 +472,20 @@ export interface SlaRow {
 export type SrvLinkKind = 'fiber' | 'radio' | 'lan';
 
 /** Иконка узла на карте. */
+// 'switch' оставлен в типе для совместимости с ранее сохранёнными картами:
+// отдельного «коммутатора» больше нет — такие узлы отображаются как серверы.
 export type SrvNodeIcon = 'server' | 'switch';
 
-/** Узел карты (видеосервер или коммутатор). */
+/** Узел карты (видеосервер; коммутатор и порт — поля узла). */
 export interface SrvMapNode {
   id: string;
   label: string;            // название узла
   agentId: string | null;   // хаб из списка с тегом "VideoSRV"
   x: number;                // координаты на холсте 0..1400 × 0..900
   y: number;
-  icon: SrvNodeIcon;        // иконка на карте (сервер / коммутатор)
+  icon: SrvNodeIcon;        // иконка на карте (сервер; 'switch' — устаревшее значение из старых карт)
   district: string;         // ЖК / офис
+  switchName: string;       // коммутатор, к которому подключён сервер
   address: string;          // ip 1
   address2: string;         // ip 2
   building: string;         // логин

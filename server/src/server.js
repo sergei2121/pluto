@@ -1211,6 +1211,7 @@ const server = http.createServer(async (req, res) => {
         y: Number.isFinite(+n.y) ? Math.min(700, Math.max(0, +n.y)) : 350,
         icon: SRV_NODE_ICONS.includes(n.icon) ? n.icon : 'server',
         district: String(n.district || '').trim(),
+        switchName: String(n.switchName || '').trim(),
         address: String(n.address || '').trim(),
         address2: String(n.address2 || '').trim(),
         building: String(n.building || '').trim(),
