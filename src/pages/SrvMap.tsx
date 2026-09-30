@@ -3,17 +3,24 @@
 // из выпадающего списка (тег "VideoSRV"), связи между узлами и комментарии.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Map as MapIcon, Plus, Trash2, Save, Link2, X, Network, Building2, MessageSquare, Pencil,
+  Map as MapIcon, Plus, Trash2, Save, Link2, X, Network, Server, Boxes, MessageSquare, Pencil,
 } from 'lucide-react';
 import { Panel, Modal, Field, EmptyState } from '../components/ui';
 import { api } from '../lib/api';
-import { getState, hasVideoSrvTag, store, useCurrentUser, usePluto, useToasts } from '../lib/store';
+import { hasVideoSrvTag, useCurrentUser, usePluto, useToasts } from '../lib/store';
 import { cls, fmtMs, uid } from '../lib/util';
-import type { Agent, SrvLinkKind, SrvMap, SrvMapLink, SrvMapNode } from '../lib/types';
+import type { Agent, SrvLinkKind, SrvMap, SrvMapLink, SrvMapNode, SrvNodeIcon } from '../lib/types';
 
-const CANVAS_W = 1000;
-const CANVAS_H = 700;
+// Холст карты: крупнее, чтобы умещалось больше узлов (серверы + коммутаторы)
+const CANVAS_W = 1400;
+const CANVAS_H = 900;
 const GRID = 20;
+
+/** Иконки узлов: видеосервер и коммутатор. */
+const NODE_ICONS: Record<SrvNodeIcon, { label: string; Icon: typeof Server }> = {
+  server: { label: 'Сервер', Icon: Server },
+  switch: { label: 'Коммутатор', Icon: Boxes },
+};
 
 const LINK_KINDS: Record<SrvLinkKind, { label: string; color: string; dash?: string }> = {
   fiber: { label: 'Оптика', color: '#8f7df0', dash: undefined },
@@ -77,14 +84,29 @@ export default function SrvMapPage() {
   }
 
   // ── операции над картой (локально; на сервер уходит при «Сохранить») ──
-  function addNode(agentId: string) {
-    const a = agentById.get(agentId) || null;
-    const n: SrvMapNode = {
-      id: uid('smn'), label: a?.name || 'Новый узел', agentId,
+  /** Создание узла: видеосервер (привязка к хабу) или коммутатор (добавляется вручную). */
+  function makeNode(agentId: string | null, icon: SrvNodeIcon): SrvMapNode {
+    const a = agentId ? agentById.get(agentId) || null : null;
+    return {
+      id: uid('smn'),
+      label: a?.name || (icon === 'switch' ? 'Коммутатор' : 'Новый узел'),
+      agentId,
       x: snap(CANVAS_W / 2), y: snap(CANVAS_H / 2),
-      district: '', address: '', building: '', comment: '',
+      icon,
+      district: '', address: '', address2: '', building: '', secret: '', port: '', comment: '',
     };
-    // ставим свободный рядом заполненный слот
+  }
+
+  function addNode(agentId: string) {
+    placeNode(makeNode(agentId, 'server'));
+  }
+
+  /** Добавить коммутатор — узел без привязки к хабу, иконку выбирает пользователь. */
+  function addSwitch() {
+    placeNode(makeNode(null, 'switch'));
+  }
+
+  function placeNode(n: SrvMapNode) {
     patchCur((m) => {
       let { x, y } = n;
       let tries = 0;
@@ -129,7 +151,7 @@ export default function SrvMapPage() {
     if (linkFrom === fromId) { setLinkFrom(null); return; }
     const dup = cur?.links.some((l) => (l.from === linkFrom && l.to === fromId) || (l.from === fromId && l.to === linkFrom));
     if (dup) { setLinkFrom(null); useToasts.push('warn', 'Связь между этими узлами уже есть'); return; }
-    setLinkDraft({ id: uid('sml'), from: linkFrom, to: fromId, kind: 'fiber', label: '', comment: '' });
+    setLinkDraft({ id: uid('sml'), from: linkFrom, to: fromId, kind: 'fiber', label: '', portFrom: '', portTo: '', comment: '' });
     setLinkFrom(null);
   }
 
@@ -196,20 +218,64 @@ export default function SrvMapPage() {
     (e.target as Element).setPointerCapture?.(e.pointerId);
     dragRef.current = { id, moved: false };
   }
-  function onCanvasPointerMove(e: React.PointerEvent) {
-    const d = dragRef.current;
-    if (!d || !wrapRef.current || !cur) return;
-    const rect = wrapRef.current.getBoundingClientRect();
-    const px = ((e.clientX - rect.left) / rect.width) * CANVAS_W;
-    const py = ((e.clientY - rect.top) / rect.height) * CANVAS_H;
-    d.moved = true;
-    moveNode(d.id, clampN(snap(px), 20, CANVAS_W - 20), clampN(snap(py), 20, CANVAS_H - 20));
-  }
-  function onCanvasPointerUp() { dragRef.current = null; }
 
   // авто-сохранение позиции после перетаскивания — по желанию пользователя кнопкой «Сохранить»
 
   const nodeById = useMemo(() => new Map((cur?.nodes || []).map((n) => [n.id, n])), [cur]);
+
+  // ── зум/панорамирование холста (колесо — зум вокруг курсора, перетаскивание фона — панорама) ──
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const panRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
+  const zoomRef = useRef(1);
+  zoomRef.current = zoom;
+  const curRef = useRef(cur);
+  curRef.current = cur;
+
+  function resetView() { setZoom(1); setPan({ x: 0, y: 0 }); }
+
+  function onWheel(e: React.WheelEvent) {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const rect = wrap.getBoundingClientRect();
+    const z0 = zoomRef.current;
+    const z1 = clampN(z0 * Math.exp(-e.deltaY * 0.0015), 1, 3.5);
+    if (Math.abs(z1 - z0) < 0.001) return;
+    e.preventDefault();
+    const fx = (e.clientX - rect.left) / rect.width;
+    const fy = (e.clientY - rect.top) / rect.height;
+    setPan((p) => ({
+      x: clampN(fx * rect.width - ((fx * rect.width - p.x) / z0) * z1, rect.width * (1 - z1), 0),
+      y: clampN(fy * rect.height - ((fy * rect.height - p.y) / z0) * z1, rect.height * (1 - z1), 0),
+    }));
+    setZoom(z1);
+  }
+
+  function onBgPointerDown(e: React.PointerEvent) {
+    if (!wrapRef.current) return;
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    panRef.current = { sx: e.clientX, sy: e.clientY, ox: pan.x, oy: pan.y };
+  }
+  function onCanvasPointerMove(e: React.PointerEvent) {
+    const d = dragRef.current;
+    if (d && wrapRef.current && curRef.current) {
+      const rect = wrapRef.current.getBoundingClientRect();
+      const px = ((e.clientX - rect.left - pan.x) / (rect.width * zoom)) * CANVAS_W;
+      const py = ((e.clientY - rect.top - pan.y) / (rect.height * zoom)) * CANVAS_H;
+      d.moved = true;
+      moveNode(d.id, clampN(snap(px), 20, CANVAS_W - 20), clampN(snap(py), 20, CANVAS_H - 20));
+      return;
+    }
+    const p = panRef.current;
+    if (p && wrapRef.current) {
+      const rect = wrapRef.current.getBoundingClientRect();
+      setPan({
+        x: clampN(p.ox + (e.clientX - p.sx), rect.width * (1 - zoom), 0),
+        y: clampN(p.oy + (e.clientY - p.sy), rect.height * (1 - zoom), 0),
+      });
+    }
+  }
+  function onCanvasPointerUp() { dragRef.current = null; panRef.current = null; }
 
   return (
     <div className="space-y-4 p-4 lg:p-6">
@@ -249,87 +315,116 @@ export default function SrvMapPage() {
                   : 'Администратор ещё не создал ни одной карты.'}
                 action={isAdmin ? <button onClick={() => void createMap()} className="btn-acc"><Plus className="h-4 w-4" />Создать карту</button> : undefined} />
         ) : (
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
-            {/* ХОЛСТ */}
-            <div>
+          <div className="space-y-4">
+            {/* ХОЛСТ — шире контейнера + зум/панорама, чтобы карта была больше */}
+            <div className="relative aspect-[16/10] w-full overflow-hidden rounded-xl border border-line bg-[#0d1122]"
+              style={{ marginLeft: 'calc(50% - 50vw)', width: 'min(100vw, 1900px)' }}>
               <div ref={wrapRef}
-                className="relative aspect-[10/7] w-full overflow-hidden rounded-xl border border-line bg-[#0d1122]"
-                style={{ backgroundImage: 'radial-gradient(circle, rgba(143,125,240,.10) 1px, transparent 1px)', backgroundSize: `${GRID / 2}px ${GRID / 2}px` }}
+                className="absolute inset-0 cursor-move touch-none select-none"
+                onWheel={onWheel}
+                onPointerDown={onBgPointerDown}
                 onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerLeave={onCanvasPointerUp}>
-                <svg viewBox={`0 0 ${CANVAS_W} ${CANVAS_H}`} className="absolute inset-0 h-full w-full">
-                  {/* связи */}
-                  {cur.links.map((l) => {
-                    const a = nodeById.get(l.from); const b = nodeById.get(l.to);
-                    if (!a || !b) return null;
-                    const meta = LINK_KINDS[l.kind] || LINK_KINDS.lan;
-                    const mx = (a.x + b.x) / 2; const my = (a.y + b.y) / 2;
+                <div className="absolute left-0 top-0 origin-top-left"
+                  style={{
+                    width: `${zoom * 100}%`, height: `${zoom * 100}%`,
+                    transform: `translate(${pan.x}px, ${pan.y}px)`,
+                    backgroundImage: 'radial-gradient(circle, rgba(143,125,240,.10) 1px, transparent 1px)',
+                    backgroundSize: `${GRID / 2}px ${GRID / 2}px`,
+                  }}>
+                  <svg viewBox={`0 0 ${CANVAS_W} ${CANVAS_H}`} className="absolute inset-0 h-full w-full">
+                    {/* связи */}
+                    {cur.links.map((l) => {
+                      const a = nodeById.get(l.from); const b = nodeById.get(l.to);
+                      if (!a || !b) return null;
+                      const meta = LINK_KINDS[l.kind] || LINK_KINDS.lan;
+                      const mx = (a.x + b.x) / 2; const my = (a.y + b.y) / 2;
+                      const ports = [l.portFrom && `${a.label}:${l.portFrom}`, l.portTo && `${b.label}:${l.portTo}`].filter(Boolean).join(' ↔ ');
+                      return (
+                        <g key={l.id} className="cursor-pointer" onClick={() => isAdmin && !viewOnly && setLinkDraft(l)}>
+                          <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={meta.color} strokeWidth={2.2} strokeDasharray={meta.dash} opacity={0.85} />
+                          <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="transparent" strokeWidth={14} />
+                          <circle cx={mx} cy={my} r={9} fill="#12162a" stroke={meta.color} strokeWidth={1.5} />
+                          <text x={mx} y={my + 3.5} textAnchor="middle" fontSize={9} fill={meta.color} fontWeight={700}>✎</text>
+                          {(l.label || '') !== '' && (
+                            <text x={mx} y={my - 14} textAnchor="middle" fontSize={10.5} fill="#aeb6d8">{l.label}</text>
+                          )}
+                          {ports !== '' && (
+                            <text x={mx} y={my + 24} textAnchor="middle" fontSize={9.5} fill="#8b93b8">{ports}</text>
+                          )}
+                        </g>
+                      );
+                    })}
+                    {/* линия-заготовка при выборе пары узлов */}
+                    {linkFrom && (
+                      <text x={CANVAS_W / 2} y={18} textAnchor="middle" fontSize={12} fill="#dfa65e">
+                        Режим связи: кликните второй узел (или тот же — отмена)
+                      </text>
+                    )}
+                  </svg>
+
+                  {/* узлы */}
+                  {cur.nodes.map((n) => {
+                    const a = n.agentId ? agentById.get(n.agentId) || null : null;
+                    const col = nodeColor(a);
+                    const selected = linkFrom === n.id;
+                    const IconComp = NODE_ICONS[n.icon]?.Icon || Server;
                     return (
-                      <g key={l.id} className="cursor-pointer" onClick={() => isAdmin && !viewOnly && setLinkDraft(l)}>
-                        <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={meta.color} strokeWidth={2.2} strokeDasharray={meta.dash} opacity={0.85} />
-                        <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="transparent" strokeWidth={14} />
-                        <circle cx={mx} cy={my} r={9} fill="#12162a" stroke={meta.color} strokeWidth={1.5} />
-                        <text x={mx} y={my + 3.5} textAnchor="middle" fontSize={9} fill={meta.color} fontWeight={700}>✎</text>
-                        {(l.label || '') !== '' && (
-                          <text x={mx} y={my - 14} textAnchor="middle" fontSize={10.5} fill="#aeb6d8">{l.label}</text>
-                        )}
-                      </g>
+                      <div key={n.id}
+                        onPointerDown={(e) => onNodePointerDown(e, n.id)}
+                        onClick={() => { if (dragRef.current?.moved) return; if (linkFrom) startLink(n.id); else setEditNode(n); }}
+                        title={a ? `${a.name} · ${a.ip} · ${a.online ? 'онлайн' : 'офлайн'}` : (n.icon === 'switch' ? 'Коммутатор' : 'Узел без привязки к хабу')}
+                        className={cls('absolute z-10 -translate-x-1/2 -translate-y-1/2 cursor-grab select-none active:cursor-grabbing',
+                          selected && 'animate-pulse')}
+                        style={{ left: `${(n.x / CANVAS_W) * 100}%`, top: `${(n.y / CANVAS_H) * 100}%` }}>
+                        <div className={cls('flex flex-col items-center gap-1', selected && 'rounded-lg ring-2 ring-warn px-1')}>
+                          <span className="relative flex h-6 w-6 items-center justify-center rounded-full border-2 bg-panel"
+                            style={{ borderColor: col, boxShadow: `0 0 10px ${col}66` }}>
+                            <IconComp className="h-3.5 w-3.5" style={{ color: col }} />
+                          </span>
+                          {/* только имя узла — прочее (ЖК/офис, ip) не показываем на подписи */}
+                          <span className="max-w-[150px] truncate rounded-md border border-line/70 bg-deep/90 px-1.5 py-0.5 text-[10.5px] font-semibold text-ink">
+                            {n.label}
+                          </span>
+                        </div>
+                      </div>
                     );
                   })}
-                  {/* линия-заготовка при выборе пары узлов */}
-                  {linkFrom && (
-                    <text x={CANVAS_W / 2} y={18} textAnchor="middle" fontSize={12} fill="#dfa65e">
-                      Режим связи: кликните второй узел (или тот же — отмена)
-                    </text>
-                  )}
-                </svg>
-
-                {/* узлы */}
-                {cur.nodes.map((n) => {
-                  const a = n.agentId ? agentById.get(n.agentId) || null : null;
-                  const col = nodeColor(a);
-                  const selected = linkFrom === n.id;
-                  return (
-                    <div key={n.id}
-                      onPointerDown={(e) => onNodePointerDown(e, n.id)}
-                      onClick={() => { if (dragRef.current?.moved) return; if (linkFrom) startLink(n.id); else setEditNode(n); }}
-                      title={a ? `${a.name} · ${a.ip} · ${a.online ? 'онлайн' : 'офлайн'}` : 'Узел без привязки к хабу'}
-                      className={cls('absolute z-10 -translate-x-1/2 -translate-y-1/2 cursor-grab select-none active:cursor-grabbing',
-                        selected && 'animate-pulse')}
-                      style={{ left: `${(n.x / CANVAS_W) * 100}%`, top: `${(n.y / CANVAS_H) * 100}%` }}>
-                      <div className={cls('flex flex-col items-center gap-1', selected && 'rounded-lg ring-2 ring-warn px-1')}>
-                        <span className="relative flex h-5 w-5 items-center justify-center rounded-full border-2 bg-panel"
-                          style={{ borderColor: col, boxShadow: `0 0 10px ${col}66` }}>
-                          <Building2 className="h-3 w-3" style={{ color: col }} />
-                        </span>
-                        <span className="max-w-[130px] truncate rounded-md border border-line/70 bg-deep/90 px-1.5 py-0.5 text-[10.5px] font-semibold text-ink">
-                          {n.label}{n.district ? ` · ${n.district}` : ''}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
+                </div>
               </div>
 
-              {/* легенда */}
-              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-dim">
-                <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-ok" />хаб онлайн</span>
-                <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-crit" />хаб офлайн</span>
-                <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-warn" />высокая задержка</span>
-                <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-dim" />без привязки</span>
-                <span className="mx-1 hidden h-3 w-px bg-line sm:block" />
-                <span className="flex items-center gap-1.5"><i className="h-0.5 w-6" style={{ background: LINK_KINDS.fiber.color }} />оптика</span>
-                <span className="flex items-center gap-1.5"><i className="h-0.5 w-6" style={{ background: `repeating-linear-gradient(90deg, ${LINK_KINDS.radio.color} 0 6px, transparent 6px 10px)` }} />радиолиния</span>
-                <span className="flex items-center gap-1.5"><i className="h-0.5 w-6" style={{ background: `repeating-linear-gradient(90deg, ${LINK_KINDS.lan.color} 0 2px, transparent 2px 6px)` }} />LAN</span>
-                {isAdmin && !viewOnly && <span className="ml-auto text-[10.5px] text-dim/70">перетаскивайте узлы · клик — свойства · «Связь» — затем клик по второму узлу</span>}
+              {/* управление масштабом */}
+              <div className="absolute right-2 top-2 z-20 flex items-center gap-1 rounded-lg border border-line bg-panel/90 p-1 backdrop-blur">
+                <button className="btn-ghost h-7 w-7 p-0 text-[14px] leading-none" onClick={() => setZoom((z) => clampN(z / 1.25, 1, 3.5))} title="Уменьшить">−</button>
+                <span className="w-11 text-center font-mono text-[11px] text-mut">{Math.round(zoom * 100)}%</span>
+                <button className="btn-ghost h-7 w-7 p-0 text-[14px] leading-none" onClick={() => setZoom((z) => clampN(z * 1.25, 1, 3.5))} title="Увеличить">+</button>
+                <button className="btn-ghost h-7 px-2 text-[11px]" onClick={resetView} title="Сбросить вид">Сброс</button>
               </div>
             </div>
 
-            {/* БОКОВАЯ ПАНЕЛЬ */}
-            <div className="space-y-3">
+            {/* легенда */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-dim">
+              <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-ok" />хаб онлайн</span>
+              <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-crit" />хаб офлайн</span>
+              <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-warn" />высокая задержка</span>
+              <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-dim" />без привязки</span>
+              <span className="flex items-center gap-1.5"><Server className="h-3.5 w-3.5" />сервер</span>
+              <span className="flex items-center gap-1.5"><Boxes className="h-3.5 w-3.5" />коммутатор</span>
+              <span className="mx-1 hidden h-3 w-px bg-line sm:block" />
+              <span className="flex items-center gap-1.5"><i className="h-0.5 w-6" style={{ background: LINK_KINDS.fiber.color }} />оптика</span>
+              <span className="flex items-center gap-1.5"><i className="h-0.5 w-6" style={{ background: `repeating-linear-gradient(90deg, ${LINK_KINDS.radio.color} 0 6px, transparent 6px 10px)` }} />радиолиния</span>
+              <span className="flex items-center gap-1.5"><i className="h-0.5 w-6" style={{ background: `repeating-linear-gradient(90deg, ${LINK_KINDS.lan.color} 0 2px, transparent 2px 6px)` }} />LAN</span>
+              {isAdmin && !viewOnly && <span className="ml-auto text-[10.5px] text-dim/70">колесо — масштаб · фон — панорама · перетаскивайте узлы · клик — свойства · «Связь» — затем клик по второму узлу</span>}
+            </div>
+
+            {/* БОКОВЫЕ ПАНЕЛИ */}
+            <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-[300px_minmax(0,1fr)_minmax(0,1fr)]">
               {isAdmin && !viewOnly && (
                 <div className="rounded-xl border border-line bg-raised/40 p-3">
                   <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Добавить устройство (VideoSRV)</p>
                   <AgentPicker agents={srvAgents} usedIds={new Set(cur.nodes.map((n) => n.agentId).filter(Boolean) as string[])} onPick={addNode} />
+                  <button onClick={addSwitch} className="btn-ghost mt-2 h-8 w-full justify-center">
+                    <Boxes className="h-3.5 w-3.5" />Добавить коммутатор
+                  </button>
                   {srvAgents.length === 0 && (
                     <p className="mt-2 text-[11.5px] leading-relaxed text-warn">
                       Нет хабов с тегом «VideoSRV». Присвойте тег хабу в разделе «Хабы», чтобы он появился здесь.
@@ -347,12 +442,13 @@ export default function SrvMapPage() {
                   {cur.links.map((l) => {
                     const a = nodeById.get(l.from); const b = nodeById.get(l.to);
                     const meta = LINK_KINDS[l.kind] || LINK_KINDS.lan;
+                    const ports = [l.portFrom && `${a?.label || '?'}:${l.portFrom}`, l.portTo && `${b?.label || '?'}:${l.portTo}`].filter(Boolean).join(' ↔ ');
                     return (
                       <li key={l.id} className="flex items-center gap-2 rounded-lg border border-line/60 bg-panel/60 px-2 py-1.5 text-[11.5px]">
                         <i className="h-0.5 w-4 shrink-0" style={{ background: meta.color }} />
                         <button className="min-w-0 flex-1 truncate text-left text-mut hover:text-ink"
-                          onClick={() => setLinkDraft(l)} title={l.comment || undefined}>
-                          {a?.label || '?'} ↔ {b?.label || '?'}{l.label ? ` · ${l.label}` : ''}
+                          onClick={() => setLinkDraft(l)} title={[l.comment, ports].filter(Boolean).join(' · ') || undefined}>
+                          {a?.label || '?'} ↔ {b?.label || '?'}{l.label ? ` · ${l.label}` : ''}{ports ? ` · ${ports}` : ''}
                         </button>
                         {isAdmin && !viewOnly && (
                           <button onClick={() => deleteLink(l.id)} className="shrink-0 rounded p-1 text-dim hover:text-crit"><X className="h-3 w-3" /></button>
@@ -370,18 +466,21 @@ export default function SrvMapPage() {
                 <ul className="scroll-thin max-h-72 space-y-1.5 overflow-y-auto">
                   {cur.nodes.map((n) => {
                     const a = n.agentId ? agentById.get(n.agentId) || null : null;
+                    const NIcon = NODE_ICONS[n.icon]?.Icon || Server;
                     return (
                       <li key={n.id} className="rounded-lg border border-line/60 bg-panel/60 px-2 py-1.5">
                         <div className="flex items-center gap-2">
                           <i className="h-2 w-2 shrink-0 rounded-full" style={{ background: nodeColor(a) }} />
+                          <NIcon className="h-3.5 w-3.5 shrink-0 text-dim" />
                           <button className="min-w-0 flex-1 truncate text-left text-[12px] font-semibold text-ink hover:text-vio" onClick={() => setEditNode(n)}>
                             {n.label}
                           </button>
+                          {n.port && <span className="shrink-0 rounded border border-line/70 bg-raised px-1 font-mono text-[9.5px] text-mut">{n.port}</span>}
                           {a && <span className="shrink-0 font-mono text-[10px] text-dim">{fmtMs(a.latency)}</span>}
                         </div>
-                        {(n.address || n.building || n.comment) && (
+                        {(n.district || n.address || n.address2 || n.comment) && (
                           <p className="mt-1 line-clamp-2 pl-4 text-[10.5px] leading-snug text-dim">
-                            {[n.address, n.building].filter(Boolean).join(', ')}{n.comment ? ` — ${n.comment}` : ''}
+                            {[n.district, n.address, n.address2].filter(Boolean).join(' · ')}{n.comment ? ` — ${n.comment}` : ''}
                           </p>
                         )}
                       </li>
@@ -457,11 +556,34 @@ function NodeEditor({ initial, agents, isAdmin, onClose, onSave, onDelete, onLin
     <Modal open onClose={onClose} title={`Узел карты · ${initial.label}`} width="max-w-xl">
       <div className="space-y-3">
         <Field label="Название узла"><input className="inp" value={n.label} onChange={(e) => set('label', e.target.value)} placeholder="" /></Field>
+        <Field label="Иконка на карте" hint="Коммутатор можно добавить вручную — привязка к хабу не обязательна">
+          <div className="flex flex-wrap gap-2">
+            {(Object.keys(NODE_ICONS) as SrvNodeIcon[]).map((k) => {
+              const Ic = NODE_ICONS[k].Icon;
+              return (
+                <button key={k} onClick={() => set('icon', k)}
+                  className={cls('inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11.5px] font-semibold transition-all',
+                    n.icon === k ? 'border-vio/60 bg-vio/20 text-ink' : 'border-line bg-raised/40 text-dim hover:text-mut')}>
+                  <Ic className="h-3.5 w-3.5" />{NODE_ICONS[k].label}
+                </button>
+              );
+            })}
+          </div>
+        </Field>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="Район / часть города"><input className="inp" value={n.district} onChange={(e) => set('district', e.target.value)} placeholder="" /></Field>
-          <Field label="Строение / площадка"><input className="inp" value={n.building} onChange={(e) => set('building', e.target.value)} placeholder="" /></Field>
+          <Field label="ЖК\\Офис"><input className="inp" value={n.district} onChange={(e) => set('district', e.target.value)} placeholder="" /></Field>
+          <Field label="Порт коммутатора" hint="Порт, к которому подключен сервер">
+            <input className="inp" value={n.port} onChange={(e) => set('port', e.target.value)} placeholder="Gi1/0/1" />
+          </Field>
         </div>
-        <Field label="Адрес"><input className="inp" value={n.address} onChange={(e) => set('address', e.target.value)} placeholder="" /></Field>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="IP 1"><input className="inp font-mono" value={n.address} onChange={(e) => set('address', e.target.value)} placeholder="10.0.0.1" /></Field>
+          <Field label="IP 2"><input className="inp font-mono" value={n.address2} onChange={(e) => set('address2', e.target.value)} placeholder="10.0.0.2" /></Field>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="Логин"><input className="inp" value={n.building} onChange={(e) => set('building', e.target.value)} autoComplete="off" placeholder="" /></Field>
+          <Field label="Пароль"><input className="inp" type="password" value={n.secret} onChange={(e) => set('secret', e.target.value)} autoComplete="new-password" placeholder="" /></Field>
+        </div>
         <Field label="Видеосервер (хаб с тегом VideoSRV)">
           <select className="inp" value={n.agentId || ''} disabled={!isAdmin}
             onChange={(e) => {
