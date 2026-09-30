@@ -224,22 +224,26 @@ export default function SrvMapPage() {
   const nodeById = useMemo(() => new Map((cur?.nodes || []).map((n) => [n.id, n])), [cur]);
 
   // ── зум/панорамирование холста (колесо — зум вокруг курсора, перетаскивание фона — панорама) ──
-  const [zoom, setZoom] = useState(1);
+  // масштаб по умолчанию 100% (BASE_ZOOM), кнопки +/− изменяют масштаб на 50% относительно текущего
+  const BASE_ZOOM = 1;
+  const ZOOM_MIN = 0.5;
+  const ZOOM_MAX = 3.5;
+  const [zoom, setZoom] = useState(BASE_ZOOM);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const panRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
-  const zoomRef = useRef(1);
+  const zoomRef = useRef(BASE_ZOOM);
   zoomRef.current = zoom;
   const curRef = useRef(cur);
   curRef.current = cur;
 
-  function resetView() { setZoom(1); setPan({ x: 0, y: 0 }); }
+  function resetView() { setZoom(BASE_ZOOM); setPan({ x: 0, y: 0 }); }
 
   function onWheel(e: React.WheelEvent) {
     const wrap = wrapRef.current;
     if (!wrap) return;
     const rect = wrap.getBoundingClientRect();
     const z0 = zoomRef.current;
-    const z1 = clampN(z0 * Math.exp(-e.deltaY * 0.0015), 1, 3.5);
+    const z1 = clampN(z0 * Math.exp(-e.deltaY * 0.0015), ZOOM_MIN, ZOOM_MAX);
     if (Math.abs(z1 - z0) < 0.001) return;
     e.preventDefault();
     const fx = (e.clientX - rect.left) / rect.width;
@@ -316,9 +320,9 @@ export default function SrvMapPage() {
                 action={isAdmin ? <button onClick={() => void createMap()} className="btn-acc"><Plus className="h-4 w-4" />Создать карту</button> : undefined} />
         ) : (
           <div className="space-y-4">
-            {/* ХОЛСТ — шире контейнера + зум/панорама, чтобы карта была больше */}
-            <div className="relative aspect-[16/10] w-full overflow-hidden rounded-xl border border-line bg-[#0d1122]"
-              style={{ marginLeft: 'calc(50% - 50vw)', width: 'min(100vw, 1900px)' }}>
+            {/* ХОЛСТ — уменьшен на 30% (70% ширины окна) + зум/панорама */}
+            <div className="relative mx-auto aspect-[16/10] overflow-hidden rounded-xl border border-line bg-[#0d1122]"
+              style={{ width: 'min(70vw, 1330px)' }}>
               <div ref={wrapRef}
                 className="absolute inset-0 cursor-move touch-none select-none"
                 onWheel={onWheel}
@@ -392,11 +396,11 @@ export default function SrvMapPage() {
                 </div>
               </div>
 
-              {/* управление масштабом */}
+              {/* управление масштабом: шаг ±50% от текущего, по умолчанию 100% */}
               <div className="absolute right-2 top-2 z-20 flex items-center gap-1 rounded-lg border border-line bg-panel/90 p-1 backdrop-blur">
-                <button className="btn-ghost h-7 w-7 p-0 text-[14px] leading-none" onClick={() => setZoom((z) => clampN(z / 1.25, 1, 3.5))} title="Уменьшить">−</button>
+                <button className="btn-ghost h-7 w-7 p-0 text-[14px] leading-none" onClick={() => setZoom((z) => clampN(z * 0.5, ZOOM_MIN, ZOOM_MAX))} title="Уменьшить на 50%">−</button>
                 <span className="w-11 text-center font-mono text-[11px] text-mut">{Math.round(zoom * 100)}%</span>
-                <button className="btn-ghost h-7 w-7 p-0 text-[14px] leading-none" onClick={() => setZoom((z) => clampN(z * 1.25, 1, 3.5))} title="Увеличить">+</button>
+                <button className="btn-ghost h-7 w-7 p-0 text-[14px] leading-none" onClick={() => setZoom((z) => clampN(z * 1.5, ZOOM_MIN, ZOOM_MAX))} title="Увеличить на 50%">+</button>
                 <button className="btn-ghost h-7 px-2 text-[11px]" onClick={resetView} title="Сбросить вид">Сброс</button>
               </div>
             </div>
