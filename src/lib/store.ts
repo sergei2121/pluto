@@ -5,6 +5,24 @@ import type {
 } from './types';
 import { uid, TAG_COLORS, embedHash, verifyTotp } from './util';
 
+/** Имя системного тега видеосерверов. Теги хранятся в agent.tags как метки (label). */
+export const VIDEO_SRV_TAG = 'VideoSRV';
+
+/**
+ * Проверка: назначен ли хабу тег «VideoSRV».
+ * Совпадение по метке без учёта регистра; дополнительно поддерживаются
+ * устаревшие записи, где в agent.tags хранился id тега (tg-…), а не метка.
+ */
+export function hasVideoSrvTag(agentTags: unknown, tagList?: Tag[]): boolean {
+  if (!Array.isArray(agentTags)) return false;
+  for (const t of agentTags) {
+    if (typeof t !== 'string') continue;
+    if (t.trim().toLowerCase() === VIDEO_SRV_TAG.toLowerCase()) return true;
+    if (tagList && tagList.some((x) => x.id === t && x.label.trim().toLowerCase() === VIDEO_SRV_TAG.toLowerCase())) return true;
+  }
+  return false;
+}
+
 export interface Toast { id: string; kind: Severity; text: string; }
 
 let toastId = 0;

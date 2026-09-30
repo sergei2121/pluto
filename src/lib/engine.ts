@@ -2,7 +2,7 @@
 // ВАЖНО: движок — это только офлайн-эмуляция для режима «embedded» (ядро недоступно).
 // В серверном режиме он не запускается и не может писать в стор: все мутации
 // стора защищены allowLocalMutation()/emuGuard() в store.ts.
-import { allowLocalMutation, getState, store, useToasts } from './store';
+import { allowLocalMutation, getState, hasVideoSrvTag, store, useToasts } from './store';
 import type { Agent, Device, GlancesPoint, RelayPingResult, RelayTargetResult } from './types';
 import { clamp, hashStr, mulberry32, rnd } from './util';
 
@@ -29,7 +29,7 @@ export function stopEngine() {
 async function pollBarsAgents() {
   if (!emuGuard('pollBarsAgents')) return;
   const s = getState();
-  const barsAgents = s.agents.filter(a => a.tags.includes('VideoSRV'));
+  const barsAgents = s.agents.filter(a => hasVideoSrvTag(a.tags, s.tags));
   for (const a of barsAgents) {
     const now = Date.now();
     // Эмуляция опроса онлайн-статуса
