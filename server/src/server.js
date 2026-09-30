@@ -14,7 +14,7 @@ import deviceChecks from './checks/deviceChecks.js';
 import { relayPing } from './lib/relay.js';
 import { expandTargets } from './lib/http.js';
 import { provisionAgent, AGENT_PORT_DEFAULT } from './lib/provision.js';
-import { initPingHistory, recordPingState, seedPingHistoryFromAgents, savePingEvents, rollupPingDaily, queryPingHistory } from './db/pingHistory.js';
+import { initPingHistory, recordPingState, seedPingHistoryFromAgents, savePingEvents, rollupPingDaily, queryPingHistory, hubNameOf } from './db/pingHistory.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const VERSION = '2.0.1';
@@ -595,10 +595,11 @@ async function pollAgent(agent) {
           }
           
           // Обновляем offlineSince для устройств в офлайне
+          const prevR = Array.isArray(prev?.results) ? prev.results[idx] : undefined;
           if (!r.alive) {
             // Если устройство уже было в офлайне, сохраняем время начала
-            if (prev?.results?.[idx] && !prev.results[idx].alive && prev.results[idx].offlineSince) {
-              r.offlineSince = prev.results[idx].offlineSince;
+            if (prevR && !prevR.alive && prevR.offlineSince) {
+              r.offlineSince = prevR.offlineSince;
             } else if (!r.offlineSince) {
               // Устройство только что ушло в офлайн
               r.offlineSince = now;
@@ -609,21 +610,27 @@ async function pollAgent(agent) {
               r.offlineDuration30d = prev.results[idx].offlineDuration30d;
             }
 
+            // История активности (журнал пингов): пишем при КАЖДОМ переходе online→offline,
+            // независимо от флагов уведомлений (_pingNotified). Иначе после первого
+            // перехода события переставали записываться (recordPingState сам отсекает дубли).
+            void recordPingState(db, agent.id, hubNameOf(agent), rangeStr, targetName, r.ip || r.host || r.addr || '', false, now);
+
             // Уведомления группы «Пинги агентов»: устройство ушло в офлайн
-            const wasAlivePrev = prev?.results?.[idx] ? prev.results[idx].alive !== false : true;
+            const wasAlivePrev = prevR ? prevR.alive !== false : true;
             if (wasAlivePrev && !r._pingNotified) {
               r._pingNotified = true;
               pingEvents.push({ level: 'warn', title: `Пинг агента «${agent.name}»: ${r.ip || r.host || r.addr || 'устройство'} недоступен`, kind: 'pingDown', msg: `Агент «${agent.name}»: устройство ${r.ip || r.host || r.addr || ''} недоступно` });
-              // История пингов: событие «ушло в офлайн»
-              void recordPingState(db, agent.id, agent.name, rangeStr, targetName, r.ip || r.host || r.addr || '', false, now);
             }
           } else {
+            // История активности (журнал пингов): пишем при КАЖДОМ возврате в онлайн,
+            // даже если предыдущее состояние не сохранилось (перезапуск сервера,
+            // пустой prev, смена порядка целей) — дубли отсекает recordPingState.
+            void recordPingState(db, agent.id, hubNameOf(agent), rangeStr, targetName, r.ip || r.host || r.addr || '', true, now);
+
             // Устройство восстановилось — вычисляем длительность офлайна
-            const wasOfflinePrev = prev?.results?.[idx]?.alive === false || !!prev?.results?.[idx]?.offlineSince;
+            const wasOfflinePrev = prevR?.alive === false || !!prevR?.offlineSince;
             if (wasOfflinePrev || r._pingNotified) {
               pingEvents.push({ level: 'ok', title: `Пинг агента «${agent.name}»: ${r.ip || r.host || r.addr || 'устройство'} снова в сети`, kind: 'pingRecover', msg: `Агент «${agent.name}»: устройство ${r.ip || r.host || r.addr || ''} восстановлено` });
-              // История пингов: событие «снова онлайн»
-              void recordPingState(db, agent.id, agent.name, rangeStr, targetName, r.ip || r.host || r.addr || '', true, now);
             }
             r._pingNotified = false;
             if (r.offlineSince) {
