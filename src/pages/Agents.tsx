@@ -74,6 +74,7 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
       name: name.trim(),
       ip: ip.trim(),
       relayUrl: relayUrl.trim(),
+      glancesUrl: '', // телеметрия настраивается в разделе «Мониторинг»
       pingTargets: targets,
       tags: selTags,
       statsView
