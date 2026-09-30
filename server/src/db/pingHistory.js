@@ -97,11 +97,14 @@ function findLastEvent(db, key) {
  * Выполняется лениво при первом опросе агента (agent.targets уже заполнены).
  */
 export function seedPingHistoryFromAgents(db) {
-  if (db._pingSeeded) return false;
+  // Флаг НЕ выставляется при пустой истории: если на момент вызова цели агентов
+  // ещё не опросены (agent.targets пуст), иначе журнал так и останется пустым.
+  if (db._pingSeeded && (db.pingEvents || []).length > 0) return false;
   initPingHistory(db);
   const now = Date.now();
   let added = 0;
   for (const a of db.agents || []) {
+    const an = hubNameOf(a);
     for (const t of a.targets || []) {
       const rangeStr = t.range || '';
       const targetName = t.name || t.target || rangeStr;
@@ -112,11 +115,13 @@ export function seedPingHistoryFromAgents(db) {
         if (findLastEvent(db, key)) continue; // история по этому устройству уже ведётся
         // время перехода в текущее состояние: offlineSince (ушёл в офлайн) или lastSuccess (восстановился)
         const ts = !r.alive ? (r.offlineSince || now) : (r.lastSuccess || now);
-        if (recordPingState(db, a.id, a.name, rangeStr, targetName, ip, !!r.alive, Math.min(ts, now))) added++;
+        if (recordPingState(db, a.id, an, rangeStr, targetName, ip, !!r.alive, Math.min(ts, now))) added++;
       }
     }
   }
-  db._pingSeeded = true;
+  // флаг ставим только если история реально непустая — иначе попробуем досеять
+  // при следующем опросе (см. начало функции)
+  db._pingSeeded = (db.pingEvents || []).length > 0;
   return db._pingDirty;
 }
 
@@ -214,8 +219,10 @@ export async function rollupPingDaily(db) {
   }
 
   prunePingHistory(db);
-  db._pingDirty = false; // история сохраняется ниже вместе с суточными агрегатами
   await saveDb();
+  // сбрасываем флаг «грязной» истории только ПОСЛЕ успешного сохранения:
+  // иначе события, добавленные во время ожидания записи, терялись
+  db._pingDirty = false;
 }
 
 /** Запрос истории: фильтры по агенту/диапазону/IP + период (дней). */
