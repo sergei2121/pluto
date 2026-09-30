@@ -487,7 +487,11 @@ export interface SrvMapNode {
   district: string;         // ЖК / офис
   switchName: string;       // коммутатор, к которому подключён сервер
   address: string;          // ip 1
+  mask: string;             // маска для ip 1
+  gateway: string;          // шлюз для ip 1
   address2: string;         // ip 2
+  mask2: string;            // маска для ip 2
+  gateway2: string;         // шлюз для ip 2
   building: string;         // логин
   secret: string;           // пароль
   port: string;             // порт коммутатора, к которому подключён сервер
