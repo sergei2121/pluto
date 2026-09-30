@@ -519,4 +519,6 @@ export interface SrvMap {
   links: SrvMapLink[];
   createdAt: number;
   updatedAt: number;
+  /** Демо-карта (из старой поставки) — не отображается в списке. */
+  demo?: boolean;
 }

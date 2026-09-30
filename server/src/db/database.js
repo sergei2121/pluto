@@ -51,6 +51,11 @@ export class Database {
     this.db.devices = this._normalizeDevices();
     this.db.agents = this._normalizeAgents();
     this.db.users = this._normalizeUsers();
+
+    // Убираем демо-данные карты сети: карты с флагом demo не должны отображаться
+    if (Array.isArray(this.db.srvMaps)) {
+      this.db.srvMaps = this.db.srvMaps.filter((m) => !m.demo);
+    }
     
     // Инициализация первого пользователя
     if (this.db.users.length === 0) {

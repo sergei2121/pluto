@@ -68,7 +68,9 @@ export default function SrvMapPage() {
   async function reload(selectFirst = false) {
     try {
       const r = await api.srvMaps();
-      const list = Array.isArray(r.maps) ? r.maps : [];
+      // Демо-данные не показываем: карты, помеченные флагом demo (или seed-карты из
+      // старой поставки), вырезаны; на карте остаются только реально созданные узлы.
+      const list = (Array.isArray(r.maps) ? r.maps : []).filter((m) => !m.demo);
       setMaps(list);
       if (selectFirst || !list.some((m) => m.id === curId)) setCurId(list[0]?.id || '');
     } catch (e) {
@@ -219,7 +221,7 @@ export default function SrvMapPage() {
 
   const nodeById = useMemo(() => new Map((cur?.nodes || []).map((n) => [n.id, n])), [cur]);
 
-  // ── зум/панорамирование холста (колесо — зум вокруг курсора, перетаскивание фона — панорама) ──
+  // ── зум/панорамирование холста (зум только кнопками +/− сверху справа, перетаскивание фона — панорама) ──
   // масштаб по умолчанию 100% (BASE_ZOOM), кнопки +/− изменяют масштаб на 50% относительно текущего
   const BASE_ZOOM = 1;
   const ZOOM_MIN = 0.5;
@@ -234,19 +236,19 @@ export default function SrvMapPage() {
 
   function resetView() { setZoom(BASE_ZOOM); setPan({ x: 0, y: 0 }); }
 
-  function onWheel(e: React.WheelEvent) {
+  // зум кнопками +/−: шаг ±50% от текущего масштаба, панорама подтягивается к центру холста
+  function zoomBy(factor: number) {
     const wrap = wrapRef.current;
     if (!wrap) return;
     const rect = wrap.getBoundingClientRect();
     const z0 = zoomRef.current;
-    const z1 = clampN(z0 * Math.exp(-e.deltaY * 0.0015), ZOOM_MIN, ZOOM_MAX);
+    const z1 = clampN(z0 * factor, ZOOM_MIN, ZOOM_MAX);
     if (Math.abs(z1 - z0) < 0.001) return;
-    e.preventDefault();
-    const fx = (e.clientX - rect.left) / rect.width;
-    const fy = (e.clientY - rect.top) / rect.height;
+    const cx = rect.width / 2;
+    const cy = rect.height / 2;
     setPan((p) => ({
-      x: clampN(fx * rect.width - ((fx * rect.width - p.x) / z0) * z1, rect.width * (1 - z1), 0),
-      y: clampN(fy * rect.height - ((fy * rect.height - p.y) / z0) * z1, rect.height * (1 - z1), 0),
+      x: clampN(cx - ((cx - p.x) / z0) * z1, rect.width * (1 - z1), 0),
+      y: clampN(cy - ((cy - p.y) / z0) * z1, rect.height * (1 - z1), 0),
     }));
     setZoom(z1);
   }
@@ -321,7 +323,6 @@ export default function SrvMapPage() {
               style={{ width: 'min(70vw, 1330px)' }}>
               <div ref={wrapRef}
                 className="absolute inset-0 cursor-move touch-none select-none"
-                onWheel={onWheel}
                 onPointerDown={onBgPointerDown}
                 onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerLeave={onCanvasPointerUp}>
                 <div className="absolute left-0 top-0 origin-top-left"
@@ -394,9 +395,9 @@ export default function SrvMapPage() {
 
               {/* управление масштабом: шаг ±50% от текущего, по умолчанию 100% */}
               <div className="absolute right-2 top-2 z-20 flex items-center gap-1 rounded-lg border border-line bg-panel/90 p-1 backdrop-blur">
-                <button className="btn-ghost h-7 w-7 p-0 text-[14px] leading-none" onClick={() => setZoom((z) => clampN(z * 0.5, ZOOM_MIN, ZOOM_MAX))} title="Уменьшить на 50%">−</button>
+                <button className="btn-ghost h-7 w-7 p-0 text-[14px] leading-none" onClick={() => zoomBy(0.5)} title="Уменьшить на 50%">−</button>
                 <span className="w-11 text-center font-mono text-[11px] text-mut">{Math.round(zoom * 100)}%</span>
-                <button className="btn-ghost h-7 w-7 p-0 text-[14px] leading-none" onClick={() => setZoom((z) => clampN(z * 1.5, ZOOM_MIN, ZOOM_MAX))} title="Увеличить на 50%">+</button>
+                <button className="btn-ghost h-7 w-7 p-0 text-[14px] leading-none" onClick={() => zoomBy(1.5)} title="Увеличить на 50%">+</button>
                 <button className="btn-ghost h-7 px-2 text-[11px]" onClick={resetView} title="Сбросить вид">Сброс</button>
               </div>
             </div>
@@ -558,26 +559,26 @@ function NodeEditor({ initial, agents, isAdmin, onClose, onSave, onDelete, onLin
             <input className="inp" value={n.switchName} onChange={(e) => set('switchName', e.target.value)} placeholder="" />
           </Field>
           <Field label="Порт" hint="Порт, к которому подключен сервер">
-            <input className="inp" value={n.port} onChange={(e) => set('port', e.target.value)} placeholder="Gi1/0/1" />
+            <input className="inp" value={n.port} onChange={(e) => set('port', e.target.value)} placeholder="" />
           </Field>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="ЖК\\Офис"><input className="inp" value={n.district} onChange={(e) => set('district', e.target.value)} placeholder="" /></Field>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="IP 1"><input className="inp font-mono" value={n.address} onChange={(e) => set('address', e.target.value)} placeholder="10.0.0.1" /></Field>
-          <Field label="Маска"><input className="inp font-mono" value={n.mask} onChange={(e) => set('mask', e.target.value)} placeholder="255.255.255.0" /></Field>
+          <Field label="IP 1"><input className="inp font-mono" value={n.address} onChange={(e) => set('address', e.target.value)} placeholder="" /></Field>
+          <Field label="Маска"><input className="inp font-mono" value={n.mask} onChange={(e) => set('mask', e.target.value)} placeholder="" /></Field>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="Шлюз"><input className="inp font-mono" value={n.gateway} onChange={(e) => set('gateway', e.target.value)} placeholder="10.0.0.254" /></Field>
+          <Field label="Шлюз"><input className="inp font-mono" value={n.gateway} onChange={(e) => set('gateway', e.target.value)} placeholder="" /></Field>
           <span aria-hidden />
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="IP 2"><input className="inp font-mono" value={n.address2} onChange={(e) => set('address2', e.target.value)} placeholder="10.0.0.2" /></Field>
-          <Field label="Маска"><input className="inp font-mono" value={n.mask2} onChange={(e) => set('mask2', e.target.value)} placeholder="255.255.255.0" /></Field>
+          <Field label="IP 2"><input className="inp font-mono" value={n.address2} onChange={(e) => set('address2', e.target.value)} placeholder="" /></Field>
+          <Field label="Маска"><input className="inp font-mono" value={n.mask2} onChange={(e) => set('mask2', e.target.value)} placeholder="" /></Field>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="Шлюз"><input className="inp font-mono" value={n.gateway2} onChange={(e) => set('gateway2', e.target.value)} placeholder="10.0.0.254" /></Field>
+          <Field label="Шлюз"><input className="inp font-mono" value={n.gateway2} onChange={(e) => set('gateway2', e.target.value)} placeholder="" /></Field>
           <span aria-hidden />
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
