@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { Panel, Modal, Field, EmptyState } from '../components/ui';
 import { api } from '../lib/api';
-import { getState, store, useCurrentUser, usePluto, useToasts } from '../lib/store';
+import { getState, hasVideoSrvTag, store, useCurrentUser, usePluto, useToasts } from '../lib/store';
 import { cls, fmtMs, uid } from '../lib/util';
 import type { Agent, SrvLinkKind, SrvMap, SrvMapLink, SrvMapNode } from '../lib/types';
 
@@ -36,8 +36,10 @@ export default function SrvMapPage() {
   const user = useCurrentUser();
   const isAdmin = user?.role === 'admin';
   const agentsAll = usePluto((s) => s.agents);
+  const tagList = usePluto((s) => s.tags);
   // Список устройств для выпадающего фильтра — только хабы с тегом "VideoSRV"
-  const srvAgents = useMemo(() => agentsAll.filter((a) => (a.tags || []).includes('VideoSRV')), [agentsAll]);
+  // (агентские теги хранятся как метки; сравнение — без учёта регистра, см. hasVideoSrvTag)
+  const srvAgents = useMemo(() => agentsAll.filter((a) => hasVideoSrvTag(a.tags, tagList)), [agentsAll, tagList]);
   const agentById = useMemo(() => new Map(agentsAll.map((a) => [a.id, a])), [agentsAll]);
 
   const [maps, setMaps] = useState<SrvMap[]>([]);

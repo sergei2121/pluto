@@ -2,7 +2,7 @@
 import { useMemo, useState } from 'react';
 import { BarChart3, Waves, Activity, Download, Cpu, HardDrive, Thermometer, Wifi, Zap, Server } from 'lucide-react';
 import { Panel, EmptyState, TimeAgo, Sparkbar } from '../components/ui';
-import { store, useCurrentUser, usePluto, visibleAgents } from '../lib/store';
+import { store, hasVideoSrvTag, useCurrentUser, usePluto, visibleAgents } from '../lib/store';
 import { cls, fmtNet, LINE_COLORS } from '../lib/util';
 import type { Agent, GlancesPoint, StatsRange } from '../lib/types';
 
@@ -154,14 +154,13 @@ export default function Stats({ mode }: { mode: 'bars' | 'ws' }) {
   const all = usePluto((s) => visibleAgents(s, user));
   const tags = usePluto((s) => s.tags);
   // в каждую вкладку попадают только агенты, назначенные именно в неё
-  // VideoSRV (бывш. Bars): только устройства с тегом «VideoSRV»
-  const videoSrvTagId = useMemo(() => tags.find((t) => t.label.toLowerCase() === 'videosrv')?.id ?? null, [tags]);
+  // VideoSRV (бывш. Bars): только устройства с тегом «VideoSRV» (сравнение метки без учёта регистра)
   const agents = useMemo(
     () =>
       all
-        .filter((a) => (mode === 'bars' ? videoSrvTagId != null && a.tags.includes(videoSrvTagId) : a.statsView === mode))
+        .filter((a) => (mode === 'bars' ? hasVideoSrvTag(a.tags, tags) : a.statsView === mode))
         .sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' })),
-    [all, mode, videoSrvTagId],
+    [all, mode, tags],
   );
   const [agentId, setAgentId] = useState<string | null>(null);
   const [range, setRange] = useState<StatsRange>('3h');

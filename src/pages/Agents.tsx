@@ -4,7 +4,7 @@ import {
   Plus, Star, Trash2, RefreshCw, Monitor, Search, BarChart3, Waves, Server, Activity,
 } from 'lucide-react';
 import { Panel, StatusDot, Modal, Field, EmptyState } from '../components/ui';
-import { store, useCurrentUser, usePluto, visibleAgents } from '../lib/store';
+import { store, hasVideoSrvTag, useCurrentUser, usePluto, visibleAgents } from '../lib/store';
 import { cls, fmtMs, fmtUp, isIp, isTarget, expandTargets, uid } from '../lib/util';
 import type { Agent, StatsView } from '../lib/types';
 
@@ -25,11 +25,12 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
   const [err, setErr] = useState('');
 
   // тег «VideoSRV» — вкладка «VideoSRV» формируется по нему, а не по statsView
-  const videoSrvTagId = useMemo(() => tags.find((t) => t.label.toLowerCase() === 'videosrv')?.id ?? null, [tags]);
-  const isVideoSrv = videoSrvTagId != null && selTags.includes(videoSrvTagId);
+  // ВАЖНО: в agent.tags теги хранятся как метки (label), а не id — сравнение по label без учёта регистра
+  const videoSrvTag = useMemo(() => tags.find((t) => t.label.trim().toLowerCase() === 'videosrv') ?? null, [tags]);
+  const isVideoSrv = hasVideoSrvTag(selTags, tags);
   const toggleVideoSrv = () => {
-    if (videoSrvTagId == null) return;
-    setSelTags((prev) => (prev.includes(videoSrvTagId) ? prev.filter((t) => t !== videoSrvTagId) : [...prev, videoSrvTagId]));
+    if (videoSrvTag == null) return;
+    setSelTags((prev) => (prev.includes(videoSrvTag.label) ? prev.filter((t) => t !== videoSrvTag.label) : [...prev, videoSrvTag.label]));
   };
 
   useEffect(() => {
@@ -136,7 +137,7 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
         <div className="space-y-2">
           <span className="block text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Показывать в статистике</span>
           <div className="flex gap-2">
-            <button onClick={toggleVideoSrv} title="VideoSRV" disabled={videoSrvTagId == null}
+            <button onClick={toggleVideoSrv} title="VideoSRV" disabled={videoSrvTag == null}
               className={cls('flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[12px] font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-50',
                 isVideoSrv ? 'text-vio border-vio/60 bg-vio/15' : 'border-line bg-raised/50 text-dim hover:text-mut')}>
               <BarChart3 className="h-4 w-4" /><span>VideoSRV</span>
@@ -150,7 +151,7 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
             ))}
           </div>
           <p className="text-[11px] text-dim/80">
-            {videoSrvTagId == null
+            {videoSrvTag == null
               ? 'Тег «VideoSRV» не найден — создайте его в «Настройки → Теги», затем назначьте агенту.'
               : isVideoSrv
                 ? 'Агент с тегом «VideoSRV» попадёт во вкладку «VideoSRV». Повторный клик снимает тег.'
@@ -165,9 +166,9 @@ function AgentModal({ open, onClose, initial }: { open: boolean; onClose: () => 
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {tags.map((t) => {
-                const on = selTags.includes(t.id);
+                const on = selTags.includes(t.label);
                 return (
-                  <button key={t.id} onClick={() => setSelTags((s) => on ? s.filter((x) => x !== t.id) : [...s, t.id])}
+                  <button key={t.id} onClick={() => setSelTags((s) => on ? s.filter((x) => x !== t.label) : [...s, t.label])}
                     className={cls('rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-all', on ? 'text-void' : 'text-mut')}
                     style={{ borderColor: t.color, background: on ? t.color : 'transparent' }}>
                     {t.label}
@@ -198,7 +199,8 @@ function AgentCard({ a, onEdit }: { a: Agent; onEdit: (a: Agent) => void }) {
     }, 0);
   }, [a.targets, a.pingTargets]);
   const rangesCount = Math.max(a.pingTargets.filter((t) => (t.range || '').trim()).length, a.targets.length);
-  const tagObjs = a.tags.map((id) => tags.find((t) => t.id === id)).filter(Boolean) as { id: string; label: string; color: string }[];
+  // теги агента хранятся как метки (label); находим объекты тегов по метке, id — для совместимости со старыми записями
+  const tagObjs = a.tags.map((v) => tags.find((t) => t.label === v || t.id === v)).filter(Boolean) as { id: string; label: string; color: string }[];
   return (
     <div className="rise rounded-xl border border-line bg-panel/90 p-4 transition-all duration-200 hover:border-vio/35 hover:shadow-[0_14px_40px_-16px_rgba(0,0,0,.8)]">
       <div className="flex items-start justify-between gap-2">
