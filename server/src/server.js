@@ -1200,6 +1200,7 @@ const server = http.createServer(async (req, res) => {
 
     // ── карта VideoSRV (схема размещения видеосерверов по городу) ──
     const SRV_LINK_KINDS = ['fiber', 'radio', 'lan'];
+    const SRV_NODE_ICONS = ['server', 'switch'];
     function normalizeSrvMap(b, existing) {
       const now = Date.now();
       const nodes = (Array.isArray(b.nodes) ? b.nodes : []).map((n) => ({
@@ -1208,9 +1209,13 @@ const server = http.createServer(async (req, res) => {
         agentId: n.agentId ? String(n.agentId) : null,
         x: Number.isFinite(+n.x) ? Math.min(1000, Math.max(0, +n.x)) : 500,
         y: Number.isFinite(+n.y) ? Math.min(700, Math.max(0, +n.y)) : 350,
+        icon: SRV_NODE_ICONS.includes(n.icon) ? n.icon : 'server',
         district: String(n.district || '').trim(),
         address: String(n.address || '').trim(),
+        address2: String(n.address2 || '').trim(),
         building: String(n.building || '').trim(),
+        secret: String(n.secret || ''),
+        port: String(n.port || '').trim(),
         comment: String(n.comment || ''),
         updatedAt: now,
       }));
@@ -1222,6 +1227,8 @@ const server = http.createServer(async (req, res) => {
           from: String(l.from), to: String(l.to),
           kind: SRV_LINK_KINDS.includes(l.kind) ? l.kind : 'lan',
           label: String(l.label || '').trim(),
+          portFrom: String(l.portFrom || '').trim(),
+          portTo: String(l.portTo || '').trim(),
           comment: String(l.comment || ''),
         }));
       return {
