@@ -591,7 +591,7 @@ function NodeEditor({ initial, agents, isAdmin, onClose, onSave, onDelete, onLin
             </span>
           )}
         </Field>
-        <Field label="Комментарий к серверу" hint="Оборудование, питание, ответственные, особенности монтажа и т.п.">
+        <Field label="Комментарий к серверу">
           <textarea className="inp min-h-[90px] resize-y" value={n.comment} onChange={(e) => set('comment', e.target.value)}
             placeholder="" />
         </Field>
