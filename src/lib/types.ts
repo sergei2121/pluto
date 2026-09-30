@@ -471,16 +471,23 @@ export interface SlaRow {
 /** Тип канала связи между узлами карты VideoSRV. */
 export type SrvLinkKind = 'fiber' | 'radio' | 'lan';
 
-/** Узел карты (строение/площадка) с видеосервером. */
+/** Иконка узла на карте. */
+export type SrvNodeIcon = 'server' | 'switch';
+
+/** Узел карты (видеосервер или коммутатор). */
 export interface SrvMapNode {
   id: string;
   label: string;            // название узла
   agentId: string | null;   // хаб из списка с тегом "VideoSRV"
-  x: number;                // координаты на холсте 0..1000 × 0..700
+  x: number;                // координаты на холсте 0..1400 × 0..900
   y: number;
-  district: string;         // район/часть города
-  address: string;          // адрес строения
-  building: string;         // строение (корпус/крыша/мачта)
+  icon: SrvNodeIcon;        // иконка на карте (сервер / коммутатор)
+  district: string;         // ЖК / офис
+  address: string;          // ip 1
+  address2: string;         // ip 2
+  building: string;         // логин
+  secret: string;           // пароль
+  port: string;             // порт коммутатора, к которому подключён сервер
   comment: string;          // комментарий к серверу
   updatedAt?: number;
 }
@@ -492,6 +499,8 @@ export interface SrvMapLink {
   to: string;               // id узла
   kind: 'fiber' | 'radio' | 'lan';
   label: string;            // подпись канала
+  portFrom: string;         // порт на первом узле
+  portTo: string;           // порт на втором узле
   comment: string;
 }
 
