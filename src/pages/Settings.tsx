@@ -284,6 +284,7 @@ const MENU_GRANTS: { route: Route; label: string }[] = [
   { route: 'agent-pings', label: 'Активность хабов' },
   { route: 'ping-history', label: 'История активности' },
   { route: 'network-map', label: 'Карта сети' },
+  { route: 'srv-map', label: 'Карта VideoSRV' },
   { route: 'sla', label: 'SLA-отчёт' },
   { route: 'stats-bars', label: 'VideoSRV' },
   { route: 'stats-ws', label: 'Статистика WS' },

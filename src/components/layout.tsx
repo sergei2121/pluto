@@ -54,6 +54,7 @@ const NAV: { route: Route; label: string; icon: ReactNode; adminOnly?: boolean }
   { route: 'agent-pings', label: 'Активность хабов', icon: <HeartPulse className="pulse-blu h-[17px] w-[17px]" /> },
   { route: 'ping-history', label: 'История активности', icon: <HeartPulse className="pulse-blu h-[17px] w-[17px]" /> },
   { route: 'monitoring', label: 'Мониторинг', icon: <HeartPulse className="pulse-crit h-[17px] w-[17px]" /> },
+  { route: 'srv-map', label: 'Карта VideoSRV', icon: <LayoutGrid className="h-[17px] w-[17px]" /> },
   { route: 'stats-bars', label: 'VideoSRV', icon: <BarChart3 className="h-[17px] w-[17px]" /> },
   { route: 'stats-ws', label: 'Статистика WS', icon: <Waves className="h-[17px] w-[17px]" /> },
   { route: 'settings', label: 'Настройки системы', icon: <SettingsIcon className="h-[17px] w-[17px]" />, adminOnly: true },
