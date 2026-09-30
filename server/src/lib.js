@@ -32,7 +32,7 @@ export const DEFAULT_SETTINGS = {
 };
 
 const DEFAULT_DB = () => ({
-  users: [], sessions: [], devices: [], agents: [], tags: [], events: [],
+  users: [], sessions: [], devices: [], agents: [], tags: [], events: [], srvMaps: [],
   settings: DEFAULT_SETTINGS,
 });
 

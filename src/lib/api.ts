@@ -1,5 +1,5 @@
 // ─── PLUTO: клиент REST API серверного ядра ─────────────────────────────────
-import type { Agent, AlertRule, AuditEntry, BackupEntry, Device, EventItem, PingHistoryDevice, PingHistoryResponse, Settings, SlaRow, SourceTestReport, Tag, User, Webhook } from './types';
+import type { Agent, AlertRule, AuditEntry, BackupEntry, Device, EventItem, PingHistoryDevice, PingHistoryResponse, Settings, SlaRow, SourceTestReport, SrvMap, Tag, User, Webhook } from './types';
 import { getState, store } from './store';
 
 const TOKEN_KEY = 'pluto_token';
@@ -134,6 +134,11 @@ export const api = {
 
   // инвентаризация агента
   collectInventory: (id: string) => req<Agent>('POST', `/api/agents/${id}/inventory`),
+
+  // карта VideoSRV (схема размещения видеосерверов по городу)
+  srvMaps: () => req<{ maps: SrvMap[] }>('GET', '/api/srv-maps'),
+  saveSrvMap: (m: Partial<SrvMap> & { name?: string }) => req<SrvMap>('POST', '/api/srv-maps', m),
+  deleteSrvMap: (id: string) => req<{ ok: boolean }>('DELETE', `/api/srv-maps/${id}`),
 
   // автоустановка relay-агента по SSH из раздела «Развёртывание»
   provisionAgent: (b: {

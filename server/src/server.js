@@ -1198,6 +1198,64 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, tag);
     }
 
+    // ── карта VideoSRV (схема размещения видеосерверов по городу) ──
+    const SRV_LINK_KINDS = ['fiber', 'radio', 'lan'];
+    function normalizeSrvMap(b, existing) {
+      const now = Date.now();
+      const nodes = (Array.isArray(b.nodes) ? b.nodes : []).map((n) => ({
+        id: String(n.id || uid()),
+        label: String(n.label || '').trim(),
+        agentId: n.agentId ? String(n.agentId) : null,
+        x: Number.isFinite(+n.x) ? Math.min(1000, Math.max(0, +n.x)) : 500,
+        y: Number.isFinite(+n.y) ? Math.min(700, Math.max(0, +n.y)) : 350,
+        district: String(n.district || '').trim(),
+        address: String(n.address || '').trim(),
+        building: String(n.building || '').trim(),
+        comment: String(n.comment || ''),
+        updatedAt: now,
+      }));
+      const ids = new Set(nodes.map((n) => n.id));
+      const links = (Array.isArray(b.links) ? b.links : [])
+        .filter((l) => ids.has(String(l.from)) && ids.has(String(l.to)) && String(l.from) !== String(l.to))
+        .map((l) => ({
+          id: String(l.id || uid()),
+          from: String(l.from), to: String(l.to),
+          kind: SRV_LINK_KINDS.includes(l.kind) ? l.kind : 'lan',
+          label: String(l.label || '').trim(),
+          comment: String(l.comment || ''),
+        }));
+      return {
+        id: existing?.id || String(b.id || uid()),
+        name: String(b.name || '').trim() || 'Карта видеосерверов',
+        nodes, links,
+        createdAt: existing?.createdAt || now,
+        updatedAt: now,
+      };
+    }
+    if (p === '/api/srv-maps' && method === 'GET') {
+      return json(res, 200, { maps: db.srvMaps || [] });
+    }
+    if (p === '/api/srv-maps' && method === 'POST' && isAdmin) {
+      const b = await readBody(req);
+      if (!db.srvMaps) db.srvMaps = [];
+      const existing = b.id ? db.srvMaps.find((x) => x.id === b.id) : null;
+      const m2 = normalizeSrvMap(b, existing);
+      if (existing) Object.assign(existing, m2);
+      else db.srvMaps.push(m2);
+      await pushEvent('info', 'system', `Карта VideoSRV «${(existing || m2).name}» сохранена (админ: ${user.login})`);
+      await saveDb();
+      return json(res, 200, existing || m2);
+    }
+    m = p.match(/^\/api\/srv-maps\/([^/]+)$/);
+    if (m && method === 'DELETE' && isAdmin) {
+      const found = (db.srvMaps || []).find((x) => x.id === m[1]);
+      if (!found) return json(res, 404, { error: 'карта не найдена' });
+      db.srvMaps = db.srvMaps.filter((x) => x.id !== m[1]);
+      await pushEvent('warn', 'system', `Удалена карта VideoSRV «${found.name}» (админ: ${user.login})`);
+      await saveDb();
+      return json(res, 200, { ok: true });
+    }
+
     // ── настройки ──
     if (p === '/api/settings' && method === 'PUT' && isAdmin) {
       const b = await readBody(req);

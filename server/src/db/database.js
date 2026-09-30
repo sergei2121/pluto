@@ -71,6 +71,7 @@ export class Database {
       agents: [],
       tags: [],
       events: [],
+      srvMaps: [], // карты VideoSRV (схема размещения видеосерверов по городу)
       settings: { ...DEFAULT_SETTINGS },
     };
   }
