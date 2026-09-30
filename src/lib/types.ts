@@ -474,7 +474,7 @@ export type SrvLinkKind = 'fiber' | 'radio' | 'lan';
 /** Узел карты (строение/площадка) с видеосервером. */
 export interface SrvMapNode {
   id: string;
-  label: string;            // название узла (например «Стр. 12, ул. Мира»)
+  label: string;            // название узла
   agentId: string | null;   // хаб из списка с тегом "VideoSRV"
   x: number;                // координаты на холсте 0..1000 × 0..700
   y: number;
@@ -491,7 +491,7 @@ export interface SrvMapLink {
   from: string;             // id узла
   to: string;               // id узла
   kind: 'fiber' | 'radio' | 'lan';
-  label: string;            // подпись канала (например «1 Гбит/с»)
+  label: string;            // подпись канала
   comment: string;
 }
 
