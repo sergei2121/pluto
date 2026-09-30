@@ -68,7 +68,9 @@ export default function SrvMapPage() {
   async function reload(selectFirst = false) {
     try {
       const r = await api.srvMaps();
-      const list = Array.isArray(r.maps) ? r.maps : [];
+      // Демо-данные не показываем: карты, помеченные флагом demo (или seed-карты из
+      // старой поставки), вырезаны; на карте остаются только реально созданные узлы.
+      const list = (Array.isArray(r.maps) ? r.maps : []).filter((m) => !m.demo);
       setMaps(list);
       if (selectFirst || !list.some((m) => m.id === curId)) setCurId(list[0]?.id || '');
     } catch (e) {
@@ -558,26 +560,26 @@ function NodeEditor({ initial, agents, isAdmin, onClose, onSave, onDelete, onLin
             <input className="inp" value={n.switchName} onChange={(e) => set('switchName', e.target.value)} placeholder="" />
           </Field>
           <Field label="Порт" hint="Порт, к которому подключен сервер">
-            <input className="inp" value={n.port} onChange={(e) => set('port', e.target.value)} placeholder="Gi1/0/1" />
+            <input className="inp" value={n.port} onChange={(e) => set('port', e.target.value)} placeholder="" />
           </Field>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="ЖК\\Офис"><input className="inp" value={n.district} onChange={(e) => set('district', e.target.value)} placeholder="" /></Field>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="IP 1"><input className="inp font-mono" value={n.address} onChange={(e) => set('address', e.target.value)} placeholder="10.0.0.1" /></Field>
-          <Field label="Маска"><input className="inp font-mono" value={n.mask} onChange={(e) => set('mask', e.target.value)} placeholder="255.255.255.0" /></Field>
+          <Field label="IP 1"><input className="inp font-mono" value={n.address} onChange={(e) => set('address', e.target.value)} placeholder="" /></Field>
+          <Field label="Маска"><input className="inp font-mono" value={n.mask} onChange={(e) => set('mask', e.target.value)} placeholder="" /></Field>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="Шлюз"><input className="inp font-mono" value={n.gateway} onChange={(e) => set('gateway', e.target.value)} placeholder="10.0.0.254" /></Field>
+          <Field label="Шлюз"><input className="inp font-mono" value={n.gateway} onChange={(e) => set('gateway', e.target.value)} placeholder="" /></Field>
           <span aria-hidden />
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="IP 2"><input className="inp font-mono" value={n.address2} onChange={(e) => set('address2', e.target.value)} placeholder="10.0.0.2" /></Field>
-          <Field label="Маска"><input className="inp font-mono" value={n.mask2} onChange={(e) => set('mask2', e.target.value)} placeholder="255.255.255.0" /></Field>
+          <Field label="IP 2"><input className="inp font-mono" value={n.address2} onChange={(e) => set('address2', e.target.value)} placeholder="" /></Field>
+          <Field label="Маска"><input className="inp font-mono" value={n.mask2} onChange={(e) => set('mask2', e.target.value)} placeholder="" /></Field>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="Шлюз"><input className="inp font-mono" value={n.gateway2} onChange={(e) => set('gateway2', e.target.value)} placeholder="10.0.0.254" /></Field>
+          <Field label="Шлюз"><input className="inp font-mono" value={n.gateway2} onChange={(e) => set('gateway2', e.target.value)} placeholder="" /></Field>
           <span aria-hidden />
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
