@@ -3,7 +3,7 @@
 // из выпадающего списка (тег "VideoSRV"), связи между узлами и комментарии.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Map as MapIcon, Plus, Trash2, Save, Link2, X, Network, Server, Boxes, MessageSquare, Pencil,
+  Map as MapIcon, Plus, Trash2, Save, Link2, X, Network, Server, MessageSquare, Pencil,
 } from 'lucide-react';
 import { Panel, Modal, Field, EmptyState } from '../components/ui';
 import { api } from '../lib/api';
@@ -16,10 +16,11 @@ const CANVAS_W = 1400;
 const CANVAS_H = 900;
 const GRID = 20;
 
-/** Иконки узлов: видеосервер и коммутатор. */
+/** Иконки узлов: только видеосервер (отдельная вкладка добавления коммутатора убрана;
+ *  'switch' из ранее сохранённых карт отображается как сервер). */
 const NODE_ICONS: Record<SrvNodeIcon, { label: string; Icon: typeof Server }> = {
   server: { label: 'Сервер', Icon: Server },
-  switch: { label: 'Коммутатор', Icon: Boxes },
+  switch: { label: 'Сервер', Icon: Server },
 };
 
 const LINK_KINDS: Record<SrvLinkKind, { label: string; color: string; dash?: string }> = {
@@ -84,26 +85,21 @@ export default function SrvMapPage() {
   }
 
   // ── операции над картой (локально; на сервер уходит при «Сохранить») ──
-  /** Создание узла: видеосервер (привязка к хабу) или коммутатор (добавляется вручную). */
-  function makeNode(agentId: string | null, icon: SrvNodeIcon): SrvMapNode {
+  /** Создание узла-сервера с привязкой к хабу. */
+  function makeNode(agentId: string | null): SrvMapNode {
     const a = agentId ? agentById.get(agentId) || null : null;
     return {
       id: uid('smn'),
-      label: a?.name || (icon === 'switch' ? 'Коммутатор' : 'Новый узел'),
+      label: a?.name || 'Новый узел',
       agentId,
       x: snap(CANVAS_W / 2), y: snap(CANVAS_H / 2),
-      icon,
-      district: '', address: '', address2: '', building: '', secret: '', port: '', comment: '',
+      icon: 'server',
+      district: '', switchName: '', address: '', address2: '', building: '', secret: '', port: '', comment: '',
     };
   }
 
   function addNode(agentId: string) {
-    placeNode(makeNode(agentId, 'server'));
-  }
-
-  /** Добавить коммутатор — узел без привязки к хабу, иконку выбирает пользователь. */
-  function addSwitch() {
-    placeNode(makeNode(null, 'switch'));
+    placeNode(makeNode(agentId));
   }
 
   function placeNode(n: SrvMapNode) {
@@ -376,7 +372,7 @@ export default function SrvMapPage() {
                       <div key={n.id}
                         onPointerDown={(e) => onNodePointerDown(e, n.id)}
                         onClick={() => { if (dragRef.current?.moved) return; if (linkFrom) startLink(n.id); else setEditNode(n); }}
-                        title={a ? `${a.name} · ${a.ip} · ${a.online ? 'онлайн' : 'офлайн'}` : (n.icon === 'switch' ? 'Коммутатор' : 'Узел без привязки к хабу')}
+                        title={a ? `${a.name} · ${a.ip} · ${a.online ? 'онлайн' : 'офлайн'}` : 'Узел без привязки к хабу'}
                         className={cls('absolute z-10 -translate-x-1/2 -translate-y-1/2 cursor-grab select-none active:cursor-grabbing',
                           selected && 'animate-pulse')}
                         style={{ left: `${(n.x / CANVAS_W) * 100}%`, top: `${(n.y / CANVAS_H) * 100}%` }}>
@@ -412,7 +408,6 @@ export default function SrvMapPage() {
               <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-warn" />высокая задержка</span>
               <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-dim" />без привязки</span>
               <span className="flex items-center gap-1.5"><Server className="h-3.5 w-3.5" />сервер</span>
-              <span className="flex items-center gap-1.5"><Boxes className="h-3.5 w-3.5" />коммутатор</span>
               <span className="mx-1 hidden h-3 w-px bg-line sm:block" />
               <span className="flex items-center gap-1.5"><i className="h-0.5 w-6" style={{ background: LINK_KINDS.fiber.color }} />оптика</span>
               <span className="flex items-center gap-1.5"><i className="h-0.5 w-6" style={{ background: `repeating-linear-gradient(90deg, ${LINK_KINDS.radio.color} 0 6px, transparent 6px 10px)` }} />радиолиния</span>
@@ -424,11 +419,8 @@ export default function SrvMapPage() {
             <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-[300px_minmax(0,1fr)_minmax(0,1fr)]">
               {isAdmin && !viewOnly && (
                 <div className="rounded-xl border border-line bg-raised/40 p-3">
-                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Добавить устройство (VideoSRV)</p>
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-dim">Добавить сервер (VideoSRV)</p>
                   <AgentPicker agents={srvAgents} usedIds={new Set(cur.nodes.map((n) => n.agentId).filter(Boolean) as string[])} onPick={addNode} />
-                  <button onClick={addSwitch} className="btn-ghost mt-2 h-8 w-full justify-center">
-                    <Boxes className="h-3.5 w-3.5" />Добавить коммутатор
-                  </button>
                   {srvAgents.length === 0 && (
                     <p className="mt-2 text-[11.5px] leading-relaxed text-warn">
                       Нет хабов с тегом «VideoSRV». Присвойте тег хабу в разделе «Хабы», чтобы он появился здесь.
@@ -560,25 +552,17 @@ function NodeEditor({ initial, agents, isAdmin, onClose, onSave, onDelete, onLin
     <Modal open onClose={onClose} title={`Узел карты · ${initial.label}`} width="max-w-xl">
       <div className="space-y-3">
         <Field label="Название узла"><input className="inp" value={n.label} onChange={(e) => set('label', e.target.value)} placeholder="" /></Field>
-        <Field label="Иконка на карте" hint="Коммутатор можно добавить вручную — привязка к хабу не обязательна">
-          <div className="flex flex-wrap gap-2">
-            {(Object.keys(NODE_ICONS) as SrvNodeIcon[]).map((k) => {
-              const Ic = NODE_ICONS[k].Icon;
-              return (
-                <button key={k} onClick={() => set('icon', k)}
-                  className={cls('inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11.5px] font-semibold transition-all',
-                    n.icon === k ? 'border-vio/60 bg-vio/20 text-ink' : 'border-line bg-raised/40 text-dim hover:text-mut')}>
-                  <Ic className="h-3.5 w-3.5" />{NODE_ICONS[k].label}
-                </button>
-              );
-            })}
-          </div>
-        </Field>
+        {/* две соседние строки: коммутатор и порт, к которому подключён сервер */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="ЖК\\Офис"><input className="inp" value={n.district} onChange={(e) => set('district', e.target.value)} placeholder="" /></Field>
-          <Field label="Порт коммутатора" hint="Порт, к которому подключен сервер">
+          <Field label="Коммутатор" hint="Коммутатор, к которому подключен сервер">
+            <input className="inp" value={n.switchName} onChange={(e) => set('switchName', e.target.value)} placeholder="" />
+          </Field>
+          <Field label="Порт" hint="Порт, к которому подключен сервер">
             <input className="inp" value={n.port} onChange={(e) => set('port', e.target.value)} placeholder="Gi1/0/1" />
           </Field>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="ЖК\\Офис"><input className="inp" value={n.district} onChange={(e) => set('district', e.target.value)} placeholder="" /></Field>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="IP 1"><input className="inp font-mono" value={n.address} onChange={(e) => set('address', e.target.value)} placeholder="10.0.0.1" /></Field>
