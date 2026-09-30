@@ -4,7 +4,7 @@ export type DeviceType = 'ping' | 'http' | 'api' | 'rtsp' | 'sip' | 'snmp' | 'ss
 export type DeviceStatus = 'up' | 'down' | 'degraded' | 'unknown';
 export type Route =
   | 'dashboard' | 'devices' | 'agents' | 'monitoring' | 'agent-pings' | 'ping-history' 
-  | 'network-map'
+  | 'network-map' | 'srv-map'
   | 'stats-bars' | 'stats-ws' | 'sla' | 'settings' | 'deploy';
 export type Severity = 'ok' | 'warn' | 'crit' | 'info';
 export type Role = 'admin' | 'viewer';
@@ -426,6 +426,7 @@ export const MENU_ITEMS: { route: Route; label: string; adminOnly?: boolean }[] 
   { route: 'agent-pings', label: 'Активность хабов' },
   { route: 'ping-history', label: 'История активности' },
   { route: 'network-map', label: 'Карта сети' },
+  { route: 'srv-map', label: 'Карта VideoSRV' },
   { route: 'stats-bars', label: 'VideoSRV' },
   { route: 'stats-ws', label: 'Статистика WS' },
   { route: 'sla', label: 'SLA-отчёт' },
@@ -463,4 +464,43 @@ export interface SlaRow {
   uptimePct: number; // % доступности
   downCount: number; // сколько раз падало
   avgLatency: number | null;
+}
+
+// ─── Карта VideoSRV: схема размещения видеосерверов по городу ───────────────
+
+/** Тип канала связи между узлами карты VideoSRV. */
+export type SrvLinkKind = 'fiber' | 'radio' | 'lan';
+
+/** Узел карты (строение/площадка) с видеосервером. */
+export interface SrvMapNode {
+  id: string;
+  label: string;            // название узла (например «Стр. 12, ул. Мира»)
+  agentId: string | null;   // хаб из списка с тегом "VideoSRV"
+  x: number;                // координаты на холсте 0..1000 × 0..700
+  y: number;
+  district: string;         // район/часть города
+  address: string;          // адрес строения
+  building: string;         // строение (корпус/крыша/мачта)
+  comment: string;          // комментарий к серверу
+  updatedAt?: number;
+}
+
+/** Связь между узлами карты. */
+export interface SrvMapLink {
+  id: string;
+  from: string;             // id узла
+  to: string;               // id узла
+  kind: 'fiber' | 'radio' | 'lan';
+  label: string;            // подпись канала (например «1 Гбит/с»)
+  comment: string;
+}
+
+/** Полная карта VideoSRV. */
+export interface SrvMap {
+  id: string;
+  name: string;
+  nodes: SrvMapNode[];
+  links: SrvMapLink[];
+  createdAt: number;
+  updatedAt: number;
 }

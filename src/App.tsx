@@ -10,6 +10,7 @@ import Agents from './pages/Agents';
 import Monitoring from './pages/Monitoring';
 import AgentPings from './pages/AgentPings';
 import PingHistory from './pages/PingHistory';
+import SrvMapPage from './pages/SrvMap';
 import Stats from './pages/Stats';
 import Sla from './pages/Sla';
 import SettingsPage from './pages/Settings';
@@ -81,6 +82,7 @@ export default function App() {
       {page === 'monitoring' && <Monitoring key={`mon-${user.id}`} />}
       {page === 'agent-pings' && <AgentPings key={`ap-${user.id}`} />}
       {page === 'ping-history' && <PingHistory key={`ph-${user.id}`} />}
+      {page === 'srv-map' && <SrvMapPage key={`sm-${user.id}`} />}
       {page === 'stats-bars' && <Stats key="stats-bars" mode="bars" />}
       {page === 'stats-ws' && <Stats key="stats-ws" mode="ws" />}
       {page === 'sla' && <Sla key={`sla-${user.id}`} />}

@@ -135,6 +135,7 @@ const TITLES: Record<Route, string> = {
   'agent-pings': 'Активность хабов · локальные устройства',
   'ping-history': 'История активности · месяц онлайн/офлайн',
   'network-map': 'Карта сети',
+  'srv-map': 'Карта VideoSRV',
   'stats-bars': 'VideoSRV · Glances',
   'stats-ws': 'Статистика WS · Glances',
   sla: 'SLA-отчёт · доступность',
