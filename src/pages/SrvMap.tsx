@@ -456,12 +456,12 @@ function NodeEditor({ initial, agents, isAdmin, onClose, onSave, onDelete, onLin
   return (
     <Modal open onClose={onClose} title={`Узел карты · ${initial.label}`} width="max-w-xl">
       <div className="space-y-3">
-        <Field label="Название узла"><input className="inp" value={n.label} onChange={(e) => set('label', e.target.value)} placeholder="Стр. 12, ул. Мира" /></Field>
+        <Field label="Название узла"><input className="inp" value={n.label} onChange={(e) => set('label', e.target.value)} placeholder="" /></Field>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="Район / часть города"><input className="inp" value={n.district} onChange={(e) => set('district', e.target.value)} placeholder="Центральный" /></Field>
-          <Field label="Строение / площадка"><input className="inp" value={n.building} onChange={(e) => set('building', e.target.value)} placeholder="Корпус А, крыша / мачта №3" /></Field>
+          <Field label="Район / часть города"><input className="inp" value={n.district} onChange={(e) => set('district', e.target.value)} placeholder="" /></Field>
+          <Field label="Строение / площадка"><input className="inp" value={n.building} onChange={(e) => set('building', e.target.value)} placeholder="" /></Field>
         </div>
-        <Field label="Адрес"><input className="inp" value={n.address} onChange={(e) => set('address', e.target.value)} placeholder="ул. Мира, д. 12" /></Field>
+        <Field label="Адрес"><input className="inp" value={n.address} onChange={(e) => set('address', e.target.value)} placeholder="" /></Field>
         <Field label="Видеосервер (хаб с тегом VideoSRV)">
           <select className="inp" value={n.agentId || ''} disabled={!isAdmin}
             onChange={(e) => {
@@ -483,7 +483,7 @@ function NodeEditor({ initial, agents, isAdmin, onClose, onSave, onDelete, onLin
         </Field>
         <Field label="Комментарий к серверу" hint="Оборудование, питание, ответственные, особенности монтажа и т.п.">
           <textarea className="inp min-h-[90px] resize-y" value={n.comment} onChange={(e) => set('comment', e.target.value)}
-            placeholder="Например: ИБП + дизель, доступ по ключу у ЖЭУ-3, камеры 12 шт." />
+            placeholder="" />
         </Field>
 
         {isAdmin && (
@@ -519,10 +519,10 @@ function LinkEditor({ initial, nodes, isNew, onClose, onSave, onDelete }: {
             ))}
           </div>
         </Field>
-        <Field label="Подпись (скорость, канал)"><input className="inp" value={l.label} onChange={(e) => setL((p) => ({ ...p, label: e.target.value }))} placeholder="1 Гбит/с, VLAN 210" /></Field>
+        <Field label="Подпись (скорость, канал)"><input className="inp" value={l.label} onChange={(e) => setL((p) => ({ ...p, label: e.target.value }))} placeholder="" /></Field>
         <Field label="Комментарий">
           <textarea className="inp min-h-[70px] resize-y" value={l.comment} onChange={(e) => setL((p) => ({ ...p, comment: e.target.value }))}
-            placeholder="Резерв по радио, оператор …" />
+            placeholder="" />
         </Field>
         <div className="flex gap-2 pt-1">
           <button onClick={() => onSave({ ...l, from: l.from, to: l.to })} className="btn-acc"><Pencil className="h-4 w-4" />Сохранить связь</button>
