@@ -94,7 +94,7 @@ export default function SrvMapPage() {
       agentId,
       x: snap(CANVAS_W / 2), y: snap(CANVAS_H / 2),
       icon: 'server',
-      district: '', switchName: '', address: '', address2: '', building: '', secret: '', port: '', comment: '',
+      district: '', switchName: '', address: '', mask: '', gateway: '', address2: '', mask2: '', gateway2: '', building: '', secret: '', port: '', comment: '',
     };
   }
 
@@ -566,7 +566,19 @@ function NodeEditor({ initial, agents, isAdmin, onClose, onSave, onDelete, onLin
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="IP 1"><input className="inp font-mono" value={n.address} onChange={(e) => set('address', e.target.value)} placeholder="10.0.0.1" /></Field>
+          <Field label="Маска"><input className="inp font-mono" value={n.mask} onChange={(e) => set('mask', e.target.value)} placeholder="255.255.255.0" /></Field>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="Шлюз"><input className="inp font-mono" value={n.gateway} onChange={(e) => set('gateway', e.target.value)} placeholder="10.0.0.254" /></Field>
+          <span aria-hidden />
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="IP 2"><input className="inp font-mono" value={n.address2} onChange={(e) => set('address2', e.target.value)} placeholder="10.0.0.2" /></Field>
+          <Field label="Маска"><input className="inp font-mono" value={n.mask2} onChange={(e) => set('mask2', e.target.value)} placeholder="255.255.255.0" /></Field>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="Шлюз"><input className="inp font-mono" value={n.gateway2} onChange={(e) => set('gateway2', e.target.value)} placeholder="10.0.0.254" /></Field>
+          <span aria-hidden />
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="Логин"><input className="inp" value={n.building} onChange={(e) => set('building', e.target.value)} autoComplete="off" placeholder="" /></Field>
