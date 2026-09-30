@@ -215,7 +215,7 @@ export default function SrvMapPage() {
     <div className="space-y-4 p-4 lg:p-6">
       {/* шапка: выбор карты + действия */}
       <Panel
-        title="Карта VideoSRV · схема видеосерверов города"
+        title="Карта VideoSRV"
         icon={<MapIcon className="h-4 w-4" />}
         right={
           <div className="flex flex-wrap items-center gap-2">
