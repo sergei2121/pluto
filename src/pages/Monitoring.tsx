@@ -14,6 +14,8 @@ function TelemetryModal({ open, onClose, initial }: { open: boolean; onClose: ()
   const [netdataUrl, setNetdataUrl] = useState('');
   const [telemetryUrl, setTelemetryUrl] = useState('');
   const [telemetrySource, setTelemetrySource] = useState<TelemetrySource>('');
+  const [agentUrl, setAgentUrl] = useState('');
+  const [aida64Url, setAida64Url] = useState('');
   const [err, setErr] = useState('');
 
   useEffect(() => {
@@ -23,11 +25,14 @@ function TelemetryModal({ open, onClose, initial }: { open: boolean; onClose: ()
       setGlancesUrl(initial.glancesUrl || '');
       setNetdataUrl(initial.netdataUrl || '');
       setTelemetryUrl(initial.telemetryUrl || '');
+      setAgentUrl(initial.agentUrl || '');
+      setAida64Url(initial.aida64Url || '');
       // Автоматически определяем источник телеметрии по наличию URL
       const source = initial.telemetrySource || (initial.netdataUrl ? 'netdata' : initial.glancesUrl ? 'glances' : '');
       setTelemetrySource(source as TelemetrySource);
     } else {
       setGlancesUrl(''); setNetdataUrl(''); setTelemetryUrl(''); setTelemetrySource('');
+      setAgentUrl(''); setAida64Url('');
     }
   }, [open, initial]);
 
@@ -39,6 +44,8 @@ function TelemetryModal({ open, onClose, initial }: { open: boolean; onClose: ()
       netdataUrl: telemetrySource === 'netdata' ? (netdataUrl.trim() || undefined) : undefined,
       telemetryUrl: (telemetrySource === 'telegraf' || telemetrySource === 'prometheus') ? (telemetryUrl.trim() || undefined) : undefined,
       telemetrySource,
+      agentUrl: agentUrl.trim(),
+      aida64Url: aida64Url.trim(),
     };
     try {
       await store.updateAgent(initial.id, body);
@@ -96,6 +103,21 @@ function TelemetryModal({ open, onClose, initial }: { open: boolean; onClose: ()
             <input className="inp font-mono" value={telemetryUrl} onChange={(e) => setTelemetryUrl(e.target.value)} placeholder={telemetrySource === 'telegraf' ? "http://192.168.1.10:8186/write" : "http://192.168.1.10:9090/metrics"} />
           </Field>
         )}
+
+        {/* Аппаратная сверка WMI <-> LibreHardwareMonitor */}
+        <div className="rounded-lg border border-line/70 bg-raised/30 p-3">
+          <div className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-dim">
+            <Thermometer className="h-3.5 w-3.5" />Сверка железа (WMI ↔ LibreHardwareMonitor)
+          </div>
+          <div className="space-y-3">
+            <Field label="URL Pluto Agent" hint="Агент на хаб-ПК с встроенным LHM отдаёт прямой снимок датчиков на /api/hardware.">
+              <input className="inp font-mono" value={agentUrl} onChange={(e) => setAgentUrl(e.target.value)} placeholder="http://192.168.1.10:8092" />
+            </Field>
+            <Field label="Страница сенсоров AIDA64/LHM" hint="Резервный источник: HTTP-сервер сенсоров AIDA64 или Remote Server LibreHardwareMonitor (по умолчанию порт 8090).">
+              <input className="inp font-mono" value={aida64Url} onChange={(e) => setAida64Url(e.target.value)} placeholder="http://192.168.1.10:8090" />
+            </Field>
+          </div>
+        </div>
 
         {err && <p className="rounded-lg border border-crit/40 bg-crit/10 px-3 py-2 text-[12.5px] text-crit">{err}</p>}
         <button onClick={save} className="btn-acc w-full justify-center"><Plus className="h-4 w-4" />Сохранить</button>
