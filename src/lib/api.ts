@@ -115,6 +115,16 @@ export const api = {
   downloadBackup: (name: string) => `/api/backup/${encodeURIComponent(name)}`,
   deleteBackup: (name: string) => req<{ ok: boolean }>('DELETE', `/api/backup/${encodeURIComponent(name)}`),
 
+  // экспорт/импорт всей базы (устройства + хабы + настройки) на вновь развёрнутый PLUTO
+  dbExportUrl: () => '/api/db/export',
+  dbImport: (data: unknown, mode: 'merge' | 'replace') =>
+    req<{ ok: boolean; counts: { devices: number; agents: number; users: number; tags: number } }>(
+      'POST', '/api/db/import', { data, mode }),
+
+  // ручная сверка WMI <-> LibreHardwareMonitor для хаба
+  checkHardware: (id: string) => req<{ ok: boolean; hardware?: unknown; error?: string }>(
+    'POST', `/api/agents/${id}/hardware-check`),
+
   // импорт устройств из CSV
   importDevices: (rows: unknown[]) => req<{ added: number; skipped: number }>('POST', '/api/devices/import', { rows }),
 

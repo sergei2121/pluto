@@ -7,11 +7,13 @@ import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import {
   loadDb, saveDb, uid, pushEvent, hashPass, verifyPass, issueSession, authUser, DEFAULT_SETTINGS,
+  exportDb, importDb,
 } from './lib.js';
 import { loginRateLimiter } from './middleware/rateLimiter.js';
 import telemetryCollectors from './telemetry/collectors.js';
 import deviceChecks from './checks/deviceChecks.js';
 import { relayPing } from './lib/relay.js';
+import { checkAgentHardware } from './lib/lhm.js';
 import { expandTargets } from './lib/http.js';
 import { provisionAgent, AGENT_PORT_DEFAULT } from './lib/provision.js';
 import { initPingHistory, recordPingState, seedPingHistoryFromAgents, savePingEvents, rollupPingDaily, queryPingHistory, hubNameOf } from './db/pingHistory.js';
@@ -688,6 +690,17 @@ async function pollAgent(agent) {
       const pt = netdataPoint(g, now);
       agent.netdata = [...(agent.netdata || []), pt].slice(-4320); // 30 дней при 20 сек интервале
       agent.netdataError = null;
+
+      // ГЛЮК-ФИКС + новая функция: сверка WMI с LibreHardwareMonitor / AIDA64.
+      // Пишет agent.hardware / hardwareHistory; события расхождения — через pushEvent.
+      try { await checkAgentHardware(agent, fetchText); } catch (e) {
+        console.warn(`[pluto][hardware] сверка не выполнена для «${agent.name}»: ${e.message}`);
+      }
+      // единый канал для UI: дублируем netdata*-поля в glances*-алиасы
+      agent.glancesLatest = agent.netdataLatest;
+      agent.glances = agent.netdata;
+      agent.glancesError = null;
+      agent.lastGlances = now;
       
       // Статистика количества дисков большой емкости (>= 1TB) для агентов с тегом "VideoSRV"
       const isBarsAgent = agent.tags && agent.tags.includes('VideoSRV');
@@ -1081,6 +1094,12 @@ const server = http.createServer(async (req, res) => {
         for (const k of ['name', 'ip', 'relayUrl', 'favorite', 'pingsFavorite', 'pingsShowcase']) if (k in b) a[k] = b[k];
         if ('netdataUrl' in b) a.netdataUrl = String(b.netdataUrl || '').trim() || undefined;
         if ('agentUrl' in b) a.agentUrl = String(b.agentUrl || '').trim() || undefined;
+        // ГЛЮК-ФИКС: раньше здесь молча отбрасывались поля glancesUrl/telemetryUrl/aida64Url —
+        // теперь они сохраняются, иначе настройки хаба терялись при любом PUT
+        if ('glancesUrl' in b) a.glancesUrl = String(b.glancesUrl || '').trim();
+        if ('telemetryUrl' in b) a.telemetryUrl = String(b.telemetryUrl || '').trim();
+        if ('telemetrySource' in b) a.telemetrySource = String(b.telemetrySource || '').trim();
+        if ('aida64Url' in b) a.aida64Url = String(b.aida64Url || '').trim();
         if ('statsView' in b) a.statsView = b.statsView === 'bars' || b.statsView === 'ws' ? b.statsView : '';
         if (Array.isArray(b.pingTargets)) {
           const prevRanges = new Set((a.pingTargets || []).map((t) => (typeof t === 'string' ? t : t.range)));
@@ -1283,6 +1302,28 @@ const server = http.createServer(async (req, res) => {
       if (db.settings.showcase.port !== prevPort) startShowcase();
       await pushEvent('info', 'system', 'Системные настройки сохранены');
       return json(res, 200, db.settings);
+    }
+
+    // ── Экспорт/импорт базы (перенос на вновь развёрнутый PLUTO) ──
+    if (p === '/api/db/export' && method === 'GET' && isAdmin) {
+      try {
+        const dump = exportDb();
+        res.writeHead(200, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Content-Disposition': `attachment; filename="pluto-db-${new Date().toISOString().slice(0,10)}.json"`,
+        });
+        res.end(JSON.stringify(dump, null, 2));
+      } catch (e) { return json(res, 500, { ok: false, error: e.message || 'ошибка экспорта' }); }
+      return;
+    }
+    if (p === '/api/db/import' && method === 'POST' && isAdmin) {
+      try {
+        const b = await readBody(req);
+        const mode = b.mode === 'replace' ? 'replace' : 'merge';
+        const result = importDb(b.data || b, mode);
+        await pushEvent('warning', 'system', `База импортирована (режим: ${mode}): устройств ${result.counts.devices}, хабов ${result.counts.agents}`);
+        return json(res, 200, { ok: true, ...result });
+      } catch (e) { return json(res, 400, { ok: false, error: e.message || 'ошибка импорта' }); }
     }
 
     // ── Web Push подписка ──

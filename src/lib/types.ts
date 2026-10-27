@@ -158,6 +158,18 @@ export interface GlancesAdapter { name: string; rx: number | null; tx: number | 
 export interface GlancesSensor { label: string; value: number; unit: string; kind: string; } // температуры, вент.
 export interface GlancesProcess { pid: number; name: string; cpu: number | null; mem: number | null; status: string; username?: string; }
 
+/** Результат сверки WMI <-> LibreHardwareMonitor / AIDA64 (пишет server/src/lib/lhm.js). */
+export interface HardwareCheckItem { metric: string; wmi: number | string | null; lhm: number | string | null; match: boolean | null; }
+export interface HardwareSnapshot {
+  ts: number;
+  source: 'librehardwaremonitor' | 'aida64-sensor-page' | 'wmi-only' | string;
+  sensors?: Record<string, { value: number; unit: string }>;
+  temps?: { cpu: number | null; disks: { label: string; temp?: number | null }[] };
+  wmi: { cpuTemp: number | null; gpuTemp: number | null; disks: { label: string; temp: number | null; smartStatus: string | null }[] } | null;
+  checks: HardwareCheckItem[];
+  status: 'ok' | 'mismatch' | 'no-lhm' | string;
+}
+
 /** Полный снимок Glances (последний опрос — для карточки агента). */
 export interface GlancesSnapshot {
   t: number;
@@ -246,6 +258,9 @@ export interface Agent {
   glancesError: string | null;
   /** Инвентаризация: данные о машине, собираемые через relay. */
   inventory?: AgentInventory | null;
+  aida64Url?: string; // сенсорная страница AIDA64/LHM на хаб-ПК (для сверки WMI)
+  hardware?: HardwareSnapshot | null; // последний результат сверки WMI <-> LibreHardwareMonitor
+  hardwareHistory?: HardwareSnapshot[]; // последние 200 снимков сверки
   createdAt: number;
 }
 
