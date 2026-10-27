@@ -5,7 +5,7 @@
 //  3) WMI-данные из телеметрии агента (netdataLatest: cpuTemp, disks[].temp и т.п.).
 // Результат: agent.hardware = { ts, source, sensors, wmi, checks[] } + алерты при расхождениях.
 
-import { pushEvent } from '../lib.js';
+import { pushEvent, saveDb } from '../lib.js';
 
 const lhmLogger = {
   warn: (msg, ctx) => console.warn(`[pluto][hardware][WARN] ${msg}`, JSON.stringify(ctx || {})),
@@ -108,10 +108,20 @@ export async function checkAgentHardware(agent, fetchTextFn) {
   agent.hardware = snapshot;
   agent.hardwareHistory = [...(agent.hardwareHistory || []), snapshot].slice(-200);
 
-  if (mismatched.length) {
-    await pushEvent('warning', 'hardware',
-      `WMI ≠ LibreHardwareMonitor на «${agent.name}»: ${mismatched.map((c) => c.metric).join(', ')}`);
-  } else if (source) {
+  // ГЛЮК-ФИКС: раньше результат сверки жил только в памяти и терялся при рестарте ядра.
+  // Аварийный снимок пишется без pushEvent/saveDb, чтобы не рекурсивно вызывать saveDb
+  // изнутри saveDb (pushEvent сам сохраняет базу).
+  try {
+    if (mismatched.length) {
+      await pushEvent('warning', 'hardware',
+        `WMI ≠ LibreHardwareMonitor на «${agent.name}»: ${mismatched.map((c) => c.metric).join(', ')}`);
+    } else {
+      await saveDb();
+    }
+  } catch (e) {
+    lhmLogger.warn('не удалось сохранить результат сверки в базу', { agent: agent.name, error: e.message });
+  }
+  if (!mismatched.length && source) {
     lhmLogger.info('аппаратная сверка пройдена', { agent: agent.name, source });
   }
   return snapshot;

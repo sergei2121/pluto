@@ -27,7 +27,7 @@ import {
   type User, type Role, type Route,
 } from '../lib/types';
 
-type Tab = 'polling' | 'tags' | 'notify' | 'alerts' | 'users' | 'mirror' | 'sla' | 'deploy' | 'system';
+type Tab = 'polling' | 'tags' | 'notify' | 'alerts' | 'users' | 'mirror' | 'sla' | 'backup' | 'deploy' | 'system';
 
 interface PingResult {
   success: boolean;
