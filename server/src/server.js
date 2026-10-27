@@ -249,6 +249,11 @@ async function collectFromAgent(url) {
   return await telemetryCollectors.collectFromAgent(url, fetchJson);
 }
 
+/** Собирает метрики из Glances REST API (glances -w, /api/4/all). */
+async function collectGlances(url) {
+  return await telemetryCollectors.collectGlances(url, fetchJson);
+}
+
 /** JSON-клиент: GET по URL с таймаутом, ответ парсится как JSON. */
 function fetchJson(rawUrl, timeoutMs = 7000) {
   return fetchText(rawUrl, timeoutMs).then((txt) => JSON.parse(txt));
@@ -260,18 +265,33 @@ function parseUptime(s) {
   return parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseInt(m[3]);
 }
 
-/** Собирает телеметрию из доступных источников (Netdata или Pluto Agent). */
+/** Собирает телеметрию из доступных источников.
+ *  ФИКС: учитывается выбор пользователя в telemetrySource и добавлен источник
+ *  Glances — раньше он был обещан в README/UI, но ядро его не собирало. */
 async function collectTelemetry(agent) {
-  // Приоритет: сначала пробуем Netdata, затем Pluto Agent
+  const src = String(agent.telemetrySource || '').trim();
+  if (src === 'glances' && agent.glancesUrl) {
+    const g = await telemetryCollectors.collectGlances(agent.glancesUrl, fetchJson);
+    return { ...g, via: 'glances' };
+  }
+  if (src === 'netdata' && agent.netdataUrl) {
+    const g = await telemetryCollectors.collectNetdata(agent.netdataUrl, fetchText);
+    return { ...g, via: 'netdata' };
+  }
+  // Приоритет по умолчанию: Netdata → Glances → Pluto Agent
   if (agent.netdataUrl) {
     const g = await telemetryCollectors.collectNetdata(agent.netdataUrl, fetchText);
     return { ...g, via: 'netdata' };
+  }
+  if (agent.glancesUrl) {
+    const g = await telemetryCollectors.collectGlances(agent.glancesUrl, fetchJson);
+    return { ...g, via: 'glances' };
   }
   if (agent.agentUrl) {
     const g = await telemetryCollectors.collectFromAgent(agent.agentUrl, fetchJson);
     return { ...g, via: 'pluto_agent' };
   }
-  throw new Error('Нет доступного источника телеметрии (укажите Netdata URL или Pluto Agent URL)');
+  throw new Error('Нет доступного источника телеметрии (укажите Netdata URL, Glances URL или Pluto Agent URL)');
 }
 
 /** Точка истории телеметрии (сокращённый формат, единый для Netdata и Pluto Agent). */
@@ -538,7 +558,10 @@ setInterval(() => {
   const barsInterval = 20 * 1000;
   for (const a of db.agents) {
     if (a.tags && a.tags.includes('VideoSRV')) {
-      if (now - (a.lastPoll || 0) >= barsInterval) {
+      // ГОНКА-ФИКС: не ставим в очередь повторный pollAgent, если предыдущий
+      // ещё выполняется (polling===true) — иначе параллельные опросы одного
+      // агента перезаписывали targets/latHist и дублировали события пингов.
+      if (!a.polling && now - (a.lastPoll || 0) >= barsInterval) {
         a.lastPoll = now;
         queue.push(() => pollAgent(a));
       }
@@ -548,7 +571,7 @@ setInterval(() => {
   const aiv = Math.max(10, db.settings.intervals.agent || 30) * 1000;
   for (const a of db.agents) {
     if (a.tags && a.tags.includes('VideoSRV')) continue; // уже добавлен выше
-    if (now - (a.lastPoll || 0) >= aiv) {
+    if (!a.polling && now - (a.lastPoll || 0) >= aiv) {
       a.lastPoll = now;
       queue.push(() => pollAgent(a));
     }
@@ -559,6 +582,15 @@ setInterval(() => {
 async function pollAgent(agent) {
   const now = Date.now();
   const wasOnline = agent.online;
+  agent.polling = true;
+  try {
+    await pollAgentInner(agent, now, wasOnline);
+  } finally {
+    agent.polling = false;
+  }
+}
+
+async function pollAgentInner(agent, now, wasOnline) {
 
   // 1) пинг до ПК (uptime / доступность)
   const ping = await checkPing(agent.ip, db.settings.timeoutMs || 3000);
@@ -657,9 +689,10 @@ async function pollAgent(agent) {
     seedPingHistoryFromAgents(db);
   }
 
-  // 3) Телеметрия (Netdata или Pluto Agent, отдельный интервал, хранение 30 дней)
+  // 3) Телеметрия (Netdata / Glances / Pluto Agent, отдельный интервал, хранение 30 дней)
   const giv = Math.max(10, db.settings.intervals.netdata || 20) * 1000;
-  const hasTelemetry = !!agent.netdataUrl || !!agent.agentUrl;
+  // ГЛЮК-ФИКС: агент с заполненным glancesUrl больше не игнорировался ядром
+  const hasTelemetry = !!agent.netdataUrl || !!agent.agentUrl || !!agent.glancesUrl;
   if (hasTelemetry && now - (agent.lastNetdata || 0) >= giv) {
     agent.lastNetdata = now;
     try {
@@ -696,11 +729,17 @@ async function pollAgent(agent) {
       try { await checkAgentHardware(agent, fetchText); } catch (e) {
         console.warn(`[pluto][hardware] сверка не выполнена для «${agent.name}»: ${e.message}`);
       }
-      // единый канал для UI: дублируем netdata*-поля в glances*-алиасы
-      agent.glancesLatest = agent.netdataLatest;
-      agent.glances = agent.netdata;
-      agent.glancesError = null;
-      agent.lastGlances = now;
+    } catch (e) {
+      agent.netdataError = 'Телеметрия: ' + (e.message || 'ошибка');
+      console.log(`[Netdata] Ошибка сбора телеметрии для агента ${agent.name}: ${e.message}`);
+    }
+    // единый канал для UI: glances*-алиасы синхронизируются ВСЕГДА (в т.ч. после
+    // ошибки), иначе страница «Статистика» показывала устаревший снимок как актуальный
+    agent.glancesLatest = agent.netdataLatest || null;
+    agent.glances = agent.netdata || [];
+    agent.glancesError = agent.netdataError;
+    agent.lastGlances = agent.lastNetdata || 0;
+  }
       
       // Статистика количества дисков большой емкости (>= 1TB) для агентов с тегом "VideoSRV"
       const isBarsAgent = agent.tags && agent.tags.includes('VideoSRV');
@@ -745,20 +784,29 @@ async function pollAgent(agent) {
 // поддерживает IP, диапазон x.y.z.a-b, подсеть /24 и выборочные хосты «x.y.z.0/24:5,77,100».
 
 // ─── Зеркало (push снапшота на read-only копию) ────────────────────────────
+// ФИКС: интервал больше не «замерает» — он был зафиксирован в setInterval при
+// старте процесса; теперь таймер пересоздаётся после каждого сохранения настроек.
 
-setInterval(() => {
+let mirrorTimer = null;
+function pushMirrorSnapshot() {
   const m = db.settings.mirror;
-  if (!m || !m.enabled || !m.url || !m.secret) return;
+  if (!m || !m.enabled || !m.url || !m.secret) return Promise.resolve(false);
   const snap = {
     ts: Date.now(), version: VERSION,
     devices: showcaseDevices(), agents: showcaseAgents(),
   };
-  fetch(String(m.url).replace(/\/+$/, '') + '/api/mirror/ingest', {
+  return fetch(String(m.url).replace(/\/+$/, '') + '/api/mirror/ingest', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Mirror-Secret': m.secret },
     body: JSON.stringify(snap),
-  }).catch(() => {});
-}, Math.max(30, db.settings.mirror?.interval || 60) * 1000);
+  }).then(() => true).catch(() => false);
+}
+function restartMirrorTimer() {
+  if (mirrorTimer) clearInterval(mirrorTimer);
+  const iv = Math.max(30, db.settings.mirror?.interval || 60) * 1000;
+  mirrorTimer = setInterval(() => { void pushMirrorSnapshot(); }, iv);
+}
+restartMirrorTimer();
 
 // ─── Авто-отчет SLA (генерация и выгрузка по расписанию) ───────────────────
 
