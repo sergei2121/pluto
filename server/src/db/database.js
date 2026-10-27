@@ -1,6 +1,7 @@
 // ─── PLUTO DB: инкапсуляция хранилища с очередью операций ──────────────────
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { DEFAULT_SETTINGS } from '../lib.js';
 
 export const DATA_DIR = process.env.DATA_DIR || './data';
@@ -115,7 +116,6 @@ export class Database {
       netdataError: a.netdataError || null,
       relayUrl: a.relayUrl || '',
       netdataUrl: a.netdataUrl || '',
-      netdataUrl: a.netdataUrl || undefined,
       telemetryUrl: a.telemetryUrl || undefined,
       telemetrySource: a.telemetrySource || '',
       lastNetdata: a.lastNetdata || 0,
@@ -236,7 +236,6 @@ export class Database {
   }
 
   _uid() {
-    const crypto = require('node:crypto');
     return crypto.randomBytes(6).toString('hex');
   }
 
@@ -249,7 +248,6 @@ export class Database {
   }
 
   async issueSession(userId) {
-    const crypto = require('node:crypto');
     const token = crypto.randomBytes(24).toString('hex');
     this.db.sessions.push({ token, userId, createdAt: Date.now() });
     if (this.db.sessions.length > this.SESSIONS_LIMIT) {
@@ -270,6 +268,86 @@ export class Database {
 
   getDb() {
     return this.db;
+  }
+
+  /**
+   * Экспорт всей базы (устройства, агенты/хабы, настройки, теги, пользователи)
+   * в виде одного JSON-дампа для переноса на вновь развёрнутый PLUTO.
+   */
+  exportDb() {
+    const db = this.load();
+    return {
+      __plutoExport: 1,
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      coreVersion: process.env.PLUTO_VERSION || '1',
+      users: db.users,
+      devices: db.devices.map((d) => ({ ...d, checking: false })),
+      agents: db.agents,
+      tags: db.tags,
+      srvMaps: db.srvMaps || [],
+      settings: db.settings,
+      events: (db.events || []).slice(0, 100),
+    };
+  }
+
+  /**
+   * Импорт дампа. Режим 'replace' — полная замена базы,
+   * 'merge' — дополнение/обновление по id без удаления существующих записей.
+   * Сессии никогда не импортируются (безопасность).
+   */
+  importDb(payload, mode = 'merge') {
+    if (!payload || payload.__plutoExport !== 1) {
+      throw new Error('Файл не является дампом базы PLUTO');
+    }
+    const db = this.load();
+    const pick = (arr) => (Array.isArray(arr) ? arr : []);
+
+    const mergeById = (existing, incoming) => {
+      const map = new Map(existing.map((x) => [x.id, x]));
+      for (const item of incoming) {
+        if (item && item.id && map.has(item.id)) {
+          map.set(item.id, { ...map.get(item.id), ...item });
+        } else if (item) {
+          map.set(item.id || this._uid(), item);
+        }
+      }
+      return [...map.values()];
+    };
+
+    if (mode === 'replace') {
+      db.users = pick(payload.users);
+      db.devices = pick(payload.devices);
+      db.agents = pick(payload.agents);
+      db.tags = pick(payload.tags);
+      db.srvMaps = pick(payload.srvMaps);
+      db.settings = payload.settings || db.settings;
+      db.events = pick(payload.events);
+      db.sessions = [];
+    } else {
+      db.users = mergeById(db.users, pick(payload.users));
+      db.devices = mergeById(db.devices, pick(payload.devices));
+      db.agents = mergeById(db.agents, pick(payload.agents));
+      db.tags = [...new Set([...(db.tags || []), ...pick(payload.tags)])];
+      db.srvMaps = mergeById(db.srvMaps || [], pick(payload.srvMaps));
+      if (payload.settings) {
+        db.settings = { ...db.settings, ...payload.settings };
+      }
+    }
+
+    // Нормализация после импорта
+    db.settings = this._mergeSettings();
+    db.devices = this._normalizeDevices();
+    db.agents = this._normalizeAgents();
+    db.users = this._normalizeUsers();
+
+    const counts = {
+      devices: db.devices.length,
+      agents: db.agents.length,
+      users: db.users.length,
+      tags: db.tags.length,
+    };
+    return counts;
   }
 }
 

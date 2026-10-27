@@ -171,8 +171,16 @@ export function loadDb() {
     ...a, pingTargets: Array.isArray(a.pingTargets) ? a.pingTargets : [],
     targets: Array.isArray(a.targets) ? a.targets : [], tags: Array.isArray(a.tags) ? a.tags : [],
     latHist: Array.isArray(a.latHist) ? a.latHist : [], netdata: Array.isArray(a.netdata) ? a.netdata : [],
+    // ГЛЮК-ФИКС: UI читает glancesLatest/glances/glancesError/lastGlances — ядро раньше писало только netdata*.
+    // Единый канал телеметрии: дублируем netdata*-поля в glances*-алиасы при загрузке.
+    glances: Array.isArray(a.glances) ? a.glances : (Array.isArray(a.netdata) ? a.netdata : []),
+    glancesLatest: a.glancesLatest !== undefined ? a.glancesLatest : (a.netdataLatest || null),
+    glancesError: a.glancesError !== undefined ? a.glancesError : (a.netdataError || null),
+    lastGlances: a.lastGlances || a.lastNetdata || 0,
     netdataLatest: a.netdataLatest || null, netdataError: a.netdataError || null,
-    relayUrl: a.relayUrl || '', netdataUrl: a.netdataUrl || '', lastNetdata: a.lastNetdata || 0,
+    relayUrl: a.relayUrl || '', glancesUrl: a.glancesUrl || '', netdataUrl: a.netdataUrl || '',
+    telemetryUrl: a.telemetryUrl || '', telemetrySource: a.telemetrySource || '', lastNetdata: a.lastNetdata || 0,
+    hardware: a.hardware || null, hardwareHistory: Array.isArray(a.hardwareHistory) ? a.hardwareHistory : [],
     favorite: !!a.favorite, pingsFavorite: !!a.pingsFavorite, pingsShowcase: !!a.pingsShowcase,
     statsView: a.statsView === 'bars' || a.statsView === 'ws' ? a.statsView : (a.stats ? 'ws' : ''),
   }));
@@ -229,4 +237,107 @@ export function authUser(req) {
   const s = db.sessions.find((x) => x.token === token);
   if (!s) return null;
   return db.users.find((u) => u.id === s.userId) || null;
+}
+
+// ─── Экспорт/импорт базы (перенос на вновь развёрнутый PLUTO) ────────────────
+
+/**
+ * Дамп всей базы: устройства, агенты/хабы, настройки, теги, пользователи, карты.
+ * Сессии не включаются (секреты токенов). history усечён для компактности.
+ */
+export function exportDb() {
+  loadDb();
+  return {
+    __plutoExport: 1,
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    users: db.users,
+    devices: (db.devices || []).map((d) => ({ ...d, checking: false })),
+    agents: (db.agents || []).map((a) => ({ ...a })),
+    tags: db.tags || [],
+    srvMaps: db.srvMaps || [],
+    settings: db.settings,
+    events: (db.events || []).slice(0, 100),
+    // снимки WMI/LibreHardwareMonitor по каждому хабу — переносятся вместе с базой
+    hardware: Object.fromEntries((db.agents || []).filter((a) => a.hardware).map((a) => [a.id, a.hardware])),
+  };
+}
+
+/**
+ * Импорт дампа в живую базу. mode: 'merge' (по id) | 'replace' (полная замена).
+ * Сессии при replace очищаются — все залогиненные будут перелогинены.
+ */
+export function importDb(payload, mode = 'merge') {
+  loadDb();
+  if (!payload || payload.__plutoExport !== 1) {
+    throw new Error('Файл не является дампом базы PLUTO');
+  }
+  const pick = (arr) => (Array.isArray(arr) ? arr : []);
+  const mergeById = (existing, incoming) => {
+    const map = new Map(existing.map((x) => [x.id, x]));
+    for (const item of incoming) {
+      if (!item) continue;
+      const id = item.id || uid();
+      map.set(id, map.has(id) ? { ...map.get(id), ...item, id } : { ...item, id });
+    }
+    return [...map.values()];
+  };
+
+  if (mode === 'replace') {
+    db.users = pick(payload.users);
+    db.devices = pick(payload.devices);
+    db.agents = pick(payload.agents);
+    db.tags = pick(payload.tags);
+    db.srvMaps = pick(payload.srvMaps);
+    db.events = pick(payload.events);
+    db.sessions = [];
+    if (payload.settings) db.settings = payload.settings;
+  } else {
+    db.users = mergeById(db.users || [], pick(payload.users));
+    db.devices = mergeById(db.devices || [], pick(payload.devices));
+    db.agents = mergeById(db.agents || [], pick(payload.agents));
+    db.tags = [...new Set([...(db.tags || []), ...pick(payload.tags)])];
+    db.srvMaps = mergeById(db.srvMaps || [], pick(payload.srvMaps));
+    if (payload.settings) db.settings = { ...db.settings, ...payload.settings };
+  }
+
+  // повторная нормализация через loadDb-логику: сбрасываем кэш и перечитываем нельзя,
+  // поэтому нормализуем на месте
+  db.devices = (db.devices || []).map((d) => ({
+    ...d, tags: Array.isArray(d.tags) ? d.tags : [], history: Array.isArray(d.history) ? d.history : [],
+    showcase: !!d.showcase, checking: false,
+  }));
+  db.agents = (db.agents || []).map((a) => ({
+    ...a, pingTargets: Array.isArray(a.pingTargets) ? a.pingTargets : [],
+    targets: Array.isArray(a.targets) ? a.targets : [], tags: Array.isArray(a.tags) ? a.tags : [],
+    latHist: Array.isArray(a.latHist) ? a.latHist : [], netdata: Array.isArray(a.netdata) ? a.netdata : [],
+    // ГЛЮК-ФИКС: UI читает glancesLatest/glances/glancesError/lastGlances — ядро раньше писало только netdata*.
+    // Единый канал телеметрии: дублируем netdata*-поля в glances*-алиасы при загрузке.
+    glances: Array.isArray(a.glances) ? a.glances : (Array.isArray(a.netdata) ? a.netdata : []),
+    glancesLatest: a.glancesLatest !== undefined ? a.glancesLatest : (a.netdataLatest || null),
+    glancesError: a.glancesError !== undefined ? a.glancesError : (a.netdataError || null),
+    lastGlances: a.lastGlances || a.lastNetdata || 0,
+    netdataLatest: a.netdataLatest || null, netdataError: a.netdataError || null,
+    relayUrl: a.relayUrl || '', glancesUrl: a.glancesUrl || '', netdataUrl: a.netdataUrl || '',
+    telemetryUrl: a.telemetryUrl || '', telemetrySource: a.telemetrySource || '', lastNetdata: a.lastNetdata || 0,
+    hardware: a.hardware || null, hardwareHistory: Array.isArray(a.hardwareHistory) ? a.hardwareHistory : [],
+    favorite: !!a.favorite, pingsFavorite: !!a.pingsFavorite, pingsShowcase: !!a.pingsShowcase,
+    statsView: a.statsView === 'bars' || a.statsView === 'ws' ? a.statsView : (a.stats ? 'ws' : ''),
+  }));
+  db.users = (db.users || []).map((u) => ({
+    ...u,
+    menuScope: Array.isArray(u.menuScope) ? u.menuScope : (u.role === 'admin' ? [] : []),
+    deviceScope: Array.isArray(u.deviceScope) ? u.deviceScope : [],
+    twoFA: u.twoFA && typeof u.twoFA === 'object' ? { enabled: !!u.twoFA.enabled, secret: u.twoFA.secret || null } : { enabled: false, secret: null },
+    builtIn: !!u.builtIn,
+  }));
+
+  const counts = {
+    devices: db.devices.length,
+    agents: db.agents.length,
+    users: db.users.length,
+    tags: (db.tags || []).length,
+  };
+  void saveDb();
+  return counts;
 }
