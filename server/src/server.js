@@ -1125,6 +1125,20 @@ const server = http.createServer(async (req, res) => {
       await pollAgent(a);
       return json(res, 200, a);
     }
+    // Ручная сверка WMI <-> LibreHardwareMonitor / AIDA64 для хаба
+    m = p.match(/^\/api\/agents\/([^/]+)\/hardware-check$/);
+    if (m && method === 'POST') {
+      const a = db.agents.find((x) => x.id === m[1]);
+      if (!a) return json(res, 404, { error: 'агент не найден' });
+      try {
+        const snap = await checkAgentHardware(a, fetchText);
+        if (!snap) return json(res, 200, { ok: false, error: 'нет источников данных: укажите URL агента (LHM) или AIDA64-страницу и включите телеметрию' });
+        await saveDb();
+        return json(res, 200, { ok: true, hardware: snap });
+      } catch (e) {
+        return json(res, 500, { ok: false, error: e.message || 'сверка не выполнена' });
+      }
+    }
     m = p.match(/^\/api\/agents\/([^/]+)\/netdata$/);
     if (m && method === 'GET') {
       const a = db.agents.find((x) => x.id === m[1]);

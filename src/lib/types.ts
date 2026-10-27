@@ -235,6 +235,7 @@ export interface Agent {
   ip: string; // адрес ПК
   relayUrl: string; // адрес pluto-relay, напр. http://192.168.1.10:8091
   glancesUrl: string; // адрес Glances (glances -w), напр. http://192.168.1.10:61208
+  agentUrl?: string; // адрес Pluto Agent на хаб-ПК (для /api/hardware — снимок LibreHardwareMonitor)
   netdataUrl?: string; // адрес Netdata, напр. http://192.168.1.10:19999
   telemetryUrl?: string; // адрес Telegraf/Prometheus endpoint
   telemetrySource?: TelemetrySource; // какой источник использовать
