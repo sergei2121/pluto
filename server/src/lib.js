@@ -171,8 +171,16 @@ export function loadDb() {
     ...a, pingTargets: Array.isArray(a.pingTargets) ? a.pingTargets : [],
     targets: Array.isArray(a.targets) ? a.targets : [], tags: Array.isArray(a.tags) ? a.tags : [],
     latHist: Array.isArray(a.latHist) ? a.latHist : [], netdata: Array.isArray(a.netdata) ? a.netdata : [],
+    // ГЛЮК-ФИКС: UI читает glancesLatest/glances/glancesError/lastGlances — ядро раньше писало только netdata*.
+    // Единый канал телеметрии: дублируем netdata*-поля в glances*-алиасы при загрузке.
+    glances: Array.isArray(a.glances) ? a.glances : (Array.isArray(a.netdata) ? a.netdata : []),
+    glancesLatest: a.glancesLatest !== undefined ? a.glancesLatest : (a.netdataLatest || null),
+    glancesError: a.glancesError !== undefined ? a.glancesError : (a.netdataError || null),
+    lastGlances: a.lastGlances || a.lastNetdata || 0,
     netdataLatest: a.netdataLatest || null, netdataError: a.netdataError || null,
-    relayUrl: a.relayUrl || '', netdataUrl: a.netdataUrl || '', lastNetdata: a.lastNetdata || 0,
+    relayUrl: a.relayUrl || '', glancesUrl: a.glancesUrl || '', netdataUrl: a.netdataUrl || '',
+    telemetryUrl: a.telemetryUrl || '', telemetrySource: a.telemetrySource || '', lastNetdata: a.lastNetdata || 0,
+    hardware: a.hardware || null, hardwareHistory: Array.isArray(a.hardwareHistory) ? a.hardwareHistory : [],
     favorite: !!a.favorite, pingsFavorite: !!a.pingsFavorite, pingsShowcase: !!a.pingsShowcase,
     statsView: a.statsView === 'bars' || a.statsView === 'ws' ? a.statsView : (a.stats ? 'ws' : ''),
   }));
@@ -250,6 +258,8 @@ export function exportDb() {
     srvMaps: db.srvMaps || [],
     settings: db.settings,
     events: (db.events || []).slice(0, 100),
+    // снимки WMI/LibreHardwareMonitor по каждому хабу — переносятся вместе с базой
+    hardware: Object.fromEntries((db.agents || []).filter((a) => a.hardware).map((a) => [a.id, a.hardware])),
   };
 }
 
@@ -301,8 +311,16 @@ export function importDb(payload, mode = 'merge') {
     ...a, pingTargets: Array.isArray(a.pingTargets) ? a.pingTargets : [],
     targets: Array.isArray(a.targets) ? a.targets : [], tags: Array.isArray(a.tags) ? a.tags : [],
     latHist: Array.isArray(a.latHist) ? a.latHist : [], netdata: Array.isArray(a.netdata) ? a.netdata : [],
+    // ГЛЮК-ФИКС: UI читает glancesLatest/glances/glancesError/lastGlances — ядро раньше писало только netdata*.
+    // Единый канал телеметрии: дублируем netdata*-поля в glances*-алиасы при загрузке.
+    glances: Array.isArray(a.glances) ? a.glances : (Array.isArray(a.netdata) ? a.netdata : []),
+    glancesLatest: a.glancesLatest !== undefined ? a.glancesLatest : (a.netdataLatest || null),
+    glancesError: a.glancesError !== undefined ? a.glancesError : (a.netdataError || null),
+    lastGlances: a.lastGlances || a.lastNetdata || 0,
     netdataLatest: a.netdataLatest || null, netdataError: a.netdataError || null,
-    relayUrl: a.relayUrl || '', netdataUrl: a.netdataUrl || '', lastNetdata: a.lastNetdata || 0,
+    relayUrl: a.relayUrl || '', glancesUrl: a.glancesUrl || '', netdataUrl: a.netdataUrl || '',
+    telemetryUrl: a.telemetryUrl || '', telemetrySource: a.telemetrySource || '', lastNetdata: a.lastNetdata || 0,
+    hardware: a.hardware || null, hardwareHistory: Array.isArray(a.hardwareHistory) ? a.hardwareHistory : [],
     favorite: !!a.favorite, pingsFavorite: !!a.pingsFavorite, pingsShowcase: !!a.pingsShowcase,
     statsView: a.statsView === 'bars' || a.statsView === 'ws' ? a.statsView : (a.stats ? 'ws' : ''),
   }));
