@@ -33,6 +33,9 @@ export const DEFAULT_SETTINGS = {
 
 const DEFAULT_DB = () => ({
   users: [], sessions: [], devices: [], agents: [], tags: [], events: [], srvMaps: [],
+  // Web Push подписки (endpoint + keys) — раньше коллекции не существовало,
+  // из-за чего модуль webpush.js писал в несуществующее хранилище
+  pushSubscriptions: [],
   settings: DEFAULT_SETTINGS,
 });
 
@@ -223,9 +226,19 @@ export function verifyPass(password, stored) {
   }
 }
 
+// TTL сессии: 30 дней; продлевается при активности (скользящий срок).
+// Раньше сессии не истекали никогда и хранились в открытом виде без ограничения жизни.
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Хеш токена сессии — в db.json храним не сам токен, а его SHA-256. */
+function hashToken(token) { return crypto.createHash('sha256').update(token).digest('hex'); }
+
 export async function issueSession(userId) {
   const token = crypto.randomBytes(24).toString('hex');
-  db.sessions.push({ token, userId, createdAt: Date.now() });
+  const now = Date.now();
+  // очистка протухших сессий
+  db.sessions = (db.sessions || []).filter((s) => now - (s.lastUsed || s.createdAt || 0) < SESSION_TTL_MS);
+  db.sessions.push({ tokenHash: hashToken(token), userId, createdAt: now, lastUsed: now });
   if (db.sessions.length > 200) db.sessions.splice(0, db.sessions.length - 200);
   await saveDb();
   return token;
@@ -235,9 +248,34 @@ export function authUser(req) {
   const h = req.headers.authorization || '';
   const token = h.startsWith('Bearer ') ? h.slice(7) : null;
   if (!token) return null;
-  const s = db.sessions.find((x) => x.token === token);
+  const tokenHash = hashToken(token);
+  const now = Date.now();
+  const s = db.sessions.find((x) => x.tokenHash === tokenHash);
   if (!s) return null;
+  if (now - (s.lastUsed || s.createdAt || 0) >= SESSION_TTL_MS) {
+    // сессия истекла — удаляем
+    db.sessions = db.sessions.filter((x) => x !== s);
+    void saveDb().catch(() => {});
+    return null;
+  }
+  // скользящее продление: пишем не чаще раза в минуту, чтобы не дёргать диск
+  if (now - (s.lastUsed || 0) > 60_000) {
+    s.lastUsed = now;
+    void saveDb().catch(() => {});
+  }
   return db.users.find((u) => u.id === s.userId) || null;
+}
+
+/** Выход: удаление сессии по токену запроса. */
+export async function revokeSession(req) {
+  const h = req.headers.authorization || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : null;
+  if (!token) return false;
+  const tokenHash = hashToken(token);
+  const before = db.sessions.length;
+  db.sessions = db.sessions.filter((x) => x.tokenHash !== tokenHash);
+  if (db.sessions.length !== before) { await saveDb(); return true; }
+  return false;
 }
 
 // ─── Экспорт/импорт базы (перенос на вновь развёрнутый PLUTO) ────────────────
