@@ -1,2 +1,19 @@
-# Build artifacts
-dist/
+# Зависимости и артефакты сборки
+node_modules/
+
+# ВНИМАНИЕ: dist/ намеренно НЕ игнорируется — dist/sw.js, icon*.svg и
+# manifest.webmanifest копируются в index.html/PWA и нужны в репозитории.
+
+# Локальные секреты и данные (не коммитить!)
+.env
+.env.mirror
+data/
+server/data/
+*.log
+
+# Собранные бинарники relay-агента (пересобираются из main.go)
+pluto-relay/pluto-relay
+pluto-relay/pluto-relay.exe
+
+# Служебное
+.DS_Store
