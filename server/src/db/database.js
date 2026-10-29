@@ -271,14 +271,14 @@ export class Database {
   }
 
   /**
-   * Экспорт всей базы (устройства, агенты/хабы, настройки, теги, пользователи)
-   * в виде одного JSON-дампа для переноса на вновь развёрнутый PLUTO.
+   * Экспорт всей базы (устройства, агенты/хабы, настройки, теги, пользователи,
+   * карты и полная история пингов) в виде одного JSON-дампа для переноса.
    */
   exportDb() {
     const db = this.load();
     return {
-      __plutoExport: 1,
-      version: 1,
+      __plutoExport: 2,
+      version: 2,
       exportedAt: new Date().toISOString(),
       coreVersion: process.env.PLUTO_VERSION || '1',
       users: db.users,
@@ -288,6 +288,8 @@ export class Database {
       srvMaps: db.srvMaps || [],
       settings: db.settings,
       events: (db.events || []).slice(0, 100),
+      pingEvents: (db.pingEvents || []).slice(),
+      pingDaily: (db.pingDaily || []).slice(),
     };
   }
 
@@ -297,11 +299,19 @@ export class Database {
    * Сессии никогда не импортируются (безопасность).
    */
   importDb(payload, mode = 'merge') {
-    if (!payload || payload.__plutoExport !== 1) {
+    if (!payload || (payload.__plutoExport !== 1 && payload.__plutoExport !== 2)) {
       throw new Error('Файл не является дампом базы PLUTO');
     }
     const db = this.load();
     const pick = (arr) => (Array.isArray(arr) ? arr : []);
+    // история пингов: только корректные записи (пустые/битые даты отбрасываются)
+    const validPingEvent = (e) => e && Number.isFinite(Number(e.ts)) && Number(e.ts) > 0;
+    const validPingDaily = (d) => d && typeof d.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.date);
+    const mergeByKey = (existing, incoming, keyOf) => {
+      const map = new Map(existing.map((x) => [keyOf(x), x]));
+      for (const item of incoming) if (item) map.set(keyOf(item), item);
+      return [...map.values()];
+    };
 
     const mergeById = (existing, incoming) => {
       const map = new Map(existing.map((x) => [x.id, x]));
@@ -324,6 +334,8 @@ export class Database {
       db.settings = payload.settings || db.settings;
       db.events = pick(payload.events);
       db.sessions = [];
+      db.pingEvents = pick(payload.pingEvents).filter(validPingEvent);
+      db.pingDaily = pick(payload.pingDaily).filter(validPingDaily);
     } else {
       db.users = mergeById(db.users, pick(payload.users));
       db.devices = mergeById(db.devices, pick(payload.devices));
@@ -333,7 +345,11 @@ export class Database {
       if (payload.settings) {
         db.settings = { ...db.settings, ...payload.settings };
       }
+      db.pingEvents = mergeByKey(db.pingEvents || [], pick(payload.pingEvents).filter(validPingEvent), (e) => `${e.key || ''}|${e.ts}`);
+      db.pingDaily = mergeByKey(db.pingDaily || [], pick(payload.pingDaily).filter(validPingDaily), (d) => `${d.date}|${d.key || ''}`);
     }
+    // импортированная история уже валидна — иначе seed продублирует стартовые события
+    db._pingSeeded = (db.pingEvents || []).length > 0;
 
     // Нормализация после импорта
     db.settings = this._mergeSettings();
@@ -346,6 +362,8 @@ export class Database {
       agents: db.agents.length,
       users: db.users.length,
       tags: db.tags.length,
+      pingEvents: (db.pingEvents || []).length,
+      pingDaily: (db.pingDaily || []).length,
     };
     return counts;
   }

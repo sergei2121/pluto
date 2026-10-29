@@ -1332,7 +1332,7 @@ const server = http.createServer(async (req, res) => {
         const b = await readBody(req);
         const mode = b.mode === 'replace' ? 'replace' : 'merge';
         const result = importDb(b.data || b, mode);
-        await pushEvent('warning', 'system', `База импортирована (режим: ${mode}): устройств ${result.counts.devices}, хабов ${result.counts.agents}`);
+        await pushEvent('warning', 'system', `База импортирована (режим: ${mode}): устройств ${result.counts.devices}, хабов ${result.counts.agents}, событий пинг-истории ${result.counts.pingEvents}`);
         return json(res, 200, { ok: true, ...result });
       } catch (e) { return json(res, 400, { ok: false, error: e.message || 'ошибка импорта' }); }
     }

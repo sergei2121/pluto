@@ -312,14 +312,15 @@ export async function revokeSession(req) {
 // ─── Экспорт/импорт базы (перенос на вновь развёрнутый PLUTO) ────────────────
 
 /**
- * Дамп всей базы: устройства, агенты/хабы, настройки, теги, пользователи, карты.
- * Сессии не включаются (секреты токенов). history усечён для компактности.
+ * Дамп всей базы: устройства, агенты/хабы, настройки, теги, пользователи, карты
+ * и полная история пингов (события + суточные агрегаты за месяц).
+ * Сессии не включаются (секреты токенов).
  */
 export function exportDb() {
   loadDb();
   return {
-    __plutoExport: 1,
-    version: 1,
+    __plutoExport: 2,
+    version: 2,
     exportedAt: new Date().toISOString(),
     users: db.users,
     devices: (db.devices || []).map((d) => ({ ...d, checking: false })),
@@ -328,6 +329,9 @@ export function exportDb() {
     srvMaps: db.srvMaps || [],
     settings: db.settings,
     events: (db.events || []).slice(0, 100),
+    // история активности пингов: события смены состояния и суточная агрегация (30 дней)
+    pingEvents: (db.pingEvents || []).slice(),
+    pingDaily: (db.pingDaily || []).slice(),
     // снимки WMI/LibreHardwareMonitor по каждому хабу — переносятся вместе с базой
     hardware: Object.fromEntries((db.agents || []).filter((a) => a.hardware).map((a) => [a.id, a.hardware])),
   };
@@ -335,11 +339,12 @@ export function exportDb() {
 
 /**
  * Импорт дампа в живую базу. mode: 'merge' (по id) | 'replace' (полная замена).
+ * Принимает дампы v1 (без истории пингов) и v2 (с pingEvents/pingDaily).
  * Сессии при replace очищаются — все залогиненные будут перелогинены.
  */
 export function importDb(payload, mode = 'merge') {
   loadDb();
-  if (!payload || payload.__plutoExport !== 1) {
+  if (!payload || (payload.__plutoExport !== 1 && payload.__plutoExport !== 2)) {
     throw new Error('Файл не является дампом базы PLUTO');
   }
   const pick = (arr) => (Array.isArray(arr) ? arr : []);
@@ -352,6 +357,14 @@ export function importDb(payload, mode = 'merge') {
     }
     return [...map.values()];
   };
+  // события/агрегаты истории пингов: только записи с корректной датой (как в sanitizePingEvents)
+  const validPingEvent = (e) => e && Number.isFinite(Number(e.ts)) && Number(e.ts) > 0;
+  const validPingDaily = (d) => d && typeof d.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.date);
+  const mergeByKey = (existing, incoming, keyOf) => {
+    const map = new Map(existing.map((x) => [keyOf(x), x]));
+    for (const item of incoming) if (item) map.set(keyOf(item), item);
+    return [...map.values()];
+  };
 
   if (mode === 'replace') {
     db.users = pick(payload.users);
@@ -362,6 +375,8 @@ export function importDb(payload, mode = 'merge') {
     db.events = pick(payload.events);
     db.sessions = [];
     if (payload.settings) db.settings = payload.settings;
+    db.pingEvents = pick(payload.pingEvents).filter(validPingEvent);
+    db.pingDaily = pick(payload.pingDaily).filter(validPingDaily);
   } else {
     db.users = mergeById(db.users || [], pick(payload.users));
     db.devices = mergeById(db.devices || [], pick(payload.devices));
@@ -369,7 +384,12 @@ export function importDb(payload, mode = 'merge') {
     db.tags = [...new Set([...(db.tags || []), ...pick(payload.tags)])];
     db.srvMaps = mergeById(db.srvMaps || [], pick(payload.srvMaps));
     if (payload.settings) db.settings = { ...db.settings, ...payload.settings };
+    db.pingEvents = mergeByKey(db.pingEvents || [], pick(payload.pingEvents).filter(validPingEvent), (e) => `${e.key || ''}|${e.ts}`);
+    db.pingDaily = mergeByKey(db.pingDaily || [], pick(payload.pingDaily).filter(validPingDaily), (d) => `${d.date}|${d.key || ''}`);
   }
+  // импортированная история уже валидна — помечаем посев выполненным,
+  // иначе seedPingHistoryFromAgents продублирует стартовые события
+  db._pingSeeded = (db.pingEvents || []).length > 0;
 
   // повторная нормализация через loadDb-логику: сбрасываем кэш и перечитываем нельзя,
   // поэтому нормализуем на месте
@@ -388,6 +408,8 @@ export function importDb(payload, mode = 'merge') {
     agents: db.agents.length,
     users: db.users.length,
     tags: (db.tags || []).length,
+    pingEvents: (db.pingEvents || []).length,
+    pingDaily: (db.pingDaily || []).length,
   };
   void saveDb();
   return counts;

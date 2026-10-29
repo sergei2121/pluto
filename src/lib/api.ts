@@ -115,10 +115,22 @@ export const api = {
   downloadBackup: (name: string) => `/api/backup/${encodeURIComponent(name)}`,
   deleteBackup: (name: string) => req<{ ok: boolean }>('DELETE', `/api/backup/${encodeURIComponent(name)}`),
 
-  // экспорт/импорт всей базы (устройства + хабы + настройки) на вновь развёрнутый PLUTO
+  // экспорт/импорт всей базы (устройства + хабы + настройки + история пингов) на вновь развёрнутый PLUTO
   dbExportUrl: () => '/api/db/export',
+  /** Авторизованное скачивание дампа (Bearer-токен подставляется заголовком). */
+  dbExport: async (): Promise<Blob> => {
+    const headers: Record<string, string> = {};
+    const t = getApiToken();
+    if (t) headers['Authorization'] = `Bearer ${t}`;
+    const res = await fetch('/api/db/export', { headers });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error((data as { error?: string }).error || `HTTP ${res.status}`);
+    }
+    return res.blob();
+  },
   dbImport: (data: unknown, mode: 'merge' | 'replace') =>
-    req<{ ok: boolean; counts: { devices: number; agents: number; users: number; tags: number } }>(
+    req<{ ok: boolean; counts: { devices: number; agents: number; users: number; tags: number; pingEvents?: number; pingDaily?: number } }>(
       'POST', '/api/db/import', { data, mode }),
 
   // ручная сверка WMI <-> LibreHardwareMonitor для хаба
