@@ -35,12 +35,20 @@ function downloadCsv(filename: string, head: string[], rows: unknown[][]): void 
 /** Ключ устройства в истории: agentId|range|ip */
 const devKey = (d: { agentId: string; range: string; ip: string }) => `${d.agentId}|${d.range}|${d.ip}`;
 
+/** Формат «дд.мм.гггг чч:мм:сс»; невалидная/пустая метка → «—» (не «Invalid Date»). */
 function fmtDateTime(ts: number): string {
   try {
-    const d = new Date(ts);
+    const d = new Date(Number(ts));
+    if (!Number.isFinite(d.getTime()) || d.getTime() <= 0) return '—';
     const pad = (n: number) => String(n).padStart(2, '0');
     return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   } catch { return '—'; }
+}
+
+/** Время «чч:мм:сс» для ленты событий; невалидная метка → «—». */
+function fmtTime(ts: number): string {
+  const s = fmtDateTime(ts);
+  return s === '—' ? '—' : s.slice(11);
 }
 
 function fmtDuration(ms: number): string {
