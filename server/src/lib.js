@@ -70,6 +70,9 @@ const DEFAULT_DB = () => ({
   // Web Push подписки (endpoint + keys) — раньше коллекции не существовало,
   // из-за чего модуль webpush.js писал в несуществующее хранилище
   pushSubscriptions: [],
+  // Месячная история пингов (см. db/pingHistory.js) — обязательные коллекции:
+  // без них в loadDb() они затирались значениями по умолчанию при каждой загрузке
+  pingEvents: [], pingDaily: [],
   settings: DEFAULT_SETTINGS,
 });
 
@@ -77,16 +80,24 @@ let db = null;
 let saveTimer = null;
 let saveQueue = [];
 let saveInProgress = false;
+// Флаг «в базе есть несохранённые изменения» — для периодического сброса на диск
+let dirtySinceSave = false;
 
 /**
  * Улучшенная функция сохранения с очередью операций (пункт 8)
  * Предотвращает race conditions при множественных одновременных сохранениях
  */
 export function saveDb() {
+  dirtySinceSave = true;
   return new Promise((resolve, reject) => {
     saveQueue.push({ resolve, reject });
     _processSaveQueue();
   });
+}
+
+/** Есть ли несохранённые изменения (для периодического сброса планировщиком). */
+export function hasUnsavedChanges() {
+  return dirtySinceSave || saveQueue.length > 0;
 }
 
 async function _processSaveQueue() {
@@ -100,9 +111,15 @@ async function _processSaveQueue() {
 
   try {
     await _doSave();
+    dirtySinceSave = false;
     currentBatch.forEach(({ resolve }) => resolve());
   } catch (e) {
     console.error('[pluto] ошибка записи БД:', e.message);
+    // Запись на диск не состоялась — изменения всё ещё не сохранены.
+    // Возвращаем флаг и ставим батч обратно в очередь: иначе события
+    // активности терялись навсегда при ошибке диска (ENOSPC/EACCES).
+    dirtySinceSave = true;
+    saveQueue.unshift(...currentBatch);
     currentBatch.forEach(({ reject }) => reject(e));
   }
 
