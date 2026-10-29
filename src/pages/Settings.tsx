@@ -1,6 +1,6 @@
 // ─── PLUTO: настройки системы ───────────────────────────────────────────────
-import { useEffect, useState } from 'react';
-import { Send, Tag as TagIcon, Bell, Users, Radio, Plus, Trash2, Monitor, Server, Check, Pencil, ShieldCheck, KeyRound, X, Eye, EyeOff, FileBarChart, Rocket, Cpu, Globe, Activity, Download, Terminal, ClipboardList, HardDrive, Thermometer, Video, Slack, MessageSquare } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Send, Tag as TagIcon, Bell, Users, Radio, Plus, Trash2, Monitor, Server, Check, Pencil, ShieldCheck, KeyRound, X, Eye, EyeOff, FileBarChart, Rocket, Cpu, Globe, Activity, Download, Upload, Database, Terminal, ClipboardList, HardDrive, Thermometer, Video, Slack, MessageSquare } from 'lucide-react';
 import { Panel, Field, Toggle, EmptyState } from '../components/ui';
 import { getState, store, useCurrentUser, usePluto, useToasts, applyTheme } from '../lib/store';
 import { sendTestNotification, requestPushPermission } from '../lib/engine';
@@ -656,6 +656,119 @@ function SlaReportTab() {
   );
 }
 
+// ─── Экспорт/импорт всей базы (устройства + хабы + настройки + история пингов) ───
+function DbBackupPanel({ isServer }: { isServer: boolean }) {
+  const me = useCurrentUser();
+  const isAdmin = me?.role === 'admin';
+  const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState<'merge' | 'replace'>('merge');
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  if (!isServer || !isAdmin) return null;
+
+  const doExport = async () => {
+    setBusy(true);
+    try {
+      const { api } = await import('../lib/api');
+      const blob = await api.dbExport();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `pluto-db-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      useToasts.push('ok', 'База экспортирована: устройства, хабы, настройки и история пингов');
+    } catch (e) {
+      useToasts.push('crit', e instanceof Error ? e.message : 'Ошибка экспорта базы');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onPickFile = async (f: File | undefined) => {
+    if (!f) return;
+    setBusy(true);
+    try {
+      const text = await f.text();
+      const data = JSON.parse(text);
+      const { api } = await import('../lib/api');
+      const r = await api.dbImport(data, mode);
+      const c = r.counts || ({} as Record<string, number>);
+      useToasts.push('ok', `Импортировано (${mode === 'replace' ? 'замена' : 'слияние'}): устройств ${c.devices ?? '—'}, хабов ${c.agents ?? '—'}, событий пинга ${c.pingEvents ?? '—'}`);
+      window.setTimeout(() => window.location.reload(), 800);
+    } catch (e) {
+      useToasts.push('crit', e instanceof Error ? e.message : 'Ошибка импорта базы');
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  return (
+    <Panel title="Экспорт / импорт базы" icon={<Database className="h-4 w-4" />}>
+      <p className="mb-4 text-[12px] leading-relaxed text-dim">
+        Резервная копия <b className="text-mut">всей базы PLUTO</b>: пользователи, устройства, хабы (агенты),
+        теги, карты VideoSRV, настройки, лента событий и полная{' '}
+        <b className="text-mut">история пингов</b> (события смены состояний + суточные агрегаты за 30 дней).
+        Файл JSON можно перенести на вновь развёрнутый PLUTO через импорт.
+      </p>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          onClick={() => void doExport()}
+          disabled={busy}
+          className={cls(
+            'inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold transition-all',
+            busy ? 'bg-raised text-dim cursor-not-allowed' : 'btn-acc'
+          )}
+        >
+          <Download className="h-3.5 w-3.5" />
+          {busy ? 'Выполняется…' : 'Экспортировать базу (.json)'}
+        </button>
+
+        <div className="flex items-center gap-2">
+          <select
+            value={mode}
+            onChange={(e) => setMode(e.target.value === 'replace' ? 'replace' : 'merge')}
+            className="rounded-lg border border-line bg-void px-2.5 py-2 text-[12px] text-ink"
+            title="Режим импорта"
+          >
+            <option value="merge">Слияние (по id)</option>
+            <option value="replace">Полная замена</option>
+          </select>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={(e) => void onPickFile(e.target.files?.[0])}
+          />
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={busy}
+            className={cls(
+              'inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-[12px] font-semibold transition-all',
+              busy ? 'text-dim cursor-not-allowed' : 'text-mut hover:border-acc/40 hover:text-ink'
+            )}
+          >
+            <Upload className="h-3.5 w-3.5" />
+            Импорт из файла
+          </button>
+        </div>
+      </div>
+
+      {mode === 'replace' && (
+        <p className="mt-3 rounded-lg border border-warn/30 bg-warn/5 px-3 py-2 text-[11.5px] text-warn">
+          <Activity className="mr-1.5 inline h-3.5 w-3.5" />
+          Режим «Полная замена» удалит текущие данные и активные сессии — все пользователи будут перелогинены.
+        </p>
+      )}
+    </Panel>
+  );
+}
+
 /** Компонент вкладки "Система" — отображение статуса ядра и пинг до ya.ru */
 function SystemTab() {
   const apiMode = usePluto((s) => s.apiMode);
@@ -823,6 +936,8 @@ function SystemTab() {
           </div>
         </div>
       </Panel>
+
+      <DbBackupPanel isServer={isServer} />
 
       <Panel title="Мониторинг Windows и Linux" icon={<HardDrive className="h-4 w-4" />}>
         <div className="space-y-4">
