@@ -357,8 +357,11 @@ export function importDb(payload, mode = 'merge') {
     }
     return [...map.values()];
   };
-  // события/агрегаты истории пингов: только записи с корректной датой (как в sanitizePingEvents)
+  // события/агрегаты истории пингов: только записи с корректной датой (как в sanitizePingEvents).
+  // Метки из будущего (часы агента/relay спешат) клампим к Date.now() — иначе событие
+  // оказывается за окном выдачи и в журнале светится «пустая дата».
   const validPingEvent = (e) => e && Number.isFinite(Number(e.ts)) && Number(e.ts) > 0;
+  const clampEvTs = (e) => { const n = Number(e.ts), now = Date.now(); return n > now ? { ...e, ts: now } : e; };
   const validPingDaily = (d) => d && typeof d.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.date);
   const mergeByKey = (existing, incoming, keyOf) => {
     const map = new Map(existing.map((x) => [keyOf(x), x]));
@@ -375,7 +378,7 @@ export function importDb(payload, mode = 'merge') {
     db.events = pick(payload.events);
     db.sessions = [];
     if (payload.settings) db.settings = payload.settings;
-    db.pingEvents = pick(payload.pingEvents).filter(validPingEvent);
+    db.pingEvents = pick(payload.pingEvents).filter(validPingEvent).map(clampEvTs);
     db.pingDaily = pick(payload.pingDaily).filter(validPingDaily);
   } else {
     db.users = mergeById(db.users || [], pick(payload.users));
@@ -384,7 +387,7 @@ export function importDb(payload, mode = 'merge') {
     db.tags = [...new Set([...(db.tags || []), ...pick(payload.tags)])];
     db.srvMaps = mergeById(db.srvMaps || [], pick(payload.srvMaps));
     if (payload.settings) db.settings = { ...db.settings, ...payload.settings };
-    db.pingEvents = mergeByKey(db.pingEvents || [], pick(payload.pingEvents).filter(validPingEvent), (e) => `${e.key || ''}|${e.ts}`);
+    db.pingEvents = mergeByKey(db.pingEvents || [], pick(payload.pingEvents).filter(validPingEvent).map(clampEvTs), (e) => `${e.key || ''}|${e.ts}`);
     db.pingDaily = mergeByKey(db.pingDaily || [], pick(payload.pingDaily).filter(validPingDaily), (d) => `${d.date}|${d.key || ''}`);
   }
   // импортированная история уже валидна — помечаем посев выполненным,

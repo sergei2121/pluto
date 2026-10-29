@@ -48,6 +48,20 @@ export function sanitizePingEvents(db) {
   }
 }
 
+/**
+ * Кламп метки времени: невалидная (пустая/нулевая/NaN/строка) или будущая
+ * метка заменяется на Date.now(). Будущие ts — частая причина «пустых дат» в
+ * журнале: событие оказывается вне интервала выдачи и за окном prune, а UI
+ * рисует вместо него прочерк. Часы агентов (relay-опрос) могут спешить —
+ * нормализуем все входящие метки к «не позже текущего момента».
+ */
+export function clampPingTs(ts) {
+  const v = validTs(ts);
+  const now = Date.now();
+  if (v == null || v > now) return now;
+  return v;
+}
+
 /** ISO-дата (YYYY-MM-DD) по таймстампу, локальная временная зона сервера. */
 function dayOf(ts) {
   const d = new Date(ts);
@@ -83,12 +97,14 @@ export function prunePingHistory(db) {
  */
 export function recordPingState(db, agentId, agentName, range, targetName, ip, state, ts = Date.now()) {
   initPingHistory(db);
-  // валидация метки: пустая/битая дата (undefined/null/0/NaN/строка) — событие не пишется.
+  // Валидация метки: ПУСТАЯ/битая дата (undefined/null/0/NaN/строка) — событие не пишется.
   // arguments[7] проверяем явно: при явном undefined срабатывает дефолт параметра (Date.now),
   // а явный undefined означает «пустая дата» — такое событие отклоняем (без ts = вызов с Date.now()).
+  // Числовая метка из БУДУЩЕГО (часы агента/relay спешат) не отбрасывается, а клампится к
+  // Date.now(): иначе событие ложилось за окно выдачи и в журнале светилась «пустая дата».
   const rawTs = arguments.length > 7 ? arguments[7] : ts;
-  const vts = validTs(rawTs);
-  if (vts == null) return false;
+  if (arguments.length > 7 && validTs(rawTs) == null) return false;
+  const vts = clampPingTs(rawTs);
   const key = pingKey(agentId, range, ip);
   const last = findLastEvent(db, key);
   // дубликаты/мигание: состояние не менялось — событие не нужно
@@ -132,7 +148,6 @@ export function seedPingHistoryFromAgents(db) {
   // ещё не опросены (agent.targets пуст), иначе журнал так и останется пустым.
   if (db._pingSeeded && (db.pingEvents || []).length > 0) return false;
   initPingHistory(db);
-  const now = Date.now();
   let added = 0;
   for (const a of db.agents || []) {
     const an = hubNameOf(a);
@@ -145,11 +160,14 @@ export function seedPingHistoryFromAgents(db) {
         const key = pingKey(a.id, rangeStr, ip);
         if (findLastEvent(db, key)) continue; // история по этому устройству уже ведётся
         // время перехода в текущее состояние: offlineSince (ушёл в офлайн) или lastSuccess (восстановился).
-        // Клампинг: обнулённый/отрицательный/битый ts (offlineSince <= 0) и метки из будущего
-        // (часы агента спешат) заменяем на Date.now() — иначе в журнал ложатся ts=0 или будущие даты.
+        // Клампинг clampPingTs: обнулённый/отрицательный/битый ts (offlineSince <= 0) и метки из будущего
+        // (часы агента спешат — relay отдаёт tsAgent по СВОЕМУ времени) заменяем на Date.now().
+        // Дополнительно: онлайн-событие не может быть СТАРШЕ, чем момент последней проверки цели
+        // (t.lastCheck) — иначе «зависший» старый lastSuccess давал событие с датой недельной
+        // давности посреди журнала («пустые/неправильные даты» при всё ещё онлайн-устройствах).
         const rawTs = !r.alive ? r.offlineSince : r.lastSuccess;
-        let ts = validTs(rawTs);
-        if (ts == null || ts > now) ts = now;
+        let ts = clampPingTs(rawTs);
+        if (r.alive && Number.isFinite(t.lastCheck) && t.lastCheck > 0 && ts < t.lastCheck) ts = clampPingTs(t.lastCheck);
         if (recordPingState(db, a.id, an, rangeStr, targetName, ip, !!r.alive, ts)) added++;
       }
     }

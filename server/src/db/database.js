@@ -304,8 +304,10 @@ export class Database {
     }
     const db = this.load();
     const pick = (arr) => (Array.isArray(arr) ? arr : []);
-    // история пингов: только корректные записи (пустые/битые даты отбрасываются)
+    // история пингов: только корректные записи (пустые/битые даты отбрасываются);
+    // метки из будущего клампим к Date.now() — иначе событие уходит за окно выдачи («пустая дата»)
     const validPingEvent = (e) => e && Number.isFinite(Number(e.ts)) && Number(e.ts) > 0;
+    const clampEvTs = (e) => { const n = Number(e.ts), now = Date.now(); return n > now ? { ...e, ts: now } : e; };
     const validPingDaily = (d) => d && typeof d.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.date);
     const mergeByKey = (existing, incoming, keyOf) => {
       const map = new Map(existing.map((x) => [keyOf(x), x]));
@@ -334,7 +336,7 @@ export class Database {
       db.settings = payload.settings || db.settings;
       db.events = pick(payload.events);
       db.sessions = [];
-      db.pingEvents = pick(payload.pingEvents).filter(validPingEvent);
+      db.pingEvents = pick(payload.pingEvents).filter(validPingEvent).map(clampEvTs);
       db.pingDaily = pick(payload.pingDaily).filter(validPingDaily);
     } else {
       db.users = mergeById(db.users, pick(payload.users));
@@ -345,7 +347,7 @@ export class Database {
       if (payload.settings) {
         db.settings = { ...db.settings, ...payload.settings };
       }
-      db.pingEvents = mergeByKey(db.pingEvents || [], pick(payload.pingEvents).filter(validPingEvent), (e) => `${e.key || ''}|${e.ts}`);
+      db.pingEvents = mergeByKey(db.pingEvents || [], pick(payload.pingEvents).filter(validPingEvent).map(clampEvTs), (e) => `${e.key || ''}|${e.ts}`);
       db.pingDaily = mergeByKey(db.pingDaily || [], pick(payload.pingDaily).filter(validPingDaily), (d) => `${d.date}|${d.key || ''}`);
     }
     // импортированная история уже валидна — иначе seed продублирует стартовые события
