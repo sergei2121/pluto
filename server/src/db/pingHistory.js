@@ -25,6 +25,28 @@ export function hubNameOf(agent) {
   return String(agent.ip ?? '').trim() || agent.id || '—';
 }
 
+/**
+ * Валидация метки времени события. «Пустые даты» в журнале рождались из-за
+ * ts = undefined / null / 0 / NaN (обнулённый offlineSince, seed без данных,
+ * битые записи в db.json) — такие записи нельзя показывать пользователю.
+ * Возвращает корректную метку или null (событие с пустой датой не пишется).
+ */
+function validTs(ts) {
+  const n = Number(ts);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.round(n);
+}
+
+/** Санация накопленных записей: удаляет события с пустой/битой датой. */
+function sanitizePingEvents(db) {
+  const before = db.pingEvents.length;
+  db.pingEvents = db.pingEvents.filter((e) => validTs(e.ts) != null);
+  if (db.pingEvents.length !== before) {
+    console.log(`[pluto] история пингов: удалено ${before - db.pingEvents.length} записей с пустой датой`);
+    db._pingDirty = true;
+  }
+}
+
 /** ISO-дата (YYYY-MM-DD) по таймстампу, локальная временная зона сервера. */
 function dayOf(ts) {
   const d = new Date(ts);
