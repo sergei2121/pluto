@@ -10,6 +10,7 @@ import {
   exportDb, importDb,
 } from './lib.js';
 import { loginRateLimiter } from './middleware/rateLimiter.js';
+import { createHealthChecks } from './lib/health.js';
 import telemetryCollectors from './telemetry/collectors.js';
 import deviceChecks from './checks/deviceChecks.js';
 import { relayPing } from './lib/relay.js';
@@ -46,64 +47,21 @@ setTimeout(() => { void rollupPingDaily(db).catch(() => {}); }, 30 * 1000);
 setInterval(() => { void savePingEvents(db).catch((e) => console.error('[pluto] savePingEvents:', e.message)); }, 30 * 1000);
 
 // ─── Health Check для зависимостей (пункт 20) ────────────────────────────────
+// Реализация — в ./lib/health.js (единый источник для ядра и тестов).
+// Результат кэшируется на 5 секунд: /api/health опрашивается healthcheck-ом
+// Docker и внешним мониторингом часто, а проверка ping запускает процесс.
 
-const healthChecks = {
-  database: async () => {
-    try {
-      const currentDb = loadDb();
-      return { 
-        status: currentDb ? 'ok' : 'error', 
-        details: { devices: currentDb.devices?.length || 0, agents: currentDb.agents?.length || 0 }
-      };
-    } catch (e) {
-      return { status: 'error', details: { error: e.message } };
-    }
-  },
-  filesystem: async () => {
-    try {
-      await fs.promises.access(WEB_DIR, fs.constants.R_OK);
-      return { status: 'ok', details: { webDir: WEB_DIR } };
-    } catch (e) {
-      return { status: 'error', details: { error: e.message } };
-    }
-  },
-  ping: async () => {
-    return new Promise((resolve) => {
-      execFile('ping', ['-c', '1', '-W', '1', '127.0.0.1'], (err) => {
-        resolve({ 
-          status: err ? 'degraded' : 'ok', 
-          details: { pingAvailable: !err } 
-        });
-      });
-    });
-  },
-};
+const { getHealthStatus: _getHealthStatus } = createHealthChecks({ version: VERSION, webDir: WEB_DIR });
+
+let healthCache = null; // { at, value }
+const HEALTH_TTL_MS = 5000;
 
 export async function getHealthStatus() {
-  const results = await Promise.allSettled([
-    healthChecks.database(),
-    healthChecks.filesystem(),
-    healthChecks.ping(),
-  ]);
-  
-  const checks = {
-    database: results[0].status === 'fulfilled' ? results[0].value : { status: 'error', details: { error: 'check failed' } },
-    filesystem: results[1].status === 'fulfilled' ? results[1].value : { status: 'error', details: { error: 'check failed' } },
-    ping: results[2].status === 'fulfilled' ? results[2].value : { status: 'error', details: { error: 'check failed' } },
-  };
-  
-  const overallStatus = Object.values(checks).every(c => c.status === 'ok') 
-    ? 'healthy' 
-    : Object.values(checks).some(c => c.status === 'error') 
-      ? 'unhealthy' 
-      : 'degraded';
-  
-  return {
-    status: overallStatus,
-    timestamp: Date.now(),
-    version: VERSION,
-    checks,
-  };
+  const now = Date.now();
+  if (healthCache && now - healthCache.at < HEALTH_TTL_MS) return healthCache.value;
+  const value = await _getHealthStatus();
+  healthCache = { at: now, value };
+  return value;
 }
 
 // ─── HTTP-хелперы ───────────────────────────────────────────────────────────

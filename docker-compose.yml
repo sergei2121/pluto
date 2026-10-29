@@ -14,6 +14,8 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-pluto}
       - TZ=${TZ:-Europe/Moscow}
       - SHOWCASE_PORT=${PLUTO_SHOWCASE_PORT:-8081}
+      # 1 — брать IP клиента из X-Forwarded-For (только если PLUTO за reverse proxy)
+      - TRUST_PROXY=${TRUST_PROXY:-0}
     volumes:
       - pluto-data:/data
     healthcheck:

@@ -8,7 +8,7 @@ export function createRateLimiter({ windowMs = 60000, maxRequests = 10 } = {}) {
   const store = new Map(); // IP -> { count, resetTime }
 
   // Очистка старых записей каждые 5 минут
-  setInterval(() => {
+  const sweeper = setInterval(() => {
     const now = Date.now();
     for (const [ip, data] of store.entries()) {
       if (now > data.resetTime) {
@@ -16,9 +16,20 @@ export function createRateLimiter({ windowMs = 60000, maxRequests = 10 } = {}) {
       }
     }
   }, 300000);
+  // Не препятствуем штатному завершению процесса (тесты, graceful shutdown)
+  sweeper.unref?.();
 
   return function rateLimit(req, res, next) {
-    const ip = req.socket?.remoteAddress || req.connection?.remoteAddress || 'unknown';
+    // PLUTO работает в Docker и часто за reverse-proxy (nginx/traefik):
+    // socket.remoteAddress при этом всегда равен IP прокси и все клиенты
+    // делили бы один лимит. Берём X-Forwarded-For (перый адрес = клиент),
+    // если запрос пришёл от доверенного прокси; иначе — адрес сокета.
+    const TRUST_PROXY = /^(1|true|yes|on)$/i.test(process.env.TRUST_PROXY || '');
+    const forwarded = TRUST_PROXY ? String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() : '';
+    const ip = forwarded
+      || req.socket?.remoteAddress
+      || req.connection?.remoteAddress
+      || 'unknown';
     const now = Date.now();
 
     let record = store.get(ip);
