@@ -38,9 +38,10 @@ function validTs(ts) {
 }
 
 /** Санация накопленных записей: удаляет события с пустой/битой датой. */
-function sanitizePingEvents(db) {
+export function sanitizePingEvents(db) {
+  if (!Array.isArray(db.pingEvents)) return;
   const before = db.pingEvents.length;
-  db.pingEvents = db.pingEvents.filter((e) => validTs(e.ts) != null);
+  db.pingEvents = db.pingEvents.filter((e) => e && validTs(e.ts) != null);
   if (db.pingEvents.length !== before) {
     console.log(`[pluto] история пингов: удалено ${before - db.pingEvents.length} записей с пустой датой`);
     db._pingDirty = true;
@@ -56,15 +57,17 @@ function dayOf(ts) {
   return `${y}-${m}-${dd}`;
 }
 
-/** Инициализация коллекций и очистка записей старше HISTORY_DAYS дней. */
+/** Инициализация коллекций, санация битых записей и очистка старше HISTORY_DAYS дней. */
 export function initPingHistory(db) {
   if (!Array.isArray(db.pingEvents)) db.pingEvents = [];
   if (!Array.isArray(db.pingDaily)) db.pingDaily = [];
+  sanitizePingEvents(db);
   prunePingHistory(db);
 }
 
-/** Удаляет события и суточные агрегаты старше месяца. */
+/** Удаляет события и суточные агрегаты старше месяца (битые даты — во время санации). */
 export function prunePingHistory(db) {
+  sanitizePingEvents(db);
   const cutoff = Date.now() - HISTORY_DAYS * DAY_MS;
   const before = db.pingEvents.length;
   db.pingEvents = db.pingEvents.filter((e) => e.ts >= cutoff);
@@ -80,11 +83,17 @@ export function prunePingHistory(db) {
  */
 export function recordPingState(db, agentId, agentName, range, targetName, ip, state, ts = Date.now()) {
   initPingHistory(db);
+  // валидация метки: пустая/битая дата (undefined/null/0/NaN/строка) — событие не пишется.
+  // arguments[7] проверяем явно: при явном undefined срабатывает дефолт параметра (Date.now),
+  // а явный undefined означает «пустая дата» — такое событие отклоняем (без ts = вызов с Date.now()).
+  const rawTs = arguments.length > 7 ? arguments[7] : ts;
+  const vts = validTs(rawTs);
+  if (vts == null) return false;
   const key = pingKey(agentId, range, ip);
   const last = findLastEvent(db, key);
   // дубликаты/мигание: состояние не менялось — событие не нужно
   if (last && last.up === !!state) return false;
-  const ev = { id: `${ip}|${ts}`, key, ts, up: !!state, agentId, agentName, range: range || '', target: targetName || range || '', ip };
+  const ev = { id: `${ip}|${vts}`, key, ts: vts, up: !!state, agentId, agentName, range: range || '', target: targetName || range || '', ip };
   db.pingEvents.push(ev);
   // усечение «на лет» — только по данной цели
   const cnt = db.pingEvents.reduce((n, e) => (e.key === key ? n + 1 : n), 0);
@@ -135,9 +144,13 @@ export function seedPingHistoryFromAgents(db) {
         if (!ip) continue;
         const key = pingKey(a.id, rangeStr, ip);
         if (findLastEvent(db, key)) continue; // история по этому устройству уже ведётся
-        // время перехода в текущее состояние: offlineSince (ушёл в офлайн) или lastSuccess (восстановился)
-        const ts = !r.alive ? (r.offlineSince || now) : (r.lastSuccess || now);
-        if (recordPingState(db, a.id, an, rangeStr, targetName, ip, !!r.alive, Math.min(ts, now))) added++;
+        // время перехода в текущее состояние: offlineSince (ушёл в офлайн) или lastSuccess (восстановился).
+        // Клампинг: обнулённый/отрицательный/битый ts (offlineSince <= 0) и метки из будущего
+        // (часы агента спешат) заменяем на Date.now() — иначе в журнал ложатся ts=0 или будущие даты.
+        const rawTs = !r.alive ? r.offlineSince : r.lastSuccess;
+        let ts = validTs(rawTs);
+        if (ts == null || ts > now) ts = now;
+        if (recordPingState(db, a.id, an, rangeStr, targetName, ip, !!r.alive, ts)) added++;
       }
     }
   }
@@ -176,10 +189,13 @@ export async function rollupPingDaily(db) {
     }
   }
 
-  // Группировка событий по ключам (последние ~3 суток достаточно)
+  // Группировка событий по ключам (последние ~3 суток достаточно).
+  // Битые записи (пустая/нечисловая дата) пропускаем — они уже удалены санацией,
+  // но защита на этом уровне не даёт NaN-сравнениям сломать агрегацию.
   const byKey = new Map();
   const scanFrom = yStart - 3 * DAY_MS;
   for (const e of db.pingEvents) {
+    if (!e || validTs(e.ts) == null) continue;
     if (e.ts < scanFrom) continue;
     if (!byKey.has(e.key)) byKey.set(e.key, []);
     byKey.get(e.key).push(e);
@@ -251,7 +267,11 @@ export async function rollupPingDaily(db) {
 export function queryPingHistory(db, { agentId, range, ip, days = HISTORY_DAYS }) {
   initPingHistory(db);
   const cutoff = Date.now() - Math.min(Math.max(Number(days) || HISTORY_DAYS, 1), HISTORY_DAYS) * DAY_MS;
+  // битые записи (пустая/нечисловая дата) в выдачу не попадают — initPingHistory выше
+  // уже выполнил санацию, дополнительная проверка защищает от гонок (события, добавленные
+  // параллельно между инициализацией и фильтром)
   const events = db.pingEvents
+    .filter((e) => e && validTs(e.ts) != null)
     .filter((e) => e.ts >= cutoff)
     .filter((e) => (!agentId || e.agentId === agentId))
     .filter((e) => (range === undefined || range === null || e.range === range))
