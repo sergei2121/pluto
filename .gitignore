@@ -1,1 +1,5 @@
-dist/
+node_modules/
+pluto-relay/pluto-relay
+pluto-relay/pluto-relay.exe
+relay.log
+server/data/db.json

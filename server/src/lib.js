@@ -264,6 +264,21 @@ const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 /** Хеш токена сессии — в db.json храним не сам токен, а его SHA-256. */
 function hashToken(token) { return crypto.createHash('sha256').update(token).digest('hex'); }
 
+/**
+ * Удаляет из хранилища мёртвые сессии: протухшие по TTL и «сироты»,
+ * привязанные к удалённым пользователям. Возвращает число удалённых записей.
+ * Вызывается планировщиком (см. server.js) и при выдаче новой сессии.
+ */
+export function pruneSessions() {
+  const now = Date.now();
+  const before = (db.sessions || []).length;
+  db.sessions = (db.sessions || []).filter(
+    (s) => now - (s.lastUsed || s.createdAt || 0) < SESSION_TTL_MS &&
+      db.users.some((u) => u.id === s.userId)
+  );
+  return before - db.sessions.length;
+}
+
 export async function issueSession(userId) {
   const token = crypto.randomBytes(24).toString('hex');
   const now = Date.now();
