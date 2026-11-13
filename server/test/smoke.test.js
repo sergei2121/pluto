@@ -95,3 +95,20 @@ test('hashPass/verifyPass: корректный пароль проходит, �
   assert.ok(!verifyPass('wrong', h));
   assert.ok(!verifyPass('', h));
 });
+
+test('pruneSessions удаляет протухшие и «осиротевшие» сессии', async () => {
+  process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'pluto-sess-'));
+  const lib = await import('../src/lib.js');
+  const db = lib.loadDb();
+  const DAY = 24 * 60 * 60 * 1000;
+  const u = db.users[0];
+  const now = Date.now();
+  db.sessions = [
+    { tokenHash: 'fresh', userId: u.id, createdAt: now, lastUsed: now },                          // живая
+    { tokenHash: 'expired', userId: u.id, createdAt: now - 40 * DAY, lastUsed: now - 31 * DAY },   // TTL истёк
+    { tokenHash: 'orphan', userId: 'nope', createdAt: now, lastUsed: now },                        // пользователь удалён
+  ];
+  const removed = lib.pruneSessions();
+  assert.equal(removed, 2, 'должно удалиться 2 мёртвые сессии');
+  assert.deepEqual(db.sessions.map((s) => s.tokenHash), ['fresh']);
+});

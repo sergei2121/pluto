@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import {
   loadDb, saveDb, uid, pushEvent, hashPass, verifyPass, issueSession, authUser, DEFAULT_SETTINGS,
-  exportDb, importDb,
+  exportDb, importDb, pruneSessions,
 } from './lib.js';
 import { loginRateLimiter } from './middleware/rateLimiter.js';
 import { createHealthChecks } from './lib/health.js';
@@ -45,6 +45,20 @@ setInterval(() => { void rollupPingDaily(db).catch((e) => console.error('[pluto]
 setTimeout(() => { void rollupPingDaily(db).catch(() => {}); }, 30 * 1000);
 // Сохранение накопленных событий истории пингов на диске — каждые 30 секунд
 setInterval(() => { void savePingEvents(db).catch((e) => console.error('[pluto] savePingEvents:', e.message)); }, 30 * 1000);
+
+// Периодическая очистка мёртвых сессий (протухшие по TTL и «сироты» удалённых
+// пользователей) — каждые 6 часов. Раньше сессии вычищались только лениво при
+// входе/проверке токена, и база могла бесконечно обрастать мусором.
+const SESSION_PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+async function pruneSessionsScheduled() {
+  const removed = pruneSessions();
+  if (removed > 0) {
+    await saveDb();
+    console.log(`[pluto] очистка сессий: удалено ${removed}`);
+  }
+}
+setInterval(() => { void pruneSessionsScheduled().catch((e) => console.error('[pluto] pruneSessions:', e.message)); }, SESSION_PRUNE_INTERVAL_MS);
+setTimeout(() => { void pruneSessionsScheduled().catch(() => {}); }, 60 * 1000);
 
 // ─── Health Check для зависимостей (пункт 20) ────────────────────────────────
 // Реализация — в ./lib/health.js (единый источник для ядра и тестов).
