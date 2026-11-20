@@ -113,7 +113,7 @@ export async function checkAgentHardware(agent, fetchTextFn) {
   // изнутри saveDb (pushEvent сам сохраняет базу).
   try {
     if (mismatched.length) {
-      await pushEvent('warning', 'hardware',
+      await pushEvent('warn', 'system',
         `WMI ≠ LibreHardwareMonitor на «${agent.name}»: ${mismatched.map((c) => c.metric).join(', ')}`);
     } else {
       await saveDb();
