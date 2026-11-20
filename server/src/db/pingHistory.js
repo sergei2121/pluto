@@ -200,7 +200,7 @@ export async function rollupPingDaily(db) {
       for (const r of t.results || []) {
         const key = pingKey(a.id, t.range || '', r.ip);
         current.set(key, {
-          up: !!r.alive, agentId: a.id, agentName: a.name,
+          up: !!r.alive, agentId: a.id, agentName: hubNameOf(a),
           range: t.range || '', target: t.name || t.target || '', ip: r.ip,
         });
       }

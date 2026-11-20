@@ -213,7 +213,7 @@ export function loadDb() {
       menuScope: [], deviceScope: [], twoFA: { enabled: false, secret: null },
       passHash: hashPass(process.env.ADMIN_PASSWORD || 'pluto'), builtIn: true, createdAt: Date.now(),
     });
-    pushEvent('info', 'system', 'Первый запуск ядра: создан администратор admin');
+    db.events.unshift({ id: uid(), ts: Date.now(), sev: 'info', source: 'system', text: 'Первый запуск ядра: создан администратор admin' });
     saveDb();
   }
   // нормализация записей (совместимость со старыми базами) - пункт 19 (миграции схемы)
@@ -230,11 +230,47 @@ export function loadDb() {
     builtIn: !!u.builtIn,
   }));
   db.devices.forEach((d) => (d.checking = false));
+  // журнал активности: миграция старых записей к схеме UI (sev/source) +
+  // сортировка по времени (по убыванию). Без этого история собиралась
+  // некорректно: 'warning'/'hardware'/'auth' не распознавались фильтрами,
+  // а записи из импортированных дампов шли вразнобой по датам.
+  db.events = (db.events || [])
+    .filter((e) => e && typeof e === 'object')
+    .map((e) => ({ ...e, ts: Number.isFinite(Number(e.ts)) && Number(e.ts) > 0 ? Number(e.ts) : Date.now(), sev: normalizeEventSev(e.sev), source: normalizeEventSource(e.source) }))
+    .sort((a, b) => b.ts - a.ts);
+  if (db.events.length > 300) db.events.length = 300;
   return db;
 }
 
+// ─── Журнал активности: нормализация событий ────────────────────────────────
+// Схема UI (src/lib/types.ts EventItem): sev ∈ ok|warn|crit|info,
+// source ∈ device|agent|system|audit. Раньше вызывающий код писал «сырые»
+// значения ('warning', 'hardware', 'auth'), из-за чего история собиралась
+// некорректно: иконки/фильтры важности не находили мету, а источник не
+// соответствовал схеме. Маппинг ниже гарантирует корректные значения на входе.
+const SEV_MAP = { warning: 'warn', err: 'crit', error: 'crit', critical: 'crit', ok: 'ok', warn: 'warn', crit: 'crit', info: 'info' };
+const SOURCE_MAP = { hardware: 'system', auth: 'audit', audit: 'audit', device: 'device', agent: 'agent', system: 'system' };
+
+export function normalizeEventSev(sev) {
+  const s = String(sev || '').toLowerCase();
+  return SEV_MAP[s] || 'info';
+}
+
+export function normalizeEventSource(source) {
+  const s = String(source || '').toLowerCase();
+  return SOURCE_MAP[s] || 'system';
+}
+
 export async function pushEvent(sev, source, text) {
-  db.events.unshift({ id: uid(), ts: Date.now(), sev, source, text });
+  if (!db.events || !Array.isArray(db.events)) db.events = [];
+  db.events.unshift({
+    id: uid(), ts: Date.now(),
+    sev: normalizeEventSev(sev),
+    source: normalizeEventSource(source),
+    text: String(text || ''),
+  });
+  // страховка от записей из будущего / без метки: держим журнал отсортированным по времени
+  db.events.sort((a, b) => (b.ts || 0) - (a.ts || 0));
   if (db.events.length > 300) db.events.length = 300;
   await saveDb();
 }
@@ -343,7 +379,7 @@ export function exportDb() {
     tags: db.tags || [],
     srvMaps: db.srvMaps || [],
     settings: db.settings,
-    events: (db.events || []).slice(0, 100),
+    events: (db.events || []).slice().sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 100),
     // история активности пингов: события смены состояния и суточная агрегация (30 дней)
     pingEvents: (db.pingEvents || []).slice(),
     pingDaily: (db.pingDaily || []).slice(),
@@ -401,6 +437,10 @@ export function importDb(payload, mode = 'merge') {
     db.agents = mergeById(db.agents || [], pick(payload.agents));
     db.tags = [...new Set([...(db.tags || []), ...pick(payload.tags)])];
     db.srvMaps = mergeById(db.srvMaps || [], pick(payload.srvMaps));
+    // журнал активности при merge раньше терялся (events не объединялись) —
+    // теперь события дампа сливаются с текущими по id и сортируются по времени
+    db.events = mergeById(db.events || [], pick(payload.events))
+      .slice().sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 300);
     if (payload.settings) db.settings = { ...db.settings, ...payload.settings };
     db.pingEvents = mergeByKey(db.pingEvents || [], pick(payload.pingEvents).filter(validPingEvent).map(clampEvTs), (e) => `${e.key || ''}|${e.ts}`);
     db.pingDaily = mergeByKey(db.pingDaily || [], pick(payload.pingDaily).filter(validPingDaily), (d) => `${d.date}|${d.key || ''}`);

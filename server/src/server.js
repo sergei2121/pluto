@@ -553,7 +553,10 @@ setInterval(() => {
 
 async function pollAgent(agent) {
   const now = Date.now();
-  const wasOnline = agent.online;
+  // wasOnline: реальное прежнее состояние. Для неизвестного (undefined после
+  // первого опроса/рестарта) считаем «как сейчас», чтобы не генерировать
+  // ложные события «в сети»/«недоступен» при отсутствии предыдущего значения.
+  const wasOnline = agent.online === undefined ? null : !!agent.online;
   agent.polling = true;
   try {
     await pollAgentInner(agent, now, wasOnline);
@@ -571,8 +574,10 @@ async function pollAgentInner(agent, now, wasOnline) {
   if (ping.ok) { agent.lastSeen = now; if (!agent.onlineSince) agent.onlineSince = now; }
   else agent.onlineSince = 0;
   agent.latHist = [...(agent.latHist || []), { t: now, ms: ping.ok ? ping.latency : null }].slice(-480);
-  if (ping.ok && !wasOnline) { await pushEvent('ok', 'agent', `Агент «${agent.name}» в сети`); notify('agentOn', 'PLUTO: агент в сети', agent.name); }
-  if (!ping.ok && wasOnline) { await pushEvent('warn', 'agent', `Агент «${agent.name}» недоступен`); notify('agentOff', 'PLUTO: агент офлайн', agent.name); }
+  if (wasOnline !== null) {
+    if (ping.ok && !wasOnline) { await pushEvent('ok', 'agent', `Агент «${agent.name}» в сети`); notify('agentOn', 'PLUTO: агент в сети', agent.name); }
+    if (!ping.ok && wasOnline) { await pushEvent('warn', 'agent', `Агент «${agent.name}» недоступен`); notify('agentOff', 'PLUTO: агент офлайн', agent.name); }
+  }
 
   // 2) relay-пинги локальных устройств. Стабильность: при сбое relay
   //    сохраняем последний успешный результат, чтобы не «мигало».
@@ -1017,7 +1022,7 @@ const server = http.createServer(async (req, res) => {
         netdataLatest: a.netdataLatest || null, netdata: (a.netdata || []).slice(-120),
         latHist: (a.latHist || []).slice(-120), createdAt: a.createdAt,
       }));
-      return json(res, 200, { devices, agents, tags: db.tags, events: (db.events || []).slice(0, 100), settings: db.settings, users: isAdmin ? db.users.map(publicUser) : undefined });
+      return json(res, 200, { devices, agents, tags: db.tags, events: (db.events || []).slice().sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 100), settings: db.settings, users: isAdmin ? db.users.map(publicUser) : undefined });
     }
 
     // ── устройства ──
@@ -1346,7 +1351,7 @@ const server = http.createServer(async (req, res) => {
         const b = await readBody(req);
         const mode = b.mode === 'replace' ? 'replace' : 'merge';
         const result = importDb(b.data || b, mode);
-        await pushEvent('warning', 'system', `База импортирована (режим: ${mode}): устройств ${result.counts.devices}, хабов ${result.counts.agents}, событий пинг-истории ${result.counts.pingEvents}`);
+        await pushEvent('warn', 'system', `База импортирована (режим: ${mode}): устройств ${result.counts.devices}, хабов ${result.counts.agents}, событий пинг-истории ${result.counts.pingEvents}`);
         return json(res, 200, { ok: true, ...result });
       } catch (e) { return json(res, 400, { ok: false, error: e.message || 'ошибка импорта' }); }
     }
